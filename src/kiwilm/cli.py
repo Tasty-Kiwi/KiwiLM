@@ -11,8 +11,8 @@ from typing import Any
 import torch
 
 from kiwilm import __version__
-from kiwilm.checkpoint import load_checkpoint
-from kiwilm.config import GatedCNNConfig, ModelConfig
+from kiwilm.comparison import compare_checkpoints
+from kiwilm.config import CNNAttentionConfig, GatedCNNConfig
 from kiwilm.data import (
     DEFAULT_DATASET_NAME,
     DEFAULT_DATASET_REVISION,
@@ -23,8 +23,10 @@ from kiwilm.data import (
     prepare_tinystories,
 )
 from kiwilm.generation import generate
-from kiwilm.models import build_model
+from kiwilm.inference import load_trained_model
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
+
+_load_trained_model = load_trained_model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,15 +59,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     train_parser = subparsers.add_parser(
         "train",
-        help="train Model A against prepared token streams",
+        help="train a model architecture against prepared token streams",
     )
     _add_data_argument(train_parser)
-    train_parser.add_argument("--output-dir", type=Path, default=Path("runs/model-a"))
+    train_parser.add_argument(
+        "--architecture",
+        choices=("gated_cnn", "cnn_attention"),
+        default="gated_cnn",
+    )
+    train_parser.add_argument("--output-dir", type=Path)
     train_parser.add_argument("--resume", type=Path)
     train_parser.add_argument("--device", default="auto")
     train_parser.add_argument("--context-length", type=int, default=256)
     train_parser.add_argument("--d-model", type=int, default=256)
     train_parser.add_argument("--dropout", type=float, default=0.1)
+    train_parser.add_argument("--attention-heads", type=int, default=8)
+    train_parser.add_argument("--attention-feedforward-dim", type=int, default=1024)
     train_parser.add_argument("--untie-embeddings", action="store_true")
     train_parser.add_argument("--max-steps", type=int, default=2_000)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -120,6 +129,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate_parser.add_argument("--seed", type=int, default=42)
     generate_parser.set_defaults(handler=_generate_command)
+
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="generate a reproducible side-by-side checkpoint report",
+    )
+    _add_data_argument(compare_parser)
+    compare_parser.add_argument("--checkpoint-a", type=Path, required=True)
+    compare_parser.add_argument("--checkpoint-b", type=Path, required=True)
+    compare_parser.add_argument(
+        "--suite",
+        type=Path,
+        default=Path("eval/story-consistency-prompts.json"),
+    )
+    compare_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("runs/comparisons/model-a-vs-model-b"),
+    )
+    compare_parser.add_argument("--label-a")
+    compare_parser.add_argument("--label-b")
+    compare_parser.add_argument("--device", default="auto")
+    compare_parser.add_argument("--seed", type=int, default=42)
+    compare_parser.set_defaults(handler=_compare_command)
     return parser
 
 
@@ -159,13 +191,24 @@ def _prepare_command(args: argparse.Namespace) -> int:
 
 def _train_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
-    model_config = GatedCNNConfig(
-        vocab_size=data.tokenizer.vocab_size,
-        context_length=args.context_length,
-        d_model=args.d_model,
-        dropout=args.dropout,
-        tie_embeddings=not args.untie_embeddings,
-    )
+    shared_config = {
+        "vocab_size": data.tokenizer.vocab_size,
+        "context_length": args.context_length,
+        "d_model": args.d_model,
+        "dropout": args.dropout,
+        "tie_embeddings": not args.untie_embeddings,
+    }
+    if args.architecture == "cnn_attention":
+        model_config = CNNAttentionConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/model-b")
+    else:
+        model_config = GatedCNNConfig(**shared_config)
+        default_output_dir = Path("runs/model-a")
+    output_dir = args.output_dir or default_output_dir
     train_config = TrainConfig(
         max_steps=args.max_steps,
         batch_size=args.batch_size,
@@ -187,7 +230,7 @@ def _train_command(args: argparse.Namespace) -> int:
     summary = train(
         model_config,
         data,
-        args.output_dir,
+        output_dir,
         train_config,
         device=args.device,
         resume_from=args.resume,
@@ -199,7 +242,7 @@ def _train_command(args: argparse.Namespace) -> int:
 def _evaluate_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
-    model, config = _load_trained_model(
+    model, config = load_trained_model(
         args.checkpoint,
         data_fingerprint=data.fingerprint,
         device=device,
@@ -228,7 +271,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
 def _generate_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
-    model, config = _load_trained_model(
+    model, config = load_trained_model(
         args.checkpoint,
         data_fingerprint=data.fingerprint,
         device=device,
@@ -248,31 +291,20 @@ def _generate_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_trained_model(
-    checkpoint_path: str | Path,
-    *,
-    data_fingerprint: str,
-    device: torch.device,
-) -> tuple[torch.nn.Module, ModelConfig]:
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    if not isinstance(payload, dict):
-        raise ValueError("checkpoint must contain a mapping")
-    serialized_config = payload.get("model_config")
-    if not isinstance(serialized_config, dict):
-        raise ValueError("checkpoint does not contain a model configuration")
-    config = ModelConfig.from_dict(serialized_config)
-    model = build_model(config)
-    load_checkpoint(
-        checkpoint_path,
-        model=model,
-        expected_model_config=config,
-        expected_data_fingerprint=data_fingerprint,
-        map_location="cpu",
-        restore_rng=False,
+def _compare_command(args: argparse.Namespace) -> int:
+    data = PreparedTokenData(args.data_dir, seed=args.seed)
+    summary = compare_checkpoints(
+        args.checkpoint_a,
+        args.checkpoint_b,
+        data=data,
+        suite_path=args.suite,
+        output_dir=args.output_dir,
+        device=choose_device(args.device),
+        label_a=args.label_a,
+        label_b=args.label_b,
     )
-    model.to(device)
-    model.eval()
-    return model, config
+    _print_json(summary)
+    return 0
 
 
 def _print_json(value: Any) -> None:

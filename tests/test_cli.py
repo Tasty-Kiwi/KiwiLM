@@ -9,7 +9,7 @@ import torch
 
 from kiwilm.checkpoint import CheckpointCompatibilityError, save_checkpoint
 from kiwilm.cli import _load_trained_model, build_parser
-from kiwilm.config import GatedCNNConfig
+from kiwilm.config import CNNAttentionConfig, GatedCNNConfig
 from kiwilm.models import build_model
 
 
@@ -24,6 +24,26 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert training.max_steps == 2_000
     assert training.batch_size == 32
     assert training.context_length == 256
+    assert training.architecture == "gated_cnn"
+    assert training.output_dir is None
+
+
+def test_cli_selects_model_b_and_comparison_defaults() -> None:
+    parser = build_parser()
+    training = parser.parse_args(["train", "--architecture", "cnn_attention"])
+    comparison = parser.parse_args(
+        [
+            "compare",
+            "--checkpoint-a",
+            "a.pt",
+            "--checkpoint-b",
+            "b.pt",
+        ]
+    )
+
+    assert training.attention_heads == 8
+    assert training.attention_feedforward_dim == 1024
+    assert comparison.suite == Path("eval/story-consistency-prompts.json")
 
 
 def test_cli_loads_checkpoint_and_rejects_other_data(tmp_path: Path) -> None:
@@ -58,3 +78,29 @@ def test_cli_loads_checkpoint_and_rejects_other_data(tmp_path: Path) -> None:
             device=torch.device("cpu"),
         )
 
+
+def test_cli_loads_model_b_checkpoint(tmp_path: Path) -> None:
+    config = CNNAttentionConfig(
+        vocab_size=64,
+        context_length=8,
+        d_model=16,
+        dropout=0.0,
+        num_heads=2,
+        feedforward_dim=32,
+    )
+    checkpoint = save_checkpoint(
+        tmp_path / "model-b.pt",
+        model=build_model(config),
+        step=1,
+        model_config=config,
+        data_fingerprint="a" * 64,
+    )
+
+    model, loaded_config = _load_trained_model(
+        checkpoint,
+        data_fingerprint="a" * 64,
+        device=torch.device("cpu"),
+    )
+
+    assert loaded_config == config
+    assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 64)

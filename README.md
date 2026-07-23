@@ -2,7 +2,7 @@
 
 KiwiLM is a small research scaffold for comparing causal language-model
 architectures on [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories).
-The first baseline, Model A, is deliberately simple:
+The baseline, Model A, is deliberately simple:
 
 ```text
 8K byte-level BPE embedding
@@ -16,11 +16,31 @@ convolutions use dilations `1, 2, 4, 8, 16, 32, 64, 128`, giving a 511-token
 receptive field over the default 256-token context. Strict left padding makes
 every output causal.
 
-Architecture selection is isolated behind a registry. Future attention and
-Mamba variants can reuse the tokenizer, prepared token streams, trainer,
-checkpoints, metrics, and generator.
+Model B keeps the same width and training pipeline while replacing two CNN
+blocks with one full Transformer-style attention block:
+
+```text
+8K byte-level BPE embedding
+  -> 3 causal gated convolution blocks (dilations 1, 2, 4)
+  -> pre-normalized 8-head causal self-attention with RoPE
+  -> pre-normalized 4x GELU feed-forward network
+  -> 3 causal gated convolution blocks (dilations 8, 16, 32)
+  -> layer normalization
+  -> tied language-model head
+```
+
+| Model | Architecture | Parameters |
+| --- | --- | ---: |
+| A | 8 gated CNN blocks | 5,259,776 |
+| B | 3 gated CNNs + attention/FFN + 3 gated CNNs | 5,261,056 |
+
+Architecture selection is isolated behind a registry, so later Mamba variants
+can reuse the tokenizer, prepared token streams, trainer, checkpoints, metrics,
+generator, and comparison tooling.
 
 ![KiwiLM Model A architecture](docs/model-a.svg)
+
+![KiwiLM Model B architecture](docs/model-b.svg)
 
 ## Setup
 
@@ -86,9 +106,27 @@ target directory is intentionally being regenerated.
 
 ```bash
 uv run kiwilm train \
+  --architecture gated_cnn \
   --data-dir data/tinystories \
   --output-dir runs/model-a
 ```
+
+## Train Model B
+
+Model B uses the already-prepared TinyStories artifacts and trains from scratch
+for a direct comparison:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_attention \
+  --data-dir data/tinystories \
+  --output-dir runs/model-b \
+  --device auto
+```
+
+The default attention block uses eight heads, RoPE, and a 1,024-channel
+feed-forward layer. These can be changed with `--attention-heads` and
+`--attention-feedforward-dim`.
 
 The fast profile trains for 2,000 optimizer steps with a batch size of 32,
 evaluates every 200 steps, and checkpoints every 500 steps. Common overrides
@@ -163,6 +201,24 @@ Generation is intentionally simple and recomputes the active context at every
 step. Architecture-specific inference caches can be introduced with later
 variants without changing the sampling contract.
 
+## Compare Model A and Model B
+
+After training Model B, run the checked-in story-consistency prompt suite:
+
+```bash
+uv run kiwilm compare \
+  --data-dir data/tinystories \
+  --checkpoint-a runs/model-a/best.pt \
+  --checkpoint-b runs/model-b/best.pt \
+  --output-dir runs/comparisons/model-a-vs-model-b \
+  --device auto
+```
+
+This produces `results.jsonl` for analysis and `report.md` for side-by-side
+reading. Both checkpoints receive the same prompt, sampling profile, and seed.
+The suite covers named entities, object ownership, two-character stories,
+persistent goals, and dialogue locations.
+
 ## Development
 
 ```bash
@@ -182,7 +238,8 @@ evaluation, and generation.
 src/kiwilm/
   models/        # architecture implementations and registry
   checkpoint.py  # atomic checkpoint I/O and compatibility checks
-  cli.py         # prepare/train/evaluate/generate commands
+  cli.py         # prepare/train/evaluate/generate/compare commands
+  comparison.py  # reproducible A/B generation reports
   config.py      # serializable model configuration
   data.py        # TinyStories preparation and token batches
   generation.py  # shared decoding
@@ -190,6 +247,6 @@ src/kiwilm/
   training.py    # optimizer, schedule, evaluation, and training loop
 ```
 
-Model A is a scaffold, not a pretrained release. The smoke defaults verify that
-the pipeline works; they do not imply useful story quality or full-corpus
-validation.
+KiwiLM is a research scaffold, not a pretrained release. The smoke defaults
+verify that the pipeline works; they do not imply useful story quality or
+full-corpus validation.
