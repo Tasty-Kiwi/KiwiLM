@@ -653,7 +653,7 @@ dev = [
 requires-dist = [
     { name = "datasets", specifier = ">=4.0" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "tokenizers", specifier = ">=0.21" },
+    { name = "tokenizers", specifier = ">=0.23" },
     { name = "torch", specifier = ">=2.7" },
     { name = "tqdm", specifier = ">=4.67" },
 ]

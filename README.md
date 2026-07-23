@@ -236,6 +236,24 @@ uv run kiwilm generate \
   --seed 42
 ```
 
+Add `--stream` to print decoded text as each token becomes available:
+
+```bash
+uv run kiwilm generate \
+  --data-dir data/tinystories \
+  --checkpoint runs/model-b/best.pt \
+  --prompt "Once upon a time" \
+  --max-new-tokens 160 \
+  --temperature 0.8 \
+  --top-k 40 \
+  --seed 42 \
+  --stream
+```
+
+Streaming uses incremental byte-level decoding, so Unicode characters split
+across multiple tokens are emitted only after their complete byte sequence is
+available.
+
 Generation is intentionally simple and recomputes the active context at every
 step. Architecture-specific inference caches can be introduced with later
 variants without changing the sampling contract.

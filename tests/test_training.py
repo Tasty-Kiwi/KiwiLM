@@ -18,7 +18,12 @@ from kiwilm.checkpoint import (
     save_checkpoint,
 )
 from kiwilm.config import GatedCNNConfig
-from kiwilm.generation import generate, generate_tokens
+from kiwilm.generation import (
+    generate,
+    generate_stream,
+    generate_token_stream,
+    generate_tokens,
+)
 from kiwilm.training import (
     TrainConfig,
     choose_device,
@@ -513,3 +518,63 @@ def test_top_k_sampling_is_seeded_and_restricted() -> None:
     )
     assert torch.equal(first, second)
     assert set(first[0, 1:].tolist()) <= {1, 2}
+
+
+def test_token_and_text_streaming_match_buffered_generation() -> None:
+    prompt = torch.tensor([0])
+    streamed_tokens = list(
+        generate_token_stream(
+            ScriptedLM(),
+            prompt,
+            max_new_tokens=12,
+            temperature=1.0,
+            top_k=2,
+            seed=17,
+        )
+    )
+    buffered_tokens = generate_tokens(
+        ScriptedLM(),
+        prompt,
+        max_new_tokens=12,
+        temperature=1.0,
+        top_k=2,
+        seed=17,
+    )
+    reconstructed = torch.cat(
+        (prompt.unsqueeze(0), *streamed_tokens),
+        dim=1,
+    )
+    torch.testing.assert_close(reconstructed, buffered_tokens)
+
+    streamed_text = "".join(
+        generate_stream(
+            ScriptedLM(eos_after_token=2),
+            TinyTokenizer(),
+            "Once",
+            max_new_tokens=10,
+            temperature=0,
+        )
+    )
+    buffered_text = generate(
+        ScriptedLM(eos_after_token=2),
+        TinyTokenizer(),
+        "Once",
+        max_new_tokens=10,
+        temperature=0,
+    )
+    assert streamed_text == buffered_text
+
+
+def test_closing_token_stream_restores_model_training_mode() -> None:
+    model = ScriptedLM().train()
+    stream = generate_token_stream(
+        model,
+        torch.tensor([0]),
+        max_new_tokens=10,
+        temperature=0,
+    )
+
+    next(stream)
+    assert not model.training
+    stream.close()
+    assert model.training

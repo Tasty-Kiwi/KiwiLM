@@ -26,6 +26,25 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert training.context_length == 256
     assert training.architecture == "gated_cnn"
     assert training.output_dir is None
+    generation = parser.parse_args(
+        ["generate", "--checkpoint", "model.pt", "--prompt", "Once"]
+    )
+    assert not generation.stream
+
+
+def test_cli_accepts_streaming_generation() -> None:
+    args = build_parser().parse_args(
+        [
+            "generate",
+            "--checkpoint",
+            "model.pt",
+            "--prompt",
+            "Once",
+            "--stream",
+        ]
+    )
+
+    assert args.stream
 
 
 def test_cli_selects_model_b_and_comparison_defaults() -> None:

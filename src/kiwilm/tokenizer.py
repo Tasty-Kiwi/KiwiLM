@@ -209,6 +209,26 @@ class ByteBPETokenizer:
             )
         )
 
+    def decode_stream(
+        self,
+        ids: Iterable[int],
+        *,
+        skip_special_tokens: bool = True,
+    ) -> Iterable[str]:
+        """Incrementally decode token IDs without corrupting split UTF-8 bytes."""
+
+        api = _tokenizers_api()
+        stream = api["decoders"].DecodeStream(
+            skip_special_tokens=skip_special_tokens
+        )
+        for token_id in ids:
+            resolved_id = int(token_id)
+            if resolved_id < 0 or resolved_id >= self.vocab_size:
+                raise ValueError("token IDs must be within the tokenizer vocabulary")
+            chunk = stream.step(self._tokenizer, resolved_id)
+            if chunk is not None:
+                yield str(chunk)
+
     @property
     def vocab_size(self) -> int:
         return int(self._tokenizer.get_vocab_size(with_added_tokens=True))

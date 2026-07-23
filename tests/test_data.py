@@ -51,6 +51,21 @@ def test_byte_bpe_round_trip_special_tokens_and_json(tmp_path: Path) -> None:
         loaded.encode("A story containing [EOS] as ordinary source text")
 
 
+def test_byte_bpe_streaming_decode_preserves_split_utf8() -> None:
+    tokenizer = ByteBPETokenizer.train(
+        ["Hello € 😊"],
+        vocab_size=260,
+        min_frequency=1,
+    )
+    text = "Hello € 😊"
+    token_ids = tokenizer.encode(text, add_bos=True, add_eos=True)
+
+    chunks = list(tokenizer.decode_stream(token_ids))
+
+    assert "".join(chunks) == text
+    assert tokenizer.decode(token_ids) == text
+
+
 def test_packing_preserves_story_boundaries_and_shifted_batches(
     tmp_path: Path,
 ) -> None:

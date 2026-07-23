@@ -27,7 +27,7 @@ from kiwilm.data import (
     PreparedTokenData,
     prepare_tinystories,
 )
-from kiwilm.generation import generate
+from kiwilm.generation import generate, generate_stream
 from kiwilm.inference import load_trained_model
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
 
@@ -142,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="sampling shortlist size; 0 disables top-k filtering",
     )
     generate_parser.add_argument("--seed", type=int, default=42)
+    generate_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="print decoded text as tokens are generated",
+    )
     generate_parser.set_defaults(handler=_generate_command)
 
     compare_parser = subparsers.add_parser(
@@ -319,18 +324,31 @@ def _generate_command(args: argparse.Namespace) -> int:
         data_fingerprint=data.fingerprint,
         device=device,
     )
-    text = generate(
-        model,
-        data.tokenizer,
-        args.prompt,
-        max_new_tokens=args.max_new_tokens,
-        context_length=config.context_length,
-        temperature=args.temperature,
-        top_k=None if args.top_k == 0 else args.top_k,
-        seed=args.seed,
-        device=device,
-    )
-    print(text)
+    generation_options = {
+        "max_new_tokens": args.max_new_tokens,
+        "context_length": config.context_length,
+        "temperature": args.temperature,
+        "top_k": None if args.top_k == 0 else args.top_k,
+        "seed": args.seed,
+        "device": device,
+    }
+    if args.stream:
+        for chunk in generate_stream(
+            model,
+            data.tokenizer,
+            args.prompt,
+            **generation_options,
+        ):
+            print(chunk, end="", flush=True)
+        print()
+    else:
+        text = generate(
+            model,
+            data.tokenizer,
+            args.prompt,
+            **generation_options,
+        )
+        print(text)
     return 0
 
 
