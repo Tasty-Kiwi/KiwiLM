@@ -20,6 +20,8 @@ Architecture selection is isolated behind a registry. Future attention and
 Mamba variants can reuse the tokenizer, prepared token streams, trainer,
 checkpoints, metrics, and generator.
 
+![KiwiLM Model A architecture](docs/model-a.svg)
+
 ## Setup
 
 KiwiLM uses [uv](https://docs.astral.sh/uv/) for dependency management:
