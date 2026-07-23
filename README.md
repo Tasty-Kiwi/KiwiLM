@@ -33,6 +33,8 @@ blocks with one full Transformer-style attention block:
 | --- | --- | ---: |
 | A | 8 gated CNN blocks | 5,259,776 |
 | B | 3 gated CNNs + attention/FFN + 3 gated CNNs | 5,261,056 |
+| C | Model B + final attention/FFN | 6,050,816 |
+| D | Model B + final portable Mamba block | 6,027,648 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
 can reuse the tokenizer, prepared token streams, trainer, checkpoints, metrics,
@@ -41,6 +43,10 @@ generator, and comparison tooling.
 ![KiwiLM Model A architecture](docs/model-a.svg)
 
 ![KiwiLM Model B architecture](docs/model-b.svg)
+
+![KiwiLM Model C architecture](docs/model-c.svg)
+
+![KiwiLM Model D architecture](docs/model-d.svg)
 
 ## Setup
 
@@ -128,6 +134,39 @@ The default attention block uses eight heads, RoPE, and a 1,024-channel
 feed-forward layer. These can be changed with `--attention-heads` and
 `--attention-feedforward-dim`.
 
+## Train Models C and D
+
+Model C adds a second attention block after the final CNN stack:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_dual_attention \
+  --data-dir data/tinystories \
+  --output-dir runs/model-c \
+  --device auto
+```
+
+Model D replaces that second attention block with a portable Mamba-1-style
+selective state-space block. Its default width is chosen to stay within 0.4% of
+Model C's parameter count:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_attention_mamba \
+  --data-dir data/tinystories \
+  --output-dir runs/model-d \
+  --batch-size 8 \
+  --grad-accum-steps 4 \
+  --device auto
+```
+
+The smaller microbatch bounds activation memory while preserving an effective
+batch size of 32. The Mamba implementation uses ordinary PyTorch operations so
+it runs on CPU and Apple MPS without CUDA extensions. Its selective scan is
+linear in sequence length, but it is a readable reference implementation rather
+than a fused performance kernel. Model D still contains one attention block, so
+the complete hybrid remains quadratic with a smaller coefficient than Model C.
+
 The fast profile trains for 2,000 optimizer steps with a batch size of 32,
 evaluates every 200 steps, and checkpoints every 500 steps. Common overrides
 are available from the CLI:
@@ -201,7 +240,7 @@ Generation is intentionally simple and recomputes the active context at every
 step. Architecture-specific inference caches can be introduced with later
 variants without changing the sampling contract.
 
-## Compare Model A and Model B
+## Compare models
 
 After training Model B, run the checked-in story-consistency prompt suite:
 
@@ -218,6 +257,22 @@ This produces `results.jsonl` for analysis and `report.md` for side-by-side
 reading. Both checkpoints receive the same prompt, sampling profile, and seed.
 The suite covers named entities, object ownership, two-character stories,
 persistent goals, and dialogue locations.
+
+Compare Models B, C, and D in one report:
+
+```bash
+uv run kiwilm compare \
+  --data-dir data/tinystories \
+  --checkpoints \
+    runs/model-b/best.pt \
+    runs/model-c/best.pt \
+    runs/model-d/best.pt \
+  --labels "Model B" "Model C" "Model D" \
+  --output-dir runs/comparisons/model-b-vs-c-vs-d \
+  --device auto
+```
+
+The original `--checkpoint-a` and `--checkpoint-b` form remains supported.
 
 ## Development
 

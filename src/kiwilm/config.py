@@ -60,6 +60,10 @@ class ModelConfig:
                 return cast(Self, GatedCNNConfig.from_dict(data))
             if architecture == "cnn_attention":
                 return cast(Self, CNNAttentionConfig.from_dict(data))
+            if architecture == "cnn_dual_attention":
+                return cast(Self, CNNDualAttentionConfig.from_dict(data))
+            if architecture == "cnn_attention_mamba":
+                return cast(Self, CNNAttentionMambaConfig.from_dict(data))
         return cls(**data)
 
 
@@ -120,41 +124,104 @@ class CNNAttentionConfig(ModelConfig):
         super(CNNAttentionConfig, self).__post_init__()
         if self.architecture != "cnn_attention":
             raise ValueError("CNNAttentionConfig architecture must be 'cnn_attention'")
-        _require_positive_int("kernel_size", self.kernel_size)
-        _require_positive_int("num_heads", self.num_heads)
-        _require_positive_int("feedforward_dim", self.feedforward_dim)
-
-        for name in ("pre_attention_dilations", "post_attention_dilations"):
-            values = getattr(self, name)
-            if not isinstance(values, tuple):
-                try:
-                    values = tuple(values)
-                    object.__setattr__(self, name, values)
-                except TypeError as error:
-                    raise ValueError(f"{name} must be a sequence of positive integers") from error
-            if len(values) != 3:
-                raise ValueError(f"{name} must contain exactly 3 entries")
-            for dilation in values:
-                _require_positive_int(f"each {name} dilation", dilation)
-
-        if self.d_model % self.num_heads != 0:
-            raise ValueError("d_model must be divisible by num_heads")
-        if (self.d_model // self.num_heads) % 2 != 0:
-            raise ValueError("attention head dimension must be even for RoPE")
+        _validate_cnn_attention_fields(self)
 
     @classmethod
     def from_dict(cls, values: Mapping[str, object]) -> Self:
         """Reconstruct a CNN-attention config from a plain mapping."""
 
-        data = dict(values)
-        for name in ("pre_attention_dilations", "post_attention_dilations"):
-            if name not in data:
-                continue
-            raw_dilations = data[name]
-            if isinstance(raw_dilations, (str, bytes)):
-                raise ValueError(f"{name} must be a sequence of positive integers")
+        return cls(**_normalize_cnn_attention_data(values))
+
+
+@dataclass(frozen=True, slots=True)
+class CNNDualAttentionConfig(CNNAttentionConfig):
+    """Configuration for Model C with a second attention block."""
+
+    architecture: str = "cnn_dual_attention"
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "cnn_dual_attention":
+            raise ValueError(
+                "CNNDualAttentionConfig architecture must be 'cnn_dual_attention'"
+            )
+        _validate_cnn_attention_fields(self)
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        """Reconstruct a dual-attention config from a plain mapping."""
+
+        return cls(**_normalize_cnn_attention_data(values))
+
+
+@dataclass(frozen=True, slots=True)
+class CNNAttentionMambaConfig(CNNAttentionConfig):
+    """Configuration for Model D with a final selective state-space block."""
+
+    architecture: str = "cnn_attention_mamba"
+    mamba_inner_dim: int = 896
+    mamba_state_dim: int = 16
+    mamba_conv_kernel: int = 4
+    mamba_dt_rank: int = 16
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "cnn_attention_mamba":
+            raise ValueError(
+                "CNNAttentionMambaConfig architecture must be "
+                "'cnn_attention_mamba'"
+            )
+        _validate_cnn_attention_fields(self)
+        _require_positive_int("mamba_inner_dim", self.mamba_inner_dim)
+        _require_positive_int("mamba_state_dim", self.mamba_state_dim)
+        _require_positive_int("mamba_conv_kernel", self.mamba_conv_kernel)
+        _require_positive_int("mamba_dt_rank", self.mamba_dt_rank)
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        """Reconstruct an attention-Mamba config from a plain mapping."""
+
+        return cls(**_normalize_cnn_attention_data(values))
+
+
+def _normalize_cnn_attention_data(
+    values: Mapping[str, object],
+) -> dict[str, object]:
+    data = dict(values)
+    for name in ("pre_attention_dilations", "post_attention_dilations"):
+        if name not in data:
+            continue
+        raw_dilations = data[name]
+        if isinstance(raw_dilations, (str, bytes)):
+            raise ValueError(f"{name} must be a sequence of positive integers")
+        try:
+            data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
+        except TypeError as error:
+            raise ValueError(
+                f"{name} must be a sequence of positive integers"
+            ) from error
+    return data
+
+
+def _validate_cnn_attention_fields(config: CNNAttentionConfig) -> None:
+    _require_positive_int("kernel_size", config.kernel_size)
+    _require_positive_int("num_heads", config.num_heads)
+    _require_positive_int("feedforward_dim", config.feedforward_dim)
+    for name in ("pre_attention_dilations", "post_attention_dilations"):
+        values = getattr(config, name)
+        if not isinstance(values, tuple):
             try:
-                data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
+                values = tuple(values)
+                object.__setattr__(config, name, values)
             except TypeError as error:
-                raise ValueError(f"{name} must be a sequence of positive integers") from error
-        return cls(**data)
+                raise ValueError(
+                    f"{name} must be a sequence of positive integers"
+                ) from error
+        if len(values) != 3:
+            raise ValueError(f"{name} must contain exactly 3 entries")
+        for dilation in values:
+            _require_positive_int(f"each {name} dilation", dilation)
+    if config.d_model % config.num_heads != 0:
+        raise ValueError("d_model must be divisible by num_heads")
+    if (config.d_model // config.num_heads) % 2 != 0:
+        raise ValueError("attention head dimension must be even for RoPE")

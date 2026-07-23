@@ -5,10 +5,16 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pytest
 import torch
 
 from kiwilm.cli import _load_trained_model
-from kiwilm.config import CNNAttentionConfig, GatedCNNConfig
+from kiwilm.config import (
+    CNNAttentionConfig,
+    CNNAttentionMambaConfig,
+    CNNDualAttentionConfig,
+    GatedCNNConfig,
+)
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.generation import generate
 from kiwilm.training import TrainConfig, evaluate, train
@@ -125,6 +131,66 @@ def test_model_b_one_step_training_smoke(tmp_path: Path) -> None:
             log_interval=0,
             sample_tokens=0,
             seed=11,
+        ),
+        device="cpu",
+        log_fn=None,
+    )
+
+    assert summary["step"] == 1
+    assert summary["best_checkpoint"] is not None
+
+
+@pytest.mark.parametrize(
+    "config_type",
+    [CNNDualAttentionConfig, CNNAttentionMambaConfig],
+)
+def test_models_c_and_d_one_step_training_smoke(
+    tmp_path: Path,
+    config_type: type[CNNDualAttentionConfig | CNNAttentionMambaConfig],
+) -> None:
+    data_dir = tmp_path / "data"
+    prepare_from_stories(
+        data_dir,
+        ["Once there was a small green bird.", "The bird found a friend."] * 4,
+        ["They went home before dark."] * 3,
+        vocab_size=300,
+        min_frequency=1,
+    )
+    data = PreparedTokenData(data_dir, seed=19)
+    architecture_options = {
+        "vocab_size": data.tokenizer.vocab_size,
+        "context_length": 8,
+        "d_model": 8,
+        "dropout": 0.0,
+        "num_heads": 1,
+        "feedforward_dim": 16,
+    }
+    if config_type is CNNAttentionMambaConfig:
+        architecture_options.update(
+            {
+                "mamba_inner_dim": 12,
+                "mamba_state_dim": 2,
+                "mamba_conv_kernel": 2,
+                "mamba_dt_rank": 2,
+            }
+        )
+    config = config_type(**architecture_options)
+    summary = train(
+        config,
+        data,
+        tmp_path / "run",
+        TrainConfig(
+            max_steps=1,
+            batch_size=2,
+            lr=1e-3,
+            min_lr=1e-3,
+            warmup_steps=0,
+            eval_interval=1,
+            eval_batches=1,
+            checkpoint_interval=1,
+            log_interval=0,
+            sample_tokens=0,
+            seed=19,
         ),
         device="cpu",
         log_fn=None,

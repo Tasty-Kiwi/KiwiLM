@@ -12,7 +12,12 @@ import torch
 
 from kiwilm import __version__
 from kiwilm.comparison import compare_checkpoints
-from kiwilm.config import CNNAttentionConfig, GatedCNNConfig
+from kiwilm.config import (
+    CNNAttentionConfig,
+    CNNAttentionMambaConfig,
+    CNNDualAttentionConfig,
+    GatedCNNConfig,
+)
 from kiwilm.data import (
     DEFAULT_DATASET_NAME,
     DEFAULT_DATASET_REVISION,
@@ -64,7 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_data_argument(train_parser)
     train_parser.add_argument(
         "--architecture",
-        choices=("gated_cnn", "cnn_attention"),
+        choices=(
+            "gated_cnn",
+            "cnn_attention",
+            "cnn_dual_attention",
+            "cnn_attention_mamba",
+        ),
         default="gated_cnn",
     )
     train_parser.add_argument("--output-dir", type=Path)
@@ -75,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--dropout", type=float, default=0.1)
     train_parser.add_argument("--attention-heads", type=int, default=8)
     train_parser.add_argument("--attention-feedforward-dim", type=int, default=1024)
+    train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
+    train_parser.add_argument("--mamba-state-dim", type=int, default=16)
+    train_parser.add_argument("--mamba-conv-kernel", type=int, default=4)
+    train_parser.add_argument("--mamba-dt-rank", type=int, default=16)
     train_parser.add_argument("--untie-embeddings", action="store_true")
     train_parser.add_argument("--max-steps", type=int, default=2_000)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -135,8 +149,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="generate a reproducible side-by-side checkpoint report",
     )
     _add_data_argument(compare_parser)
-    compare_parser.add_argument("--checkpoint-a", type=Path, required=True)
-    compare_parser.add_argument("--checkpoint-b", type=Path, required=True)
+    compare_parser.add_argument("--checkpoint-a", type=Path)
+    compare_parser.add_argument("--checkpoint-b", type=Path)
+    compare_parser.add_argument(
+        "--checkpoints",
+        type=Path,
+        nargs="+",
+        help="two or more checkpoints for an N-way report",
+    )
     compare_parser.add_argument(
         "--suite",
         type=Path,
@@ -149,6 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compare_parser.add_argument("--label-a")
     compare_parser.add_argument("--label-b")
+    compare_parser.add_argument(
+        "--labels",
+        nargs="+",
+        help="labels corresponding positionally to --checkpoints",
+    )
     compare_parser.add_argument("--device", default="auto")
     compare_parser.add_argument("--seed", type=int, default=42)
     compare_parser.set_defaults(handler=_compare_command)
@@ -205,6 +230,24 @@ def _train_command(args: argparse.Namespace) -> int:
             feedforward_dim=args.attention_feedforward_dim,
         )
         default_output_dir = Path("runs/model-b")
+    elif args.architecture == "cnn_dual_attention":
+        model_config = CNNDualAttentionConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/model-c")
+    elif args.architecture == "cnn_attention_mamba":
+        model_config = CNNAttentionMambaConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+            mamba_inner_dim=args.mamba_inner_dim,
+            mamba_state_dim=args.mamba_state_dim,
+            mamba_conv_kernel=args.mamba_conv_kernel,
+            mamba_dt_rank=args.mamba_dt_rank,
+        )
+        default_output_dir = Path("runs/model-d")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")
@@ -293,15 +336,36 @@ def _generate_command(args: argparse.Namespace) -> int:
 
 def _compare_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
+    if args.checkpoints is not None:
+        if (
+            args.checkpoint_a is not None
+            or args.checkpoint_b is not None
+            or args.label_a is not None
+            or args.label_b is not None
+        ):
+            raise ValueError(
+                "use either --checkpoints/--labels or the "
+                "--checkpoint-a/--checkpoint-b form"
+            )
+        checkpoints = args.checkpoints
+        labels = args.labels
+    else:
+        if args.checkpoint_a is None or args.checkpoint_b is None:
+            raise ValueError(
+                "pass --checkpoints with two or more paths, or both "
+                "--checkpoint-a and --checkpoint-b"
+            )
+        if args.labels is not None:
+            raise ValueError("--labels requires --checkpoints")
+        checkpoints = [args.checkpoint_a, args.checkpoint_b]
+        labels = [args.label_a, args.label_b]
     summary = compare_checkpoints(
-        args.checkpoint_a,
-        args.checkpoint_b,
+        checkpoints,
         data=data,
         suite_path=args.suite,
         output_dir=args.output_dir,
         device=choose_device(args.device),
-        label_a=args.label_a,
-        label_b=args.label_b,
+        labels=labels,
     )
     _print_json(summary)
     return 0

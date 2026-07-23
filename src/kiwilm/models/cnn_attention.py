@@ -6,13 +6,19 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from kiwilm.config import CNNAttentionConfig, ModelConfig
+from kiwilm.config import (
+    CNNAttentionConfig,
+    CNNAttentionMambaConfig,
+    CNNDualAttentionConfig,
+    ModelConfig,
+)
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.components import (
     GatedCNNBlock,
     initialize_weights,
     validate_input_ids,
 )
+from kiwilm.models.mamba import MambaBlock
 from kiwilm.models.registry import register_model
 
 
@@ -138,41 +144,7 @@ class CNNAttentionLM(CausalLanguageModel):
         else:
             raise TypeError("CNNAttentionLM requires a CNNAttentionConfig")
 
-        self.config = attention_config
-        self.token_embedding = nn.Embedding(
-            attention_config.vocab_size,
-            attention_config.d_model,
-        )
-        self.pre_attention_blocks = nn.ModuleList(
-            GatedCNNBlock(
-                attention_config.d_model,
-                kernel_size=attention_config.kernel_size,
-                dilation=dilation,
-                dropout=attention_config.dropout,
-            )
-            for dilation in attention_config.pre_attention_dilations
-        )
-        self.attention_block = TransformerAttentionBlock(
-            attention_config.d_model,
-            num_heads=attention_config.num_heads,
-            feedforward_dim=attention_config.feedforward_dim,
-            dropout=attention_config.dropout,
-        )
-        self.post_attention_blocks = nn.ModuleList(
-            GatedCNNBlock(
-                attention_config.d_model,
-                kernel_size=attention_config.kernel_size,
-                dilation=dilation,
-                dropout=attention_config.dropout,
-            )
-            for dilation in attention_config.post_attention_dilations
-        )
-        self.final_norm = nn.LayerNorm(attention_config.d_model)
-        self.lm_head = nn.Linear(
-            attention_config.d_model,
-            attention_config.vocab_size,
-            bias=True,
-        )
+        _initialize_backbone(self, attention_config)
         self.apply(initialize_weights)
         if attention_config.tie_embeddings:
             self.lm_head.weight = self.token_embedding.weight
@@ -180,13 +152,107 @@ class CNNAttentionLM(CausalLanguageModel):
     def forward(self, input_ids: Tensor) -> Tensor:
         validate_input_ids(input_ids, context_length=self.config.context_length)
 
-        values = self.token_embedding(input_ids)
-        for block in self.pre_attention_blocks:
-            values = block(values)
-        values = self.attention_block(values)
-        for block in self.post_attention_blocks:
-            values = block(values)
+        values = _forward_backbone(self, input_ids)
         return self.lm_head(self.final_norm(values))
+
+
+class CNNDualAttentionLM(CausalLanguageModel):
+    """Model C: Model B followed by a second full attention block."""
+
+    def __init__(self, config: CNNDualAttentionConfig | None = None) -> None:
+        super().__init__()
+        dual_config = config or CNNDualAttentionConfig()
+        if not isinstance(dual_config, CNNDualAttentionConfig):
+            raise TypeError("CNNDualAttentionLM requires a CNNDualAttentionConfig")
+        _initialize_backbone(self, dual_config)
+        self.final_attention_block = TransformerAttentionBlock(
+            dual_config.d_model,
+            num_heads=dual_config.num_heads,
+            feedforward_dim=dual_config.feedforward_dim,
+            dropout=dual_config.dropout,
+        )
+        self.apply(initialize_weights)
+        if dual_config.tie_embeddings:
+            self.lm_head.weight = self.token_embedding.weight
+
+    def forward(self, input_ids: Tensor) -> Tensor:
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.final_attention_block(_forward_backbone(self, input_ids))
+        return self.lm_head(self.final_norm(values))
+
+
+class CNNAttentionMambaLM(CausalLanguageModel):
+    """Model D: Model B followed by a portable Mamba block."""
+
+    def __init__(self, config: CNNAttentionMambaConfig | None = None) -> None:
+        super().__init__()
+        mamba_config = config or CNNAttentionMambaConfig()
+        if not isinstance(mamba_config, CNNAttentionMambaConfig):
+            raise TypeError(
+                "CNNAttentionMambaLM requires a CNNAttentionMambaConfig"
+            )
+        _initialize_backbone(self, mamba_config)
+        self.mamba_block = MambaBlock(
+            mamba_config.d_model,
+            inner_dim=mamba_config.mamba_inner_dim,
+            state_dim=mamba_config.mamba_state_dim,
+            conv_kernel=mamba_config.mamba_conv_kernel,
+            dt_rank=mamba_config.mamba_dt_rank,
+            dropout=mamba_config.dropout,
+        )
+        self.apply(initialize_weights)
+        self.mamba_block.reset_ssm_parameters()
+        if mamba_config.tie_embeddings:
+            self.lm_head.weight = self.token_embedding.weight
+
+    def forward(self, input_ids: Tensor) -> Tensor:
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.mamba_block(_forward_backbone(self, input_ids))
+        return self.lm_head(self.final_norm(values))
+
+
+def _initialize_backbone(
+    model: CausalLanguageModel,
+    config: CNNAttentionConfig,
+) -> None:
+    model.config = config
+    model.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
+    model.pre_attention_blocks = nn.ModuleList(
+        GatedCNNBlock(
+            config.d_model,
+            kernel_size=config.kernel_size,
+            dilation=dilation,
+            dropout=config.dropout,
+        )
+        for dilation in config.pre_attention_dilations
+    )
+    model.attention_block = TransformerAttentionBlock(
+        config.d_model,
+        num_heads=config.num_heads,
+        feedforward_dim=config.feedforward_dim,
+        dropout=config.dropout,
+    )
+    model.post_attention_blocks = nn.ModuleList(
+        GatedCNNBlock(
+            config.d_model,
+            kernel_size=config.kernel_size,
+            dilation=dilation,
+            dropout=config.dropout,
+        )
+        for dilation in config.post_attention_dilations
+    )
+    model.final_norm = nn.LayerNorm(config.d_model)
+    model.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=True)
+
+
+def _forward_backbone(model: CausalLanguageModel, input_ids: Tensor) -> Tensor:
+    values = model.token_embedding(input_ids)
+    for block in model.pre_attention_blocks:
+        values = block(values)
+    values = model.attention_block(values)
+    for block in model.post_attention_blocks:
+        values = block(values)
+    return values
 
 
 def _build_cnn_attention(config: ModelConfig) -> CausalLanguageModel:
@@ -194,3 +260,19 @@ def _build_cnn_attention(config: ModelConfig) -> CausalLanguageModel:
 
 
 register_model("cnn_attention", _build_cnn_attention)
+
+
+def _build_cnn_dual_attention(config: ModelConfig) -> CausalLanguageModel:
+    if not isinstance(config, CNNDualAttentionConfig):
+        raise TypeError("cnn_dual_attention requires CNNDualAttentionConfig")
+    return CNNDualAttentionLM(config)
+
+
+def _build_cnn_attention_mamba(config: ModelConfig) -> CausalLanguageModel:
+    if not isinstance(config, CNNAttentionMambaConfig):
+        raise TypeError("cnn_attention_mamba requires CNNAttentionMambaConfig")
+    return CNNAttentionMambaLM(config)
+
+
+register_model("cnn_dual_attention", _build_cnn_dual_attention)
+register_model("cnn_attention_mamba", _build_cnn_attention_mamba)

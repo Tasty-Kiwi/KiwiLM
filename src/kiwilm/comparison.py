@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,23 +17,52 @@ from kiwilm.inference import load_trained_model
 
 
 def compare_checkpoints(
-    checkpoint_a: str | Path,
-    checkpoint_b: str | Path,
+    checkpoints: str | Path | Sequence[str | Path],
+    checkpoint_b: str | Path | None = None,
     *,
     data: PreparedTokenData,
     suite_path: str | Path,
     output_dir: str | Path,
     device: torch.device,
+    labels: Sequence[str | None] | None = None,
     label_a: str | None = None,
     label_b: str | None = None,
 ) -> dict[str, Any]:
-    """Generate every suite case from both checkpoints with identical seeds."""
+    """Generate every suite case from two or more checkpoints."""
 
     suite = _load_suite(suite_path)
+    if isinstance(checkpoints, (str, Path)):
+        if checkpoint_b is None:
+            raise ValueError("a second checkpoint is required")
+        resolved_checkpoints = [Path(checkpoints), Path(checkpoint_b)]
+        resolved_labels = [label_a, label_b]
+        if labels is not None:
+            raise ValueError("labels cannot be combined with label_a and label_b")
+    else:
+        if checkpoint_b is not None:
+            raise ValueError(
+                "checkpoint_b cannot be combined with a checkpoint sequence"
+            )
+        if label_a is not None or label_b is not None:
+            raise ValueError(
+                "label_a and label_b cannot be combined with a checkpoint sequence"
+            )
+        resolved_checkpoints = [Path(checkpoint) for checkpoint in checkpoints]
+        resolved_labels = (
+            list(labels)
+            if labels is not None
+            else [None] * len(resolved_checkpoints)
+        )
+    if len(resolved_checkpoints) < 2:
+        raise ValueError("comparison requires at least two checkpoints")
+    if len(resolved_labels) != len(resolved_checkpoints):
+        raise ValueError("labels must match the number of checkpoints")
+
     models = []
-    for checkpoint, label in (
-        (Path(checkpoint_a), label_a),
-        (Path(checkpoint_b), label_b),
+    for checkpoint, label in zip(
+        resolved_checkpoints,
+        resolved_labels,
+        strict=True,
     ):
         model, config = load_trained_model(
             checkpoint,
@@ -48,6 +77,9 @@ def compare_checkpoints(
                 checkpoint,
             )
         )
+    model_labels = [model[2] for model in models]
+    if len(set(model_labels)) != len(model_labels):
+        raise ValueError("comparison labels must be unique")
 
     rows: list[dict[str, Any]] = []
     for prompt_case in suite["prompts"]:
@@ -130,9 +162,9 @@ def _render_report(
     rows: list[dict[str, Any]],
     models: list[tuple[torch.nn.Module, Any, str, Path]],
 ) -> str:
-    labels = [models[0][2], models[1][2]]
+    labels = [model[2] for model in models]
     lines = [
-        "# KiwiLM A/B generation report",
+        "# KiwiLM generation comparison report",
         "",
         "The outputs below use the same prompt and sampling seed for both models.",
         "",
@@ -148,9 +180,11 @@ def _render_report(
                 "",
                 f"Prompt: `{_escape(first['prompt'])}`",
                 "",
-                f"| {_escape(labels[0])} | {_escape(labels[1])} |",
-                "| --- | --- |",
-                f"| {_cell(pair[labels[0]]['text'])} | {_cell(pair[labels[1]]['text'])} |",
+                "| " + " | ".join(_escape(label) for label in labels) + " |",
+                "| " + " | ".join("---" for _ in labels) + " |",
+                "| "
+                + " | ".join(_cell(pair[label]["text"]) for label in labels)
+                + " |",
                 "",
             ]
         )

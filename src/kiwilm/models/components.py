@@ -16,6 +16,7 @@ class CausalConv1d(nn.Module):
         kernel_size: int,
         *,
         dilation: int,
+        groups: int = 1,
     ) -> None:
         super().__init__()
         self.left_padding = dilation * (kernel_size - 1)
@@ -24,6 +25,7 @@ class CausalConv1d(nn.Module):
             out_channels,
             kernel_size=kernel_size,
             dilation=dilation,
+            groups=groups,
             padding=0,
         )
 

@@ -46,6 +46,35 @@ def test_cli_selects_model_b_and_comparison_defaults() -> None:
     assert comparison.suite == Path("eval/story-consistency-prompts.json")
 
 
+def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
+    parser = build_parser()
+    model_c = parser.parse_args(["train", "--architecture", "cnn_dual_attention"])
+    model_d = parser.parse_args(["train", "--architecture", "cnn_attention_mamba"])
+    comparison = parser.parse_args(
+        [
+            "compare",
+            "--checkpoints",
+            "b.pt",
+            "c.pt",
+            "d.pt",
+            "--labels",
+            "Model B",
+            "Model C",
+            "Model D",
+        ]
+    )
+
+    assert model_c.architecture == "cnn_dual_attention"
+    assert model_d.mamba_inner_dim == 896
+    assert model_d.mamba_state_dim == 16
+    assert comparison.checkpoints == [
+        Path("b.pt"),
+        Path("c.pt"),
+        Path("d.pt"),
+    ]
+    assert comparison.labels == ["Model B", "Model C", "Model D"]
+
+
 def test_cli_loads_checkpoint_and_rejects_other_data(tmp_path: Path) -> None:
     config = GatedCNNConfig(
         vocab_size=300,

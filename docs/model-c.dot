@@ -1,0 +1,26 @@
+digraph KiwiLM_Model_C {
+    graph [rankdir=TB, bgcolor="#FFFFFF", pad=0.25, nodesep=0.25, ranksep=0.4,
+           splines=ortho, fontname="Helvetica", fontsize=18,
+           label="KiwiLM Model C — Dual Attention", labelloc=t];
+    node [shape=box, style="rounded,filled", color="#64748B", fillcolor="#F8FAFC",
+          fontcolor="#0F172A", fontname="Helvetica", fontsize=11,
+          margin="0.18,0.10", penwidth=1.2];
+    edge [color="#475569", arrowsize=0.7, penwidth=1.3];
+
+    input [label="Input token IDs\n[B, T] • T ≤ 256", fillcolor="#DBEAFE", color="#3B82F6"];
+    embedding [label="Token Embedding\n8,192 × 256", fillcolor="#DCFCE7", color="#22C55E"];
+    pre [label="3 × Causal Gated CNN\nDilations 1, 2, 4", fillcolor="#FEF3C7", color="#F59E0B"];
+    attention1 [label="Attention Block 1\nPre-LN → 8-head causal attention + RoPE → Residual\nPre-LN → 4× GELU FFN → Residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+    post [label="3 × Causal Gated CNN\nDilations 8, 16, 32", fillcolor="#FEF3C7", color="#F59E0B"];
+    attention2 [label="Attention Block 2\nPre-LN → 8-head causal attention + RoPE → Residual\nPre-LN → 4× GELU FFN → Residual", fillcolor="#DDD6FE", color="#7C3AED", penwidth=1.6];
+    norm [label="Final LayerNorm", fillcolor="#E2E8F0"];
+    head [label="Tied LM Head\n256 → 8,192", fillcolor="#F3E8FF", color="#A855F7"];
+    logits [label="Next-token logits\n[B, T, 8,192]", fillcolor="#FFE4E6", color="#F43F5E"];
+    summary [shape=note, style=filled, label="6,050,816 parameters\nTwo global causal routing stages",
+             fillcolor="#F1F5F9", color="#94A3B8"];
+
+    input -> embedding -> pre -> attention1 -> post -> attention2 -> norm -> head -> logits;
+    embedding -> head [style=dashed, color="#9333EA", constraint=false, xlabel="shared weights"];
+    { rank=same; norm; summary; }
+    summary -> norm [style=invis];
+}
