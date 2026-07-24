@@ -131,6 +131,8 @@ def test_model_b_one_step_training_smoke(tmp_path: Path) -> None:
             log_interval=0,
             sample_tokens=0,
             seed=11,
+            batch_mode="story",
+            eval_mode="both",
         ),
         device="cpu",
         log_fn=None,
@@ -138,6 +140,9 @@ def test_model_b_one_step_training_smoke(tmp_path: Path) -> None:
 
     assert summary["step"] == 1
     assert summary["best_checkpoint"] is not None
+    checkpoint = torch.load(summary["best_checkpoint"], weights_only=True)
+    assert checkpoint["metrics"]["story_validation_loss"] >= 0
+    assert checkpoint["metrics"]["packed_validation_loss"] >= 0
 
 
 @pytest.mark.parametrize(

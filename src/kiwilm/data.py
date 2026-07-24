@@ -34,6 +34,7 @@ SPLITS = ("train", "validation")
 Story = str | Mapping[str, Any]
 StoryFactory = Callable[[], Iterable[Story]]
 SplitName = Literal["train", "validation"]
+BatchMode = Literal["packed", "story"]
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
@@ -577,6 +578,8 @@ class PreparedTokenData:
 
         self._generator = torch.Generator(device="cpu")
         self._generator.manual_seed(seed)
+        self._story_offsets: dict[str, np.ndarray] = {}
+        self._story_chunks: dict[tuple[str, int], np.ndarray] = {}
 
     def tokens(self, split: SplitName) -> np.memmap:
         try:
@@ -633,6 +636,126 @@ class PreparedTokenData:
             targets = targets.to(device, non_blocking=True)
         return inputs, targets
 
+    def story_offsets(self, split: SplitName) -> np.ndarray:
+        """Return validated ``[start, end)`` story boundaries for a split."""
+
+        if split in self._story_offsets:
+            return self._story_offsets[split]
+        details = _require_mapping(
+            _require_mapping(self.metadata.get("splits"), "splits").get(split),
+            f"splits.{split}",
+        )
+        split_sha = details.get("sha256")
+        if not isinstance(split_sha, str):
+            raise ValueError(f"prepared {split} checksum is invalid")
+        cache_path = self.data_dir / f"{split}-story-offsets-{split_sha}.npy"
+        offsets: np.ndarray | None = None
+        try:
+            loaded = np.load(cache_path, allow_pickle=False)
+            offsets = np.asarray(loaded, dtype=np.int64)
+            self._validate_story_offsets(split, offsets)
+        except (OSError, ValueError, TypeError):
+            offsets = self._scan_story_offsets(split)
+            temporary = _temporary_path(cache_path)
+            try:
+                with temporary.open("wb") as stream:
+                    np.save(stream, offsets, allow_pickle=False)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, cache_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        self._story_offsets[split] = offsets
+        return offsets
+
+    def story_chunks(self, split: SplitName, context_length: int) -> np.ndarray:
+        """Return ``[input_start, valid_targets]`` chunks for story-safe batching."""
+
+        if isinstance(context_length, bool) or not isinstance(context_length, int):
+            raise TypeError("context_length must be an integer")
+        if context_length < 1:
+            raise ValueError("context_length must be at least 1")
+        cache_key = (split, context_length)
+        if cache_key in self._story_chunks:
+            return self._story_chunks[cache_key]
+        chunks: list[tuple[int, int]] = []
+        for start, end in self.story_offsets(split):
+            target_count = int(end - start - 1)
+            for offset in range(0, target_count, context_length):
+                chunks.append(
+                    (int(start + offset), min(context_length, target_count - offset))
+                )
+        if not chunks:
+            raise ValueError(f"{split} contains no next-token story targets")
+        result = np.asarray(chunks, dtype=np.int64)
+        self._story_chunks[cache_key] = result
+        return result
+
+    def story_batch(
+        self,
+        split: SplitName,
+        chunk_indices: torch.Tensor | list[int],
+        *,
+        context_length: int,
+        device: str | torch.device | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Materialize selected story chunks with masked right padding."""
+
+        chunks = self.story_chunks(split, context_length)
+        indices = (
+            chunk_indices.detach().cpu().tolist()
+            if isinstance(chunk_indices, torch.Tensor)
+            else list(chunk_indices)
+        )
+        pad_id = self.tokenizer.pad_id
+        inputs = np.full((len(indices), context_length), pad_id, dtype=np.int64)
+        targets = np.full((len(indices), context_length), -100, dtype=np.int64)
+        tokens = self.tokens(split)
+        for row, index in enumerate(indices):
+            start, valid = chunks[int(index)]
+            window = np.asarray(tokens[start : start + valid + 1], dtype=np.int64)
+            inputs[row, :valid] = window[:-1]
+            targets[row, :valid] = window[1:]
+        input_tensor = torch.from_numpy(inputs)
+        target_tensor = torch.from_numpy(targets)
+        if device is not None:
+            input_tensor = input_tensor.to(device, non_blocking=True)
+            target_tensor = target_tensor.to(device, non_blocking=True)
+        return input_tensor, target_tensor
+
+    def _scan_story_offsets(self, split: SplitName) -> np.ndarray:
+        tokens = self.tokens(split)
+        bos_id = self.tokenizer.bos_id
+        eos_id = self.tokenizer.eos_id
+        starts = np.flatnonzero(tokens == bos_id)
+        ends = np.flatnonzero(tokens == eos_id) + 1
+        if len(starts) != len(ends):
+            raise ValueError(f"{split} has mismatched BOS/EOS story markers")
+        offsets = np.column_stack((starts, ends)).astype(np.int64, copy=False)
+        self._validate_story_offsets(split, offsets)
+        return offsets
+
+    def _validate_story_offsets(self, split: SplitName, offsets: np.ndarray) -> None:
+        tokens = self.tokens(split)
+        if offsets.ndim != 2 or offsets.shape[1] != 2 or len(offsets) == 0:
+            raise ValueError(f"{split} story offset cache has an invalid shape")
+        starts, ends = offsets[:, 0], offsets[:, 1]
+        if (
+            starts[0] != 0
+            or ends[-1] != len(tokens)
+            or np.any(ends <= starts)
+            or np.any(starts[1:] != ends[:-1])
+            or np.any(tokens[starts] != self.tokenizer.bos_id)
+            or np.any(tokens[ends - 1] != self.tokenizer.eos_id)
+        ):
+            raise ValueError(f"{split} story offset cache is inconsistent")
+        details = _require_mapping(
+            _require_mapping(self.metadata.get("splits"), "splits").get(split),
+            f"splits.{split}",
+        )
+        if details.get("stories") != len(offsets):
+            raise ValueError(f"{split} story offset count is inconsistent")
+
     def get_rng_state(self) -> torch.Tensor:
         return self._generator.get_state().clone()
 
@@ -656,6 +779,102 @@ class PreparedTokenData:
         self.set_rng_state(generator_state)
 
 
+class StoryBatchSampler:
+    """Deterministic epoch-shuffled sampler over non-overlapping story chunks."""
+
+    def __init__(
+        self,
+        data: PreparedTokenData,
+        split: SplitName,
+        *,
+        context_length: int,
+        seed: int,
+        shuffle: bool = True,
+    ) -> None:
+        self.data = data
+        self.split = split
+        self.context_length = context_length
+        self.seed = seed
+        self.shuffle = shuffle
+        self.chunk_count = len(data.story_chunks(split, context_length))
+        self.epoch = 0
+        self.cursor = 0
+        self._order = self._make_order()
+
+    def next_indices(self, count: int) -> torch.Tensor:
+        _positive_batch_size(count)
+        selected: list[torch.Tensor] = []
+        remaining = count
+        while remaining:
+            available = self.chunk_count - self.cursor
+            take = min(remaining, available)
+            selected.append(self._order[self.cursor : self.cursor + take])
+            self.cursor += take
+            remaining -= take
+            if self.cursor == self.chunk_count:
+                self.epoch += 1
+                self.cursor = 0
+                self._order = self._make_order()
+        return torch.cat(selected)
+
+    def get_batch(
+        self,
+        *,
+        batch_size: int,
+        device: str | torch.device | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.data.story_batch(
+            self.split,
+            self.next_indices(batch_size),
+            context_length=self.context_length,
+            device=device,
+        )
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "fingerprint": self.data.fingerprint,
+            "split": self.split,
+            "context_length": self.context_length,
+            "seed": self.seed,
+            "shuffle": self.shuffle,
+            "epoch": self.epoch,
+            "cursor": self.cursor,
+        }
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        expected = {
+            "fingerprint": self.data.fingerprint,
+            "split": self.split,
+            "context_length": self.context_length,
+            "seed": self.seed,
+            "shuffle": self.shuffle,
+        }
+        if any(state.get(name) != value for name, value in expected.items()):
+            raise ValueError("story sampler state is incompatible")
+        epoch = state.get("epoch")
+        cursor = state.get("cursor")
+        if not isinstance(epoch, int) or epoch < 0:
+            raise ValueError("story sampler epoch is invalid")
+        if not isinstance(cursor, int) or not 0 <= cursor < self.chunk_count:
+            raise ValueError("story sampler cursor is invalid")
+        self.epoch = epoch
+        self.cursor = cursor
+        self._order = self._make_order()
+
+    def _make_order(self) -> torch.Tensor:
+        if not self.shuffle:
+            return torch.arange(self.chunk_count)
+        generator = torch.Generator(device="cpu").manual_seed(self.seed + self.epoch)
+        return torch.randperm(self.chunk_count, generator=generator)
+
+
+def _positive_batch_size(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("batch size must be an integer")
+    if value < 1:
+        raise ValueError("batch size must be at least 1")
+
+
 __all__ = [
     "DEFAULT_DATASET_NAME",
     "DEFAULT_DATASET_REVISION",
@@ -663,6 +882,7 @@ __all__ = [
     "DEFAULT_VALIDATION_LIMIT",
     "DEFAULT_VOCAB_SIZE",
     "PreparedTokenData",
+    "StoryBatchSampler",
     "metadata_fingerprint",
     "prepare_from_stories",
     "prepare_tinystories",

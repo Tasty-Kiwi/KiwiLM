@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from kiwilm.config import CNNAttentionConfig, ModelConfig
+from kiwilm.generation import generate_tokens
 from kiwilm.models import CNNAttentionLM, build_model
 
 
@@ -137,3 +138,35 @@ def test_forward_backward_on_available_accelerators() -> None:
         loss = model(input_ids).float().mean()
         loss.backward()
         assert torch.isfinite(loss)
+
+
+def test_incremental_cache_matches_full_forward_and_context_rollover() -> None:
+    torch.manual_seed(21)
+    config = CNNAttentionConfig(
+        vocab_size=47,
+        context_length=8,
+        d_model=16,
+        dropout=0.0,
+        num_heads=2,
+        feedforward_dim=32,
+    )
+    model = CNNAttentionLM(config).eval()
+    prompt = torch.randint(config.vocab_size, (2, 4))
+    logits, cache = model.prefill(prompt)
+    torch.testing.assert_close(logits, model(prompt))
+
+    tokens = prompt
+    for _ in range(7):
+        next_token = torch.randint(config.vocab_size, (2, 1))
+        tokens = torch.cat((tokens, next_token), dim=1)
+        cached_logits, cache = model.decode_step(next_token, cache)
+        expected = model(tokens[:, -config.context_length :])[:, -1:, :]
+        torch.testing.assert_close(cached_logits[:, -1:, :], expected)
+
+    uncached = generate_tokens(
+        model, prompt[:1], max_new_tokens=12, temperature=0, cache="off"
+    )
+    cached = generate_tokens(
+        model, prompt[:1], max_new_tokens=12, temperature=0, cache="auto"
+    )
+    assert torch.equal(cached, uncached)

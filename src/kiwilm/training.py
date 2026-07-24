@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn.functional as F
@@ -23,7 +23,7 @@ from kiwilm.checkpoint import (
     save_checkpoint,
 )
 from kiwilm.config import ModelConfig
-from kiwilm.data import PreparedTokenData
+from kiwilm.data import PreparedTokenData, StoryBatchSampler
 from kiwilm.generation import generate as generate_text
 from kiwilm.models import build_model
 
@@ -38,6 +38,11 @@ class TrainConfig:
     lr: float = 3e-4
     min_lr: float = 3e-5
     warmup_steps: int = 100
+    max_tokens: int | None = None
+    warmup_tokens: int | None = None
+    batch_mode: Literal["packed", "story"] = "packed"
+    eval_mode: Literal["packed", "story", "both"] = "packed"
+    precision: Literal["fp32", "fp16", "bf16", "auto"] = "fp32"
     weight_decay: float = 0.1
     beta2: float = 0.95
     grad_clip: float = 1.0
@@ -55,6 +60,20 @@ class TrainConfig:
         _positive_int("grad_accum_steps", self.grad_accum_steps)
         _positive_int("eval_batches", self.eval_batches)
         _non_negative_int("warmup_steps", self.warmup_steps)
+        if self.max_tokens is not None:
+            _positive_int("max_tokens", self.max_tokens)
+        if self.warmup_tokens is not None:
+            _non_negative_int("warmup_tokens", self.warmup_tokens)
+            if self.max_tokens is None:
+                raise ValueError("warmup_tokens requires max_tokens")
+            if self.warmup_tokens > self.max_tokens:
+                raise ValueError("warmup_tokens cannot exceed max_tokens")
+        if self.batch_mode not in {"packed", "story"}:
+            raise ValueError("batch_mode must be 'packed' or 'story'")
+        if self.eval_mode not in {"packed", "story", "both"}:
+            raise ValueError("eval_mode must be 'packed', 'story', or 'both'")
+        if self.precision not in {"fp32", "fp16", "bf16", "auto"}:
+            raise ValueError("precision must be fp32, fp16, bf16, or auto")
         _non_negative_int("eval_interval", self.eval_interval)
         _non_negative_int("checkpoint_interval", self.checkpoint_interval)
         _non_negative_int("log_interval", self.log_interval)
@@ -134,6 +153,24 @@ def learning_rate_at_step(step: int, config: TrainConfig) -> float:
     return config.min_lr + coefficient * (config.lr - config.min_lr)
 
 
+def learning_rate_at_tokens(tokens: int, config: TrainConfig) -> float:
+    """Return token-driven warmup/cosine learning rate."""
+
+    if tokens < 0:
+        raise ValueError("tokens must be non-negative")
+    if config.max_tokens is None:
+        raise ValueError("max_tokens is required for token-driven scheduling")
+    warmup = min(config.warmup_tokens or 0, config.max_tokens)
+    position = min(tokens, config.max_tokens)
+    if warmup and position <= warmup:
+        return config.lr * position / warmup
+    if config.max_tokens == warmup:
+        return config.lr
+    progress = (position - warmup) / (config.max_tokens - warmup)
+    coefficient = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return config.min_lr + coefficient * (config.lr - config.min_lr)
+
+
 def next_token_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """Calculate mean next-token cross entropy."""
 
@@ -158,8 +195,11 @@ def evaluate(
     device: str | torch.device | None = None,
     generator: torch.Generator | None = None,
     split: str = "validation",
+    batch_mode: Literal["packed", "story"] = "packed",
+    precision: str = "fp32",
+    seed: int = 43,
 ) -> dict[str, float]:
-    """Measure mean loss and perplexity over sampled validation windows."""
+    """Measure target-weighted loss and perplexity."""
 
     _positive_int("batch_size", batch_size)
     _positive_int("context_length", context_length)
@@ -170,22 +210,43 @@ def evaluate(
     model.to(resolved_device)
     was_training = model.training
     model.eval()
-    total_loss = 0.0
+    resolved_precision = _resolve_precision(precision, resolved_device)
+    total_nll = 0.0
+    total_targets = 0
+    sampler = (
+        StoryBatchSampler(
+            data,
+            split,  # type: ignore[arg-type]
+            context_length=context_length,
+            seed=seed,
+        )
+        if batch_mode == "story"
+        else None
+    )
     try:
         for _ in range(num_batches):
-            inputs, targets = _get_batch(
-                data,
-                split,
-                batch_size=batch_size,
-                context_length=context_length,
-                device=resolved_device,
-                generator=generator,
-            )
-            total_loss += float(next_token_loss(model(inputs), targets))
+            if sampler is None:
+                inputs, targets = _get_batch(
+                    data,
+                    split,
+                    batch_size=batch_size,
+                    context_length=context_length,
+                    device=resolved_device,
+                    generator=generator,
+                )
+            else:
+                inputs, targets = sampler.get_batch(
+                    batch_size=batch_size, device=resolved_device
+                )
+            with _autocast_context(resolved_device, resolved_precision):
+                logits = model(inputs)
+                loss_sum, valid_targets = _loss_sum_and_count(logits, targets)
+            total_nll += float(loss_sum)
+            total_targets += valid_targets
     finally:
         model.train(was_training)
 
-    validation_loss = total_loss / num_batches
+    validation_loss = total_nll / total_targets
     try:
         perplexity = math.exp(validation_loss)
     except OverflowError:
@@ -193,6 +254,7 @@ def evaluate(
     return {
         "validation_loss": validation_loss,
         "perplexity": perplexity,
+        "valid_targets": float(total_targets),
     }
 
 
@@ -211,6 +273,7 @@ def train(
 
     settings = train_config or TrainConfig()
     resolved_device = choose_device(device)
+    resolved_precision = _resolve_precision(settings.precision, resolved_device)
     run_directory = Path(output_dir)
     run_directory.mkdir(parents=True, exist_ok=True)
     latest_path = run_directory / "latest.pt"
@@ -238,8 +301,24 @@ def train(
     eval_generator = torch.Generator(device="cpu")
     eval_generator.manual_seed(settings.seed + 1)
     generators = {"train": train_generator, "validation": eval_generator}
+    story_sampler = (
+        StoryBatchSampler(
+            data,
+            "train",
+            context_length=model_config.context_length,
+            seed=settings.seed,
+        )
+        if settings.batch_mode == "story"
+        else None
+    )
+    checkpoint_batcher = story_sampler if story_sampler is not None else data
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=resolved_device.type == "cuda" and resolved_precision == "fp16",
+    )
 
     completed_step = 0
+    tokens_seen = 0
     best_validation_loss = math.inf
     best_validation_perplexity = math.inf
     if resume_from is not None:
@@ -251,10 +330,15 @@ def train(
             expected_model_config=model_config,
             expected_data_fingerprint=data.fingerprint,
             generators=generators,
-            batcher=data,
+            batcher=checkpoint_batcher,
             map_location="cpu",
         )
         completed_step = int(checkpoint["step"])
+        training_state = checkpoint.get("training_state") or {}
+        tokens_seen = int(training_state.get("tokens_seen", 0))
+        scaler_state = training_state.get("scaler_state")
+        if scaler_state:
+            scaler.load_state_dict(scaler_state)
         checkpoint_metrics = checkpoint.get("metrics") or {}
         best_validation_loss = float(
             checkpoint_metrics.get("best_validation_loss", math.inf)
@@ -266,50 +350,92 @@ def train(
 
     metric_mode = "a" if resume_from is not None else "w"
     last_log_time = time.perf_counter()
-    tokens_since_log = 0
+    valid_tokens_since_log = 0
+    model_tokens_since_log = 0
     latest_train_loss: float | None = None
     latest_validation: dict[str, float] | None = None
     generated_sample: str | None = None
     with metrics_path.open(metric_mode, encoding="utf-8") as metric_stream:
-        while completed_step < settings.max_steps:
+        while completed_step < settings.max_steps and (
+            settings.max_tokens is None or tokens_seen < settings.max_tokens
+        ):
             step_index = completed_step
-            current_lr = learning_rate_at_step(step_index, settings)
+            microbatches: list[tuple[torch.Tensor, torch.Tensor]] = []
+            step_valid_targets = 0
+            step_model_tokens = 0
+            for _ in range(settings.grad_accum_steps):
+                if story_sampler is None:
+                    inputs, targets = _get_batch(
+                        data,
+                        "train",
+                        batch_size=settings.batch_size,
+                        context_length=model_config.context_length,
+                        device=resolved_device,
+                        generator=train_generator,
+                    )
+                else:
+                    inputs, targets = story_sampler.get_batch(
+                        batch_size=settings.batch_size,
+                        device=resolved_device,
+                    )
+                if settings.max_tokens is not None:
+                    remaining = settings.max_tokens - tokens_seen - step_valid_targets
+                    targets = _trim_targets(targets, remaining)
+                valid_targets = int(targets.ne(-100).sum().item())
+                if valid_targets == 0:
+                    break
+                step_valid_targets += valid_targets
+                step_model_tokens += targets.numel()
+                microbatches.append((inputs, targets))
+                if (
+                    settings.max_tokens is not None
+                    and tokens_seen + step_valid_targets >= settings.max_tokens
+                ):
+                    break
+            if not microbatches:
+                break
+            current_lr = (
+                learning_rate_at_tokens(tokens_seen + step_valid_targets, settings)
+                if settings.max_tokens is not None
+                else learning_rate_at_step(step_index, settings)
+            )
             for parameter_group in optimizer.param_groups:
                 parameter_group["lr"] = current_lr
 
             optimizer.zero_grad(set_to_none=True)
-            accumulated_loss = 0.0
-            for _ in range(settings.grad_accum_steps):
-                inputs, targets = _get_batch(
-                    data,
-                    "train",
-                    batch_size=settings.batch_size,
-                    context_length=model_config.context_length,
-                    device=resolved_device,
-                    generator=train_generator,
-                )
-                loss = next_token_loss(network(inputs), targets)
-                if not bool(torch.isfinite(loss)):
+            accumulated_nll = 0.0
+            for inputs, targets in microbatches:
+                with _autocast_context(resolved_device, resolved_precision):
+                    loss_sum, _ = _loss_sum_and_count(network(inputs), targets)
+                    normalized_loss = loss_sum / step_valid_targets
+                if not bool(torch.isfinite(normalized_loss)):
                     raise FloatingPointError(
                         f"non-finite training loss at step {completed_step + 1}"
                     )
-                (loss / settings.grad_accum_steps).backward()
-                accumulated_loss += (
-                    loss.detach().item() / settings.grad_accum_steps
-                )
-                tokens_since_log += targets.numel()
+                scaler.scale(normalized_loss).backward()
+                accumulated_nll += float(loss_sum.detach())
 
             if settings.grad_clip:
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(
                     network.parameters(), settings.grad_clip
                 )
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             completed_step += 1
-            latest_train_loss = accumulated_loss
+            tokens_seen += step_valid_targets
+            valid_tokens_since_log += step_valid_targets
+            model_tokens_since_log += step_model_tokens
+            latest_train_loss = accumulated_nll / step_valid_targets
+            reached_target = (
+                settings.max_tokens is not None
+                and tokens_seen >= settings.max_tokens
+            )
+            final_step = reached_target or completed_step == settings.max_steps
 
             should_log = (
                 completed_step == 1
-                or completed_step == settings.max_steps
+                or final_step
                 or (
                     settings.log_interval > 0
                     and completed_step % settings.log_interval == 0
@@ -318,26 +444,34 @@ def train(
             if should_log:
                 now = time.perf_counter()
                 elapsed = max(now - last_log_time, 1e-12)
-                tokens_per_second = tokens_since_log / elapsed
+                valid_tokens_per_second = valid_tokens_since_log / elapsed
+                model_tokens_per_second = model_tokens_since_log / elapsed
                 train_metrics = {
                     "event": "train",
                     "step": completed_step,
                     "train_loss": latest_train_loss,
                     "learning_rate": current_lr,
-                    "tokens_per_second": tokens_per_second,
+                    "tokens_seen": tokens_seen,
+                    "valid_tokens_per_second": valid_tokens_per_second,
+                    "model_tokens_per_second": model_tokens_per_second,
+                    "padding_fraction": (
+                        1.0 - valid_tokens_since_log / model_tokens_since_log
+                    ),
                 }
                 _write_metric(metric_stream, train_metrics)
                 if log_fn is not None:
                     log_fn(
                         f"step {completed_step}/{settings.max_steps} "
                         f"loss={latest_train_loss:.4f} "
-                        f"lr={current_lr:.3g} tok/s={tokens_per_second:,.0f}"
+                        f"lr={current_lr:.3g} "
+                        f"valid tok/s={valid_tokens_per_second:,.0f}"
                     )
                 last_log_time = now
-                tokens_since_log = 0
+                valid_tokens_since_log = 0
+                model_tokens_since_log = 0
 
             should_evaluate = (
-                completed_step == settings.max_steps
+                final_step
                 or (
                     settings.eval_interval > 0
                     and completed_step % settings.eval_interval == 0
@@ -345,14 +479,8 @@ def train(
             )
             if should_evaluate:
                 evaluation_started = time.perf_counter()
-                latest_validation = evaluate(
-                    network,
-                    data,
-                    batch_size=settings.batch_size,
-                    context_length=model_config.context_length,
-                    num_batches=settings.eval_batches,
-                    device=resolved_device,
-                    generator=eval_generator,
+                latest_validation = _evaluate_modes(
+                    network, data, settings, model_config, resolved_device, eval_generator
                 )
                 evaluation_metrics = {
                     "event": "validation",
@@ -382,17 +510,18 @@ def train(
                         train_config=settings,
                         data_fingerprint=data.fingerprint,
                         generators=generators,
-                        batcher=data,
+                        batcher=checkpoint_batcher,
                         metrics=_checkpoint_metrics(
                             latest_train_loss,
                             latest_validation,
                             best_validation_loss,
                             best_validation_perplexity,
                         ),
+                        training_state=_training_state(tokens_seen, scaler),
                     )
 
             should_checkpoint = (
-                completed_step == settings.max_steps
+                final_step
                 or (
                     settings.checkpoint_interval > 0
                     and completed_step % settings.checkpoint_interval == 0
@@ -408,16 +537,17 @@ def train(
                     train_config=settings,
                     data_fingerprint=data.fingerprint,
                     generators=generators,
-                    batcher=data,
+                    batcher=checkpoint_batcher,
                     metrics=_checkpoint_metrics(
                         latest_train_loss,
                         latest_validation,
                         best_validation_loss,
                         best_validation_perplexity,
                     ),
+                    training_state=_training_state(tokens_seen, scaler),
                 )
 
-        if not latest_path.exists() or completed_step != settings.max_steps:
+        if not latest_path.exists():
             save_checkpoint(
                 latest_path,
                 model=network,
@@ -427,13 +557,14 @@ def train(
                 train_config=settings,
                 data_fingerprint=data.fingerprint,
                 generators=generators,
-                batcher=data,
+                batcher=checkpoint_batcher,
                 metrics=_checkpoint_metrics(
                     latest_train_loss,
                     latest_validation,
                     best_validation_loss,
                     best_validation_perplexity,
                 ),
+                training_state=_training_state(tokens_seen, scaler),
             )
 
         tokenizer = getattr(data, "tokenizer", None)
@@ -460,6 +591,16 @@ def train(
             if log_fn is not None:
                 log_fn(f"sample: {generated_sample}")
 
+    stop_reason = (
+        "max_tokens"
+        if settings.max_tokens is not None and tokens_seen >= settings.max_tokens
+        else "max_steps"
+    )
+    if settings.max_tokens is not None and stop_reason == "max_steps":
+        raise RuntimeError(
+            f"max_steps={settings.max_steps} reached after {tokens_seen} valid "
+            f"targets, before max_tokens={settings.max_tokens}; latest checkpoint saved"
+        )
     resolved_latest_path = str(latest_path.resolve())
     resolved_best_path = str(best_path.resolve()) if best_path.exists() else None
     return {
@@ -481,6 +622,13 @@ def train(
         "metrics_path": str(metrics_path.resolve()),
         "device": str(resolved_device),
         "parameter_count": parameter_count,
+        "tokens_seen": tokens_seen,
+        "tokens_per_parameter": tokens_seen / parameter_count,
+        "precision": resolved_precision,
+        "batch_mode": settings.batch_mode,
+        "eval_mode": settings.eval_mode,
+        "stop_reason": stop_reason,
+        "validation_metrics": latest_validation,
         "sample": generated_sample,
     }
 
@@ -497,6 +645,12 @@ def _validate_resume_settings(
         raise CheckpointCompatibilityError(
             "resume checkpoint does not contain a training configuration"
         )
+    try:
+        saved_config = TrainConfig(**dict(saved)).to_dict()
+    except (TypeError, ValueError) as error:
+        raise CheckpointCompatibilityError(
+            "resume checkpoint has an invalid training configuration"
+        ) from error
     current = settings.to_dict()
     allowed_changes = {
         "eval_interval",
@@ -508,7 +662,7 @@ def _validate_resume_settings(
     incompatible = sorted(
         name
         for name, value in current.items()
-        if name not in allowed_changes and saved.get(name) != value
+        if name not in allowed_changes and saved_config.get(name) != value
     )
     if incompatible:
         raise CheckpointCompatibilityError(
@@ -530,7 +684,7 @@ def _checkpoint_metrics(
     best_loss: float,
     best_perplexity: float,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "train_loss": train_loss,
         "validation_loss": (
             validation.get("validation_loss") if validation is not None else None
@@ -541,6 +695,113 @@ def _checkpoint_metrics(
         "best_validation_loss": best_loss,
         "best_validation_perplexity": best_perplexity,
     }
+    if validation is not None:
+        result.update(
+            {
+                name: value
+                for name, value in validation.items()
+                if name not in {"validation_loss", "perplexity"}
+            }
+        )
+    return result
+
+
+def _loss_sum_and_count(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> tuple[torch.Tensor, int]:
+    if logits.ndim != 3:
+        raise ValueError("logits must have shape [batch, sequence, vocabulary]")
+    if targets.shape != logits.shape[:2]:
+        raise ValueError("targets must match the logits batch and sequence dimensions")
+    valid_targets = int(targets.ne(-100).sum().item())
+    if valid_targets == 0:
+        raise ValueError("batch contains no valid next-token targets")
+    loss_sum = F.cross_entropy(
+        logits.reshape(-1, logits.shape[-1]),
+        targets.reshape(-1),
+        reduction="sum",
+    )
+    return loss_sum, valid_targets
+
+
+def _trim_targets(targets: torch.Tensor, remaining: int) -> torch.Tensor:
+    if remaining < 0:
+        remaining = 0
+    valid = targets.ne(-100).flatten().nonzero(as_tuple=False).flatten()
+    if len(valid) <= remaining:
+        return targets
+    trimmed = targets.clone()
+    trimmed.flatten()[valid[remaining:]] = -100
+    return trimmed
+
+
+def _resolve_precision(precision: str, device: torch.device) -> str:
+    if precision == "auto":
+        return "fp16" if device.type == "cuda" else "fp32"
+    if precision not in {"fp32", "fp16", "bf16"}:
+        raise ValueError("precision must be fp32, fp16, bf16, or auto")
+    if precision != "fp32" and device.type != "cuda":
+        raise ValueError(f"{precision} precision is supported only on CUDA")
+    if precision == "bf16" and not torch.cuda.is_bf16_supported():
+        raise ValueError("bf16 precision is not supported by this CUDA device")
+    return precision
+
+
+def _autocast_context(device: torch.device, precision: str) -> Any:
+    dtype = torch.float16 if precision == "fp16" else torch.bfloat16
+    return torch.autocast(
+        device_type=device.type,
+        dtype=dtype,
+        enabled=precision != "fp32",
+    )
+
+
+def _training_state(
+    tokens_seen: int, scaler: torch.amp.GradScaler
+) -> dict[str, Any]:
+    return {
+        "tokens_seen": tokens_seen,
+        "scaler_state": scaler.state_dict(),
+    }
+
+
+def _evaluate_modes(
+    model: nn.Module,
+    data: PreparedTokenData,
+    settings: TrainConfig,
+    model_config: ModelConfig,
+    device: torch.device,
+    generator: torch.Generator,
+) -> dict[str, float]:
+    modes = (
+        ("packed", "story")
+        if settings.eval_mode == "both"
+        else (settings.eval_mode,)
+    )
+    measured: dict[str, dict[str, float]] = {}
+    for mode in modes:
+        measured[mode] = evaluate(
+            model,
+            data,
+            batch_size=settings.batch_size,
+            context_length=model_config.context_length,
+            num_batches=settings.eval_batches,
+            device=device,
+            generator=generator,
+            batch_mode=mode,
+            precision=settings.precision,
+            seed=settings.seed + 1,
+        )
+    primary = "story" if settings.eval_mode == "both" else settings.eval_mode
+    result = {
+        "validation_loss": measured[primary]["validation_loss"],
+        "perplexity": measured[primary]["perplexity"],
+    }
+    for mode, values in measured.items():
+        result[f"{mode}_validation_loss"] = values["validation_loss"]
+        result[f"{mode}_validation_perplexity"] = values["perplexity"]
+        result[f"{mode}_validation_targets"] = values["valid_targets"]
+    return result
 
 
 def _truncate_metrics_after(metrics_path: Path, completed_step: int) -> None:

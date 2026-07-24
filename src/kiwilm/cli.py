@@ -96,6 +96,19 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--learning-rate", type=float, default=3e-4)
     train_parser.add_argument("--min-learning-rate", type=float, default=3e-5)
     train_parser.add_argument("--warmup-steps", type=int, default=100)
+    train_parser.add_argument("--max-tokens", type=int)
+    train_parser.add_argument("--warmup-tokens", type=int)
+    train_parser.add_argument(
+        "--batch-mode", choices=("packed", "story"), default="packed"
+    )
+    train_parser.add_argument(
+        "--eval-mode", choices=("packed", "story", "both"), default="packed"
+    )
+    train_parser.add_argument(
+        "--precision",
+        choices=("fp32", "fp16", "bf16", "auto"),
+        default="fp32",
+    )
     train_parser.add_argument("--weight-decay", type=float, default=0.1)
     train_parser.add_argument("--beta2", type=float, default=0.95)
     train_parser.add_argument("--grad-clip", type=float, default=1.0)
@@ -123,6 +136,14 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--batch-size", type=int, default=32)
     evaluate_parser.add_argument("--batches", type=int, default=20)
     evaluate_parser.add_argument("--seed", type=int, default=42)
+    evaluate_parser.add_argument(
+        "--batch-mode", choices=("packed", "story"), default="packed"
+    )
+    evaluate_parser.add_argument(
+        "--precision",
+        choices=("fp32", "fp16", "bf16", "auto"),
+        default="fp32",
+    )
     evaluate_parser.set_defaults(handler=_evaluate_command)
 
     generate_parser = subparsers.add_parser(
@@ -142,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="sampling shortlist size; 0 disables top-k filtering",
     )
     generate_parser.add_argument("--seed", type=int, default=42)
+    generate_parser.add_argument(
+        "--cache",
+        choices=("auto", "off"),
+        default="auto",
+        help="use Model B incremental caches when available",
+    )
     generate_parser.add_argument(
         "--stream",
         action="store_true",
@@ -264,6 +291,11 @@ def _train_command(args: argparse.Namespace) -> int:
         lr=args.learning_rate,
         min_lr=args.min_learning_rate,
         warmup_steps=args.warmup_steps,
+        max_tokens=args.max_tokens,
+        warmup_tokens=args.warmup_tokens,
+        batch_mode=args.batch_mode,
+        eval_mode=args.eval_mode,
+        precision=args.precision,
         weight_decay=args.weight_decay,
         beta2=args.beta2,
         grad_clip=args.grad_clip,
@@ -304,6 +336,9 @@ def _evaluate_command(args: argparse.Namespace) -> int:
         num_batches=args.batches,
         device=device,
         generator=generator,
+        batch_mode=args.batch_mode,
+        precision=args.precision,
+        seed=args.seed,
     )
     _print_json(
         {
@@ -331,6 +366,7 @@ def _generate_command(args: argparse.Namespace) -> int:
         "top_k": None if args.top_k == 0 else args.top_k,
         "seed": args.seed,
         "device": device,
+        "cache": args.cache,
     }
     if args.stream:
         for chunk in generate_stream(

@@ -7,7 +7,12 @@ import pytest
 import torch
 
 import kiwilm.data as data_module
-from kiwilm.data import PreparedTokenData, prepare_from_stories, prepare_tinystories
+from kiwilm.data import (
+    PreparedTokenData,
+    StoryBatchSampler,
+    prepare_from_stories,
+    prepare_tinystories,
+)
 from kiwilm.tokenizer import ByteBPETokenizer
 
 TEST_VOCAB_SIZE = 300
@@ -124,6 +129,62 @@ def test_batches_and_rng_resume_are_deterministic(tmp_path: Path) -> None:
     assert torch.equal(expected[0], resumed[0])
     assert torch.equal(expected[1], resumed[1])
     assert torch.equal(expected[0][:, 1:], expected[1][:, :-1])
+
+
+def test_story_batches_cover_targets_once_without_crossing_boundaries(
+    tmp_path: Path,
+) -> None:
+    stories = ["a", "a somewhat longer story", ""]
+    prepare_from_stories(
+        tmp_path,
+        stories,
+        ["validation"],
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+    )
+    data = PreparedTokenData(tmp_path)
+    chunks = data.story_chunks("train", context_length=3)
+    sampler = StoryBatchSampler(
+        data, "train", context_length=3, seed=17, shuffle=False
+    )
+    inputs, targets = sampler.get_batch(batch_size=len(chunks))
+
+    expected_targets = sum(
+        len(data.tokenizer.encode(story, add_bos=True, add_eos=True)) - 1
+        for story in stories
+    )
+    assert targets.ne(-100).sum().item() == expected_targets
+    assert inputs.shape == targets.shape == (len(chunks), 3)
+    for row in range(len(chunks)):
+        valid = targets[row].ne(-100)
+        valid_count = int(valid.sum())
+        assert torch.equal(
+            inputs[row, 1:valid_count],
+            targets[row, : valid_count - 1],
+        )
+        assert torch.all(inputs[row, ~valid] == data.tokenizer.pad_id)
+
+
+def test_story_sampler_resume_and_corrupt_offset_cache_rebuild(
+    tmp_path: Path,
+) -> None:
+    metadata = _prepare_test_data(tmp_path)
+    data = PreparedTokenData(tmp_path)
+    sampler = StoryBatchSampler(data, "train", context_length=3, seed=9)
+    sampler.next_indices(1)
+    state = sampler.state_dict()
+    expected = sampler.next_indices(4)
+
+    resumed = StoryBatchSampler(data, "train", context_length=3, seed=9)
+    resumed.load_state_dict(state)
+    assert torch.equal(resumed.next_indices(4), expected)
+
+    split_sha = metadata["splits"]["train"]["sha256"]
+    cache_path = tmp_path / f"train-story-offsets-{split_sha}.npy"
+    cache_path.write_bytes(b"broken")
+    reloaded = PreparedTokenData(tmp_path)
+    offsets = reloaded.story_offsets("train")
+    assert len(offsets) == metadata["splits"]["train"]["stories"]
 
 
 def test_metadata_fingerprint_and_binary_corruption_are_rejected(

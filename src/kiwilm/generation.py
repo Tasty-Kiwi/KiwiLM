@@ -21,6 +21,7 @@ def generate_tokens(
     eos_id: int | None = None,
     seed: int | None = None,
     generator: torch.Generator | None = None,
+    cache: str = "auto",
 ) -> torch.Tensor:
     """Append tokens autoregressively and return the full token sequence.
 
@@ -39,6 +40,7 @@ def generate_tokens(
         eos_id=eos_id,
         seed=seed,
         generator=generator,
+        cache=cache,
     ):
         generated = torch.cat((generated, next_token), dim=1)
     return generated
@@ -55,6 +57,7 @@ def generate_token_stream(
     eos_id: int | None = None,
     seed: int | None = None,
     generator: torch.Generator | None = None,
+    cache: str = "auto",
 ) -> Iterator[torch.Tensor]:
     """Yield each sampled token while maintaining the autoregressive context."""
 
@@ -69,6 +72,13 @@ def generate_token_stream(
         temperature=temperature,
         top_k=top_k,
     )
+    if cache not in {"auto", "off"}:
+        raise ValueError("cache must be 'auto' or 'off'")
+    use_cache = (
+        cache == "auto"
+        and callable(getattr(model, "prefill", None))
+        and callable(getattr(model, "decode_step", None))
+    )
     finished = torch.zeros(
         generated.shape[0], dtype=torch.bool, device=generated.device
     )
@@ -76,10 +86,20 @@ def generate_token_stream(
     model.eval()
     with torch.inference_mode():
         try:
+            cached_state: Any = None
+            cached_logits: torch.Tensor | None = None
+            if use_cache:
+                cached_logits, cached_state = model.prefill(
+                    generated[:, -resolved_context_length:]
+                )
             for _ in range(max_new_tokens):
                 model_input = generated[:, -resolved_context_length:]
-                logits = model(model_input)
-                if logits.ndim != 3 or logits.shape[:2] != model_input.shape:
+                logits = cached_logits if use_cache else model(model_input)
+                assert logits is not None
+                valid_shapes = {tuple(model_input.shape)}
+                if use_cache:
+                    valid_shapes.add((model_input.shape[0], 1))
+                if logits.ndim != 3 or tuple(logits.shape[:2]) not in valid_shapes:
                     raise ValueError(
                         "model must return logits shaped "
                         "[batch, sequence, vocabulary]"
@@ -108,6 +128,10 @@ def generate_token_stream(
                     finished |= next_token.squeeze(1).eq(eos_id)
                     if bool(finished.all()):
                         break
+                if use_cache:
+                    cached_logits, cached_state = model.decode_step(
+                        next_token, cached_state
+                    )
         finally:
             model.train(was_training)
 
@@ -124,6 +148,7 @@ def generate(
     seed: int | None = 42,
     device: str | torch.device | None = None,
     include_prompt: bool = True,
+    cache: str = "auto",
 ) -> str:
     """Encode a prompt, generate from any KiwiLM architecture, and decode it."""
 
@@ -145,6 +170,7 @@ def generate(
         top_k=top_k,
         eos_id=getattr(tokenizer, "eos_id", None),
         seed=seed,
+        cache=cache,
     )[0]
     decoded_ids = output_ids if include_prompt else output_ids[len(prompt_ids) :]
     return tokenizer.decode(decoded_ids.tolist(), skip_special_tokens=True)
@@ -162,6 +188,7 @@ def generate_stream(
     seed: int | None = 42,
     device: str | torch.device | None = None,
     include_prompt: bool = True,
+    cache: str = "auto",
 ) -> Iterator[str]:
     """Yield decoded text chunks as tokens become available."""
 
@@ -185,6 +212,7 @@ def generate_stream(
         top_k=top_k,
         eos_id=getattr(tokenizer, "eos_id", None),
         seed=seed,
+        cache=cache,
     )
 
     def output_ids() -> Iterator[int]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -22,13 +24,14 @@ from kiwilm.models.mamba import MambaBlock
 from kiwilm.models.registry import register_model
 
 
-def apply_rotary_embedding(values: Tensor) -> Tensor:
+def apply_rotary_embedding(values: Tensor, *, position_offset: int = 0) -> Tensor:
     """Apply rotary position embeddings to ``[batch, heads, time, width]``."""
 
     sequence_length = values.shape[-2]
     head_dim = values.shape[-1]
     positions = torch.arange(
-        sequence_length,
+        position_offset,
+        position_offset + sequence_length,
         device=values.device,
         dtype=torch.float32,
     )
@@ -97,6 +100,67 @@ class CausalSelfAttention(nn.Module):
         )
         return self.output_dropout(self.output_projection(merged))
 
+    def prefill(self, values: Tensor) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        """Attend over a prompt and return its rotated key/value cache."""
+
+        batch_size, sequence_length, d_model = values.shape
+        query, key, value = self.qkv_projection(values).chunk(3, dim=-1)
+        query = apply_rotary_embedding(
+            self._split_heads(query, batch_size, sequence_length)
+        )
+        key = apply_rotary_embedding(
+            self._split_heads(key, batch_size, sequence_length)
+        )
+        value = self._split_heads(value, batch_size, sequence_length)
+        attended = F.scaled_dot_product_attention(
+            query, key, value, dropout_p=0.0, is_causal=True
+        )
+        return self._merge_heads(attended, d_model), (key, value)
+
+    def decode_step(
+        self,
+        values: Tensor,
+        cache: tuple[Tensor, Tensor],
+        *,
+        position: int,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        """Attend one query over cached past keys and values."""
+
+        batch_size, sequence_length, d_model = values.shape
+        if sequence_length != 1:
+            raise ValueError("incremental attention input must contain one position")
+        query, key, value = self.qkv_projection(values).chunk(3, dim=-1)
+        query = apply_rotary_embedding(
+            self._split_heads(query, batch_size, 1), position_offset=position
+        )
+        key = apply_rotary_embedding(
+            self._split_heads(key, batch_size, 1), position_offset=position
+        )
+        value = self._split_heads(value, batch_size, 1)
+        cached_key, cached_value = cache
+        key = torch.cat((cached_key, key), dim=2)
+        value = torch.cat((cached_value, value), dim=2)
+        attended = F.scaled_dot_product_attention(
+            query, key, value, dropout_p=0.0, is_causal=False
+        )
+        return self._merge_heads(attended, d_model), (key, value)
+
+    def _split_heads(
+        self, values: Tensor, batch_size: int, sequence_length: int
+    ) -> Tensor:
+        return values.view(
+            batch_size, sequence_length, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+
+    def _merge_heads(self, values: Tensor, d_model: int) -> Tensor:
+        batch_size, _, sequence_length, _ = values.shape
+        merged = (
+            values.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, sequence_length, d_model)
+        )
+        return self.output_dropout(self.output_projection(merged))
+
 
 class TransformerAttentionBlock(nn.Module):
     """Pre-normalized causal attention followed by a GELU feed-forward layer."""
@@ -129,6 +193,34 @@ class TransformerAttentionBlock(nn.Module):
         values = values + self.attention(self.attention_norm(values))
         return values + self.feedforward(self.feedforward_norm(values))
 
+    def prefill(self, values: Tensor) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        attended, cache = self.attention.prefill(self.attention_norm(values))
+        values = values + attended
+        return values + self.feedforward(self.feedforward_norm(values)), cache
+
+    def decode_step(
+        self,
+        values: Tensor,
+        cache: tuple[Tensor, Tensor],
+        *,
+        position: int,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        attended, cache = self.attention.decode_step(
+            self.attention_norm(values), cache, position=position
+        )
+        values = values + attended
+        return values + self.feedforward(self.feedforward_norm(values)), cache
+
+
+@dataclass(slots=True)
+class CNNAttentionCache:
+    """Incremental state for Model B generation."""
+
+    token_ids: Tensor
+    pre_cnn: list[Tensor]
+    attention: tuple[Tensor, Tensor]
+    post_cnn: list[Tensor]
+
 
 class CNNAttentionLM(CausalLanguageModel):
     """Embedding, 3 gated CNNs, attention, 3 gated CNNs, and an LM head."""
@@ -154,6 +246,68 @@ class CNNAttentionLM(CausalLanguageModel):
 
         values = _forward_backbone(self, input_ids)
         return self.lm_head(self.final_norm(values))
+
+    def prefill(self, input_ids: Tensor) -> tuple[Tensor, CNNAttentionCache]:
+        """Populate incremental caches from an input window."""
+
+        input_ids = input_ids[:, -self.config.context_length :]
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.token_embedding(input_ids)
+        pre_cache: list[Tensor] = []
+        for block in self.pre_attention_blocks:
+            values, history = block.prefill(values)
+            pre_cache.append(history)
+        values, attention_cache = self.attention_block.prefill(values)
+        post_cache: list[Tensor] = []
+        for block in self.post_attention_blocks:
+            values, history = block.prefill(values)
+            post_cache.append(history)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNAttentionCache(
+            token_ids=input_ids,
+            pre_cnn=pre_cache,
+            attention=attention_cache,
+            post_cnn=post_cache,
+        )
+
+    def decode_step(
+        self, input_ids: Tensor, cache: CNNAttentionCache
+    ) -> tuple[Tensor, CNNAttentionCache]:
+        """Decode one new token, rebuilding at the context-window boundary."""
+
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(1)
+        if input_ids.ndim != 2 or input_ids.shape[1] != 1:
+            raise ValueError("decode_step input must have shape [batch, 1]")
+        if cache.token_ids.shape[0] != input_ids.shape[0]:
+            raise ValueError("decode_step batch size differs from the cache")
+        token_ids = torch.cat((cache.token_ids, input_ids), dim=1)
+        if token_ids.shape[1] > self.config.context_length:
+            return self.prefill(token_ids[:, -self.config.context_length :])
+
+        values = self.token_embedding(input_ids)
+        pre_cache: list[Tensor] = []
+        for block, history in zip(
+            self.pre_attention_blocks, cache.pre_cnn, strict=True
+        ):
+            values, history = block.decode_step(values, history)
+            pre_cache.append(history)
+        values, attention_cache = self.attention_block.decode_step(
+            values, cache.attention, position=cache.token_ids.shape[1]
+        )
+        post_cache: list[Tensor] = []
+        for block, history in zip(
+            self.post_attention_blocks, cache.post_cnn, strict=True
+        ):
+            values, history = block.decode_step(values, history)
+            post_cache.append(history)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNAttentionCache(
+            token_ids=token_ids,
+            pre_cnn=pre_cache,
+            attention=attention_cache,
+            post_cnn=post_cache,
+        )
 
 
 class CNNDualAttentionLM(CausalLanguageModel):

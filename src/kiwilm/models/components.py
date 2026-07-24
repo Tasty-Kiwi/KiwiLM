@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
@@ -59,6 +60,41 @@ class GatedCNNBlock(nn.Module):
         convolved = self.conv(self.norm(values).transpose(1, 2))
         gated = F.glu(convolved, dim=1).transpose(1, 2)
         return residual + self.dropout(gated)
+
+    def prefill(self, values: Tensor) -> tuple[Tensor, Tensor]:
+        """Run a sequence and retain normalized history for incremental decoding."""
+
+        normalized = self.norm(values)
+        convolved = self.conv(normalized.transpose(1, 2))
+        gated = F.glu(convolved, dim=1).transpose(1, 2)
+        output = values + self.dropout(gated)
+        history_length = self.conv.left_padding
+        if history_length:
+            history = normalized[:, -history_length:, :]
+            if history.shape[1] < history_length:
+                history = F.pad(
+                    history.transpose(1, 2),
+                    (history_length - history.shape[1], 0),
+                ).transpose(1, 2)
+        else:
+            history = normalized[:, :0]
+        return output, history
+
+    def decode_step(self, values: Tensor, history: Tensor) -> tuple[Tensor, Tensor]:
+        """Process one position using a cache produced by :meth:`prefill`."""
+
+        if values.ndim != 3 or values.shape[1] != 1:
+            raise ValueError("incremental CNN input must have shape [batch, 1, width]")
+        normalized = self.norm(values)
+        required = self.conv.left_padding
+        if history.shape != (values.shape[0], required, values.shape[2]):
+            raise ValueError("incremental CNN history has an incompatible shape")
+        window = torch.cat((history, normalized), dim=1)
+        convolved = self.conv.conv(window.transpose(1, 2))
+        gated = F.glu(convolved, dim=1).transpose(1, 2)
+        output = values + self.dropout(gated)
+        next_history = window[:, -required:, :] if required else window[:, :0]
+        return output, next_history
 
 
 def initialize_weights(module: nn.Module) -> None:

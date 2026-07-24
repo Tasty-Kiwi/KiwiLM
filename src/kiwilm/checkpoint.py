@@ -92,6 +92,7 @@ def save_checkpoint(
     generators: Mapping[str, torch.Generator] | None = None,
     batcher: Any | None = None,
     metrics: Mapping[str, Any] | None = None,
+    training_state: Mapping[str, Any] | None = None,
 ) -> Path:
     """Atomically save all state needed to resume at an optimizer boundary."""
 
@@ -125,6 +126,7 @@ def save_checkpoint(
         "rng_state": capture_rng_state(),
         "batcher_state": batcher_state,
         "metrics": _normalise(dict(metrics or {})),
+        "training_state": _normalise(dict(training_state or {})),
     }
 
     destination = Path(path)

@@ -134,6 +134,63 @@ The default attention block uses eight heads, RoPE, and a 1,024-channel
 feed-forward layer. These can be changed with `--attention-heads` and
 `--attention-feedforward-dim`.
 
+### Train Model B2 on 500k stories
+
+B2 keeps Model B's weights and architecture but uses story-safe batches, CUDA
+FP16 AMP, a token-counted learning-rate schedule, and both story-safe and packed
+validation. The 105,221,120-target budget is exactly 20 targets per parameter:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_attention \
+  --data-dir data/tinystories-500k \
+  --output-dir runs/model-b2 \
+  --device cuda \
+  --batch-mode story \
+  --precision fp16 \
+  --max-tokens 105221120 \
+  --warmup-tokens 5261056 \
+  --max-steps 12000 \
+  --batch-size 64 \
+  --eval-mode both \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+Story mode derives content-addressed boundary indexes alongside the existing
+packed files. It never changes the prepared-data fingerprint, so previous
+checkpoints remain compatible. Each story target is used once per shuffled
+epoch; final chunks are padded and excluded from loss and throughput counts.
+When both validation modes are enabled, the fixed story-safe sample selects the
+best checkpoint and packed validation is reported as a secondary metric.
+
+To verify the workflow on a Colab T4 without starting the full run, first
+authenticate the Colab CLI, then execute:
+
+```bash
+scripts/run_colab_b2_smoke.sh
+```
+
+The script builds and uploads the current wheel, provisions the named
+`kiwilm-b2-smoke` session, runs a one-million-target FP16 smoke train, downloads
+the summary and session log to `runs/colab-b2-smoke`, and stops the VM even if a
+step fails.
+
+Run the complete 500k-story B2 train with:
+
+```bash
+scripts/run_colab_b2_full.sh
+```
+
+The full runner uploads the exact local prepared artifacts, trains for
+105,221,120 valid targets, and downloads `best.pt`, `latest.pt`,
+`metrics.jsonl`, `summary.json`, and the Colab session log to
+`runs/model-b2-colab`. It uses a named T4 session and always stops it during
+cleanup.
+
 ## Train Models C and D
 
 Model C adds a second attention block after the final CNN stack:
@@ -254,9 +311,20 @@ Streaming uses incremental byte-level decoding, so Unicode characters split
 across multiple tokens are emitted only after their complete byte sequence is
 available.
 
-Generation is intentionally simple and recomputes the active context at every
-step. Architecture-specific inference caches can be introduced with later
-variants without changing the sampling contract.
+Generation defaults to `--cache auto`. Model B uses incremental attention K/V
+and dilation-aware CNN caches, rebuilding them only when the 256-token context
+window rolls over. Other architectures automatically retain the original
+full-context path. Pass `--cache off` for legacy behavior or historical
+comparison reproduction:
+
+```bash
+uv run kiwilm generate \
+  --data-dir data/tinystories-500k \
+  --checkpoint runs/model-b2/best.pt \
+  --prompt "Once upon a time" \
+  --stream \
+  --cache auto
+```
 
 ## Compare models
 
@@ -291,6 +359,20 @@ uv run kiwilm compare \
 ```
 
 The original `--checkpoint-a` and `--checkpoint-b` form remains supported.
+
+Generate the focused/creative examples report for a single checkpoint:
+
+```bash
+uv run python scripts/generate_example_report.py \
+  --data-dir data/tinystories-550k \
+  --checkpoint runs/model-c-chinchilla/best.pt \
+  --output examples/model-c-chinchilla.md \
+  --title "Model C Chinchilla Ratio (trained on 550k stories, ~20:1 ratio) Examples"
+```
+
+The script reads the same checked-in prompt suite as `kiwilm compare`, validates
+the checkpoint against the prepared-data fingerprint, and reproduces every
+prompt/profile pair with its recorded temperature, top-k value, and seed.
 
 ## Development
 

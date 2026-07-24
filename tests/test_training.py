@@ -29,6 +29,7 @@ from kiwilm.training import (
     choose_device,
     evaluate,
     learning_rate_at_step,
+    learning_rate_at_tokens,
     train,
 )
 
@@ -110,6 +111,76 @@ def test_train_defaults_device_and_schedule() -> None:
     short = TrainConfig(max_steps=10)
     assert learning_rate_at_step(0, short) == pytest.approx(short.lr / 10)
     assert learning_rate_at_step(9, short) == pytest.approx(short.lr)
+    token_settings = TrainConfig(
+        max_tokens=100, warmup_tokens=10, lr=1.0, min_lr=0.1
+    )
+    assert learning_rate_at_tokens(5, token_settings) == pytest.approx(0.5)
+    assert learning_rate_at_tokens(10, token_settings) == pytest.approx(1.0)
+    assert learning_rate_at_tokens(100, token_settings) == pytest.approx(0.1)
+
+
+def test_token_budget_trims_final_batch_exactly(tmp_path: Path) -> None:
+    config = tiny_config()
+    result = train(
+        config,
+        TinyData(config.vocab_size),
+        tmp_path,
+        TrainConfig(
+            max_steps=10,
+            max_tokens=13,
+            warmup_tokens=4,
+            batch_size=2,
+            grad_accum_steps=2,
+            eval_interval=0,
+            checkpoint_interval=1,
+            log_interval=0,
+            sample_tokens=0,
+        ),
+        device="cpu",
+        model=TinyLM(config),
+        log_fn=None,
+    )
+    checkpoint = torch.load(tmp_path / "latest.pt", weights_only=True)
+    assert result["tokens_seen"] == 13
+    assert result["stop_reason"] == "max_tokens"
+    assert checkpoint["training_state"]["tokens_seen"] == 13
+
+
+def test_non_cuda_mixed_precision_is_rejected(tmp_path: Path) -> None:
+    config = tiny_config()
+    with pytest.raises(ValueError, match="only on CUDA"):
+        train(
+            config,
+            TinyData(config.vocab_size),
+            tmp_path,
+            TrainConfig(max_steps=1, precision="fp16"),
+            device="cpu",
+            model=TinyLM(config),
+            log_fn=None,
+        )
+
+
+def test_token_budget_safety_cap_saves_latest_checkpoint(tmp_path: Path) -> None:
+    config = tiny_config()
+    with pytest.raises(RuntimeError, match="before max_tokens"):
+        train(
+            config,
+            TinyData(config.vocab_size),
+            tmp_path,
+            TrainConfig(
+                max_steps=1,
+                max_tokens=100,
+                batch_size=1,
+                eval_interval=0,
+                checkpoint_interval=0,
+                log_interval=0,
+                sample_tokens=0,
+            ),
+            device="cpu",
+            model=TinyLM(config),
+            log_fn=None,
+        )
+    assert (tmp_path / "latest.pt").is_file()
 
 
 def test_evaluate_and_short_training_run(tmp_path) -> None:

@@ -30,7 +30,7 @@ def compare_checkpoints(
 ) -> dict[str, Any]:
     """Generate every suite case from two or more checkpoints."""
 
-    suite = _load_suite(suite_path)
+    suite = load_prompt_suite(suite_path)
     if isinstance(checkpoints, (str, Path)):
         if checkpoint_b is None:
             raise ValueError("a second checkpoint is required")
@@ -99,6 +99,7 @@ def compare_checkpoints(
                     top_k=None if top_k == 0 else top_k,
                     seed=profile["seed"],
                     device=device,
+                    cache="off",
                 )
                 rows.append(
                     {
@@ -108,6 +109,7 @@ def compare_checkpoints(
                         "model_label": label,
                         "checkpoint": str(checkpoint.resolve()),
                         "architecture": config.architecture,
+                        "cache": "off",
                         "model_config": config.to_dict(),
                         "data_fingerprint": data.fingerprint,
                         "prompt": prompt_case["prompt"],
@@ -140,7 +142,9 @@ def compare_checkpoints(
     }
 
 
-def _load_suite(path: str | Path) -> dict[str, Any]:
+def load_prompt_suite(path: str | Path) -> dict[str, Any]:
+    """Load and validate a generation prompt suite."""
+
     with Path(path).open(encoding="utf-8") as handle:
         suite = json.load(handle)
     if not isinstance(suite, dict):

@@ -30,6 +30,9 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
         ["generate", "--checkpoint", "model.pt", "--prompt", "Once"]
     )
     assert not generation.stream
+    assert generation.cache == "auto"
+    assert training.batch_mode == "packed"
+    assert training.precision == "fp32"
 
 
 def test_cli_accepts_streaming_generation() -> None:
