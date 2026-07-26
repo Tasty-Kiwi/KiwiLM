@@ -337,6 +337,76 @@ allocation and again on the VM. It uploads in 32 MiB chunks and downloads
 `examples.md` report, and `session.jsonl` to `runs/model-f-colab`. Cleanup stops
 the session after success, failure, or interruption.
 
+### Model E matched-data ablation
+
+To isolate Model F's architectural effect, train Model E on the same 750k
+dataset with Model F's exact token and warmup budgets:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_interleaved_attention \
+  --data-dir data/tinystories-750k \
+  --output-dir runs/model-e-750k \
+  --device cuda \
+  --batch-mode story \
+  --precision fp16 \
+  --max-tokens 160465920 \
+  --warmup-tokens 8023296 \
+  --max-steps 17000 \
+  --batch-size 64 \
+  --eval-mode both \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+The matching T4 workflow is:
+
+```bash
+scripts/run_colab_model_e_750k.sh
+```
+
+It validates the exact Model F dataset fingerprint, trains Model E for the same
+160,465,920 targets, generates the same cache-off focused/creative report, and
+downloads all artifacts to `runs/model-e-750k-colab` before stopping the VM.
+
+### Model B matched-data ablation
+
+The final controlled comparison trains Model B with the same Model F data,
+targets, warmup, seed, and evaluation schedule:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_attention \
+  --data-dir data/tinystories-750k \
+  --output-dir runs/model-b-750k \
+  --device cuda \
+  --batch-mode story \
+  --precision fp16 \
+  --max-tokens 160465920 \
+  --warmup-tokens 8023296 \
+  --max-steps 17000 \
+  --batch-size 64 \
+  --eval-mode both \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+Run the named T4 workflow with:
+
+```bash
+scripts/run_colab_model_b_750k.sh
+```
+
+The 5,261,056-parameter model receives 30.50 targets per parameter. Its
+checkpoints, metrics, summary, focused/creative report, and session history are
+downloaded to `runs/model-b-750k-colab`.
+
 The fast profile trains for 2,000 optimizer steps with a batch size of 32,
 evaluates every 200 steps, and checkpoints every 500 steps. Common overrides
 are available from the CLI:
