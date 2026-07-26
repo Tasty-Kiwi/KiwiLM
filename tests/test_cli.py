@@ -22,6 +22,17 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert prepare.validation_limit == 2_000
     assert prepare.vocab_size == 8_192
     assert prepare.tokenizer_from is None
+    exported = parser.parse_args(
+        [
+            "export-tokenizer",
+            "--data-dir",
+            "data/source",
+            "--output-dir",
+            "data/bundle",
+        ]
+    )
+    assert exported.data_dir == Path("data/source")
+    assert exported.output_dir == Path("data/bundle")
     assert training.max_steps == 2_000
     assert training.batch_size == 32
     assert training.context_length == 256

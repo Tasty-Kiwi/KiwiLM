@@ -10,6 +10,7 @@ import kiwilm.data as data_module
 from kiwilm.data import (
     PreparedTokenData,
     StoryBatchSampler,
+    export_tokenizer_bundle,
     prepare_from_stories,
     prepare_tinystories,
 )
@@ -388,6 +389,82 @@ def test_frozen_tokenizer_streaming_loads_each_split_once(tmp_path: Path) -> Non
     assert calls == ["train", "validation"]
     assert metadata["splits"]["train"]["stories"] == 2
     assert metadata["splits"]["validation"]["stories"] == 1
+
+
+def test_portable_tokenizer_bundle_reuses_exact_bytes_and_provenance(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    bundle_dir = tmp_path / "bundle"
+    target_dir = tmp_path / "target"
+    source_metadata = _prepare_test_data(source_dir)
+    bundle = export_tokenizer_bundle(source_dir, bundle_dir)
+
+    target_metadata = prepare_from_stories(
+        target_dir,
+        ["A remotely prepared story."],
+        ["A validation story."],
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        tokenizer_from=bundle_dir,
+    )
+
+    source_bytes = (source_dir / source_metadata["tokenizer"]["file"]).read_bytes()
+    target_bytes = (target_dir / target_metadata["tokenizer"]["file"]).read_bytes()
+    assert target_bytes == source_bytes
+    assert target_metadata["tokenizer"]["reused_from"] == {
+        "dataset_fingerprint": source_metadata["fingerprint"],
+        "tokenizer_sha256": source_metadata["tokenizer"]["sha256"],
+    }
+    assert bundle["source_dataset_fingerprint"] == source_metadata["fingerprint"]
+    assert str(source_dir) not in json.dumps(bundle)
+
+
+def test_portable_tokenizer_bundle_rejects_corruption_and_existing_target(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    bundle_dir = tmp_path / "bundle"
+    _prepare_test_data(source_dir)
+    bundle = export_tokenizer_bundle(source_dir, bundle_dir)
+
+    with pytest.raises(FileExistsError, match="force=True"):
+        export_tokenizer_bundle(source_dir, bundle_dir)
+
+    tokenizer_path = bundle_dir / bundle["tokenizer"]["file"]
+    tokenizer_path.write_bytes(tokenizer_path.read_bytes() + b"corrupt")
+    with pytest.raises(ValueError, match="bundle checksum mismatch"):
+        prepare_from_stories(
+            tmp_path / "target",
+            ["train"],
+            ["validation"],
+            vocab_size=TEST_VOCAB_SIZE,
+            min_frequency=1,
+            tokenizer_from=bundle_dir,
+        )
+
+
+def test_portable_tokenizer_bundle_rejects_manifest_tampering(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    bundle_dir = tmp_path / "bundle"
+    _prepare_test_data(source_dir)
+    export_tokenizer_bundle(source_dir, bundle_dir)
+    manifest_path = bundle_dir / "tokenizer-bundle.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source_dataset_fingerprint"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="bundle fingerprint mismatch"):
+        prepare_from_stories(
+            tmp_path / "target",
+            ["train"],
+            ["validation"],
+            vocab_size=TEST_VOCAB_SIZE,
+            min_frequency=1,
+            tokenizer_from=bundle_dir,
+        )
 
 
 def test_vocab_and_context_validation(tmp_path: Path) -> None:

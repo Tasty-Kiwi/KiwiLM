@@ -27,6 +27,7 @@ from kiwilm.data import (
     DEFAULT_VALIDATION_LIMIT,
     DEFAULT_VOCAB_SIZE,
     PreparedTokenData,
+    export_tokenizer_bundle,
     prepare_tinystories,
 )
 from kiwilm.generation import generate, generate_stream
@@ -68,6 +69,15 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--force", action="store_true")
     prepare_parser.add_argument("--quiet", action="store_true")
     prepare_parser.set_defaults(handler=_prepare_command)
+
+    export_tokenizer_parser = subparsers.add_parser(
+        "export-tokenizer",
+        help="export a prepared tokenizer as a small portable bundle",
+    )
+    export_tokenizer_parser.add_argument("--data-dir", type=Path, required=True)
+    export_tokenizer_parser.add_argument("--output-dir", type=Path, required=True)
+    export_tokenizer_parser.add_argument("--force", action="store_true")
+    export_tokenizer_parser.set_defaults(handler=_export_tokenizer_command)
 
     train_parser = subparsers.add_parser(
         "train",
@@ -251,6 +261,23 @@ def _prepare_command(args: argparse.Namespace) -> int:
             "dataset": metadata["dataset"],
             "vocab_size": metadata["tokenizer"]["vocab_size"],
             "splits": metadata["splits"],
+        }
+    )
+    return 0
+
+
+def _export_tokenizer_command(args: argparse.Namespace) -> int:
+    bundle = export_tokenizer_bundle(
+        args.data_dir,
+        args.output_dir,
+        force=args.force,
+    )
+    _print_json(
+        {
+            "output_dir": str(args.output_dir.resolve()),
+            "fingerprint": bundle["fingerprint"],
+            "source_dataset_fingerprint": bundle["source_dataset_fingerprint"],
+            "tokenizer": bundle["tokenizer"],
         }
     )
     return 0

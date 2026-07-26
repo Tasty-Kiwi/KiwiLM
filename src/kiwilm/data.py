@@ -27,6 +27,8 @@ DEFAULT_TRAIN_LIMIT = 25_000
 DEFAULT_VALIDATION_LIMIT = 2_000
 DEFAULT_VOCAB_SIZE = 8_192
 METADATA_SCHEMA_VERSION = 1
+TOKENIZER_BUNDLE_SCHEMA_VERSION = 1
+TOKENIZER_BUNDLE_FILE = "tokenizer-bundle.json"
 TOKEN_DTYPE = "uint16"
 TOKEN_BYTE_ORDER = "little"
 SPLITS = ("train", "validation")
@@ -51,6 +53,14 @@ def metadata_fingerprint(metadata: Mapping[str, Any]) -> str:
     """Return the deterministic SHA-256 fingerprint for metadata contents."""
 
     payload = dict(metadata)
+    payload.pop("fingerprint", None)
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def tokenizer_bundle_fingerprint(bundle: Mapping[str, Any]) -> str:
+    """Return the deterministic SHA-256 fingerprint for a tokenizer bundle."""
+
+    payload = dict(bundle)
     payload.pop("fingerprint", None)
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
@@ -363,6 +373,13 @@ def _load_reused_tokenizer(
 ) -> tuple[ByteBPETokenizer, bytes, dict[str, str]]:
     if source_dir.resolve() == output_dir.resolve():
         raise ValueError("tokenizer source and preparation output must differ")
+    bundle_path = source_dir / TOKENIZER_BUNDLE_FILE
+    if bundle_path.is_file():
+        return _load_tokenizer_bundle(
+            bundle_path,
+            vocab_size=vocab_size,
+            min_frequency=min_frequency,
+        )
     source = PreparedTokenData(source_dir)
     details = _require_mapping(source.metadata.get("tokenizer"), "tokenizer")
     source_vocab_size = details.get("requested_vocab_size")
@@ -392,6 +409,137 @@ def _load_reused_tokenizer(
         tokenizer_json,
         {
             "dataset_fingerprint": source.fingerprint,
+            "tokenizer_sha256": tokenizer_sha256,
+        },
+    )
+
+
+def export_tokenizer_bundle(
+    data_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Export a prepared dataset's tokenizer as a small portable bundle."""
+
+    source = PreparedTokenData(data_dir)
+    destination = Path(output_dir)
+    manifest_path = destination / TOKENIZER_BUNDLE_FILE
+    if manifest_path.exists() and not force:
+        raise FileExistsError(
+            f"tokenizer bundle already exists ({manifest_path.name}); "
+            "pass force=True to replace it"
+        )
+    destination.mkdir(parents=True, exist_ok=True)
+    details = _require_mapping(source.metadata.get("tokenizer"), "tokenizer")
+    tokenizer_file = details.get("file")
+    tokenizer_sha256 = details.get("sha256")
+    if not isinstance(tokenizer_file, str) or not isinstance(tokenizer_sha256, str):
+        raise ValueError("prepared tokenizer metadata is incomplete")
+    tokenizer_bytes = (source.data_dir / tokenizer_file).read_bytes()
+    if _sha256_bytes(tokenizer_bytes) != tokenizer_sha256:
+        raise ValueError("prepared tokenizer checksum mismatch")
+
+    artifact_name = f"tokenizer-{tokenizer_sha256}.json"
+    bundle: dict[str, Any] = {
+        "schema_version": TOKENIZER_BUNDLE_SCHEMA_VERSION,
+        "source_dataset_fingerprint": source.fingerprint,
+        "tokenizer": {
+            "file": artifact_name,
+            "sha256": tokenizer_sha256,
+            "vocab_size": details.get("vocab_size"),
+            "requested_vocab_size": details.get("requested_vocab_size"),
+            "min_frequency": details.get("min_frequency"),
+            "special_tokens": details.get("special_tokens"),
+        },
+    }
+    bundle["fingerprint"] = tokenizer_bundle_fingerprint(bundle)
+
+    tokenizer_destination = destination / artifact_name
+    temporary_tokenizer = _temporary_path(tokenizer_destination)
+    temporary_manifest = _temporary_path(manifest_path)
+    try:
+        _write_bytes(temporary_tokenizer, tokenizer_bytes)
+        _write_json(temporary_manifest, bundle)
+        os.replace(temporary_tokenizer, tokenizer_destination)
+        os.replace(temporary_manifest, manifest_path)
+    finally:
+        temporary_tokenizer.unlink(missing_ok=True)
+        temporary_manifest.unlink(missing_ok=True)
+    return bundle
+
+
+def _load_tokenizer_bundle(
+    bundle_path: Path,
+    *,
+    vocab_size: int,
+    min_frequency: int,
+) -> tuple[ByteBPETokenizer, bytes, dict[str, str]]:
+    try:
+        loaded = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read tokenizer bundle at {bundle_path}") from error
+    bundle = _require_mapping(loaded, "tokenizer bundle")
+    if bundle.get("schema_version") != TOKENIZER_BUNDLE_SCHEMA_VERSION:
+        raise ValueError("unsupported tokenizer bundle schema version")
+    fingerprint = bundle.get("fingerprint")
+    if (
+        not isinstance(fingerprint, str)
+        or fingerprint != tokenizer_bundle_fingerprint(bundle)
+    ):
+        raise ValueError("tokenizer bundle fingerprint mismatch")
+    source_fingerprint = bundle.get("source_dataset_fingerprint")
+    if not isinstance(source_fingerprint, str) or len(source_fingerprint) != 64:
+        raise ValueError("tokenizer bundle source fingerprint is invalid")
+
+    details = _require_mapping(bundle.get("tokenizer"), "tokenizer bundle tokenizer")
+    if details.get("requested_vocab_size") != vocab_size:
+        raise ValueError(
+            "vocab_size conflicts with the tokenizer source: "
+            f"expected {details.get('requested_vocab_size')}, found {vocab_size}"
+        )
+    if details.get("min_frequency") != min_frequency:
+        raise ValueError(
+            "min_frequency conflicts with the tokenizer source: "
+            f"expected {details.get('min_frequency')}, found {min_frequency}"
+        )
+    file_name = details.get("file")
+    tokenizer_sha256 = details.get("sha256")
+    if (
+        not isinstance(file_name, str)
+        or Path(file_name).name != file_name
+        or not isinstance(tokenizer_sha256, str)
+    ):
+        raise ValueError("tokenizer bundle metadata is incomplete")
+    try:
+        tokenizer_bytes = (bundle_path.parent / file_name).read_bytes()
+    except OSError as error:
+        raise ValueError("cannot read tokenizer bundle artifact") from error
+    if _sha256_bytes(tokenizer_bytes) != tokenizer_sha256:
+        raise ValueError("tokenizer bundle checksum mismatch")
+    tokenizer = ByteBPETokenizer.from_json(tokenizer_bytes.decode("utf-8"))
+    if tokenizer.vocab_size != details.get("vocab_size"):
+        raise ValueError("tokenizer bundle vocabulary size mismatch")
+    special_tokens = {
+        token: token_id
+        for token, token_id in zip(
+            SPECIAL_TOKENS,
+            (
+                tokenizer.pad_id,
+                tokenizer.unk_id,
+                tokenizer.bos_id,
+                tokenizer.eos_id,
+            ),
+            strict=True,
+        )
+    }
+    if special_tokens != details.get("special_tokens"):
+        raise ValueError("tokenizer bundle special token IDs mismatch")
+    return (
+        tokenizer,
+        tokenizer_bytes,
+        {
+            "dataset_fingerprint": source_fingerprint,
             "tokenizer_sha256": tokenizer_sha256,
         },
     )

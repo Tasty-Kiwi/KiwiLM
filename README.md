@@ -407,6 +407,36 @@ The 5,261,056-parameter model receives 30.50 targets per parameter. Its
 checkpoints, metrics, summary, focused/creative report, and session history are
 downloaded to `runs/model-b-750k-colab`.
 
+### Model B on the complete TinyStories training split
+
+Launch the named T4 workflow:
+
+```bash
+scripts/run_colab_model_b_2m.sh
+```
+
+The runner exports the frozen tokenizer from `data/tinystories-550k` as a
+small, content-verified bundle and uploads it with the current KiwiLM wheel.
+Colab then streams and prepares the complete pinned TinyStories split directly,
+so no large local prepared dataset is needed. It trains Model B for exactly one
+shuffled story epoch: the token budget, five-percent warmup, and safety step cap
+are derived from the remotely prepared artifacts rather than estimated in
+advance. Checkpoints, metrics, summary, focused/creative report, and session
+history are downloaded to `runs/model-b-2m-colab`; the T4 session is always
+stopped during cleanup.
+
+Portable tokenizer bundles can also be created directly:
+
+```bash
+uv run kiwilm export-tokenizer \
+  --data-dir data/tinystories-550k \
+  --output-dir tokenizer/kiwilm-8192
+```
+
+Passing that directory to `kiwilm prepare --tokenizer-from` preserves the exact
+tokenizer bytes, IDs, and source-data provenance without requiring the source
+dataset binaries.
+
 The fast profile trains for 2,000 optimizer steps with a batch size of 32,
 evaluates every 200 steps, and checkpoints every 500 steps. Common overrides
 are available from the CLI:
