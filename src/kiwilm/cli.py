@@ -15,7 +15,9 @@ from kiwilm.comparison import compare_checkpoints
 from kiwilm.config import (
     CNNAttentionConfig,
     CNNAttentionMambaConfig,
+    CNNDeepInterleavedAttentionConfig,
     CNNDualAttentionConfig,
+    CNNInterleavedAttentionConfig,
     GatedCNNConfig,
 )
 from kiwilm.data import (
@@ -44,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     prepare_parser = subparsers.add_parser(
         "prepare",
-        help="stream TinyStories, train a BPE tokenizer, and pack token streams",
+        help="stream TinyStories, select a BPE tokenizer, and pack token streams",
     )
     prepare_parser.add_argument("--output-dir", type=Path, default=Path("data/tinystories"))
     prepare_parser.add_argument("--dataset-name", default=DEFAULT_DATASET_NAME)
@@ -58,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_parser.add_argument("--vocab-size", type=int, default=DEFAULT_VOCAB_SIZE)
     prepare_parser.add_argument("--min-frequency", type=int, default=2)
+    prepare_parser.add_argument(
+        "--tokenizer-from",
+        type=Path,
+        help="reuse the validated tokenizer from another prepared dataset",
+    )
     prepare_parser.add_argument("--force", action="store_true")
     prepare_parser.add_argument("--quiet", action="store_true")
     prepare_parser.set_defaults(handler=_prepare_command)
@@ -74,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
             "cnn_attention",
             "cnn_dual_attention",
             "cnn_attention_mamba",
+            "cnn_interleaved_attention",
+            "cnn_deep_interleaved_attention",
         ),
         default="gated_cnn",
     )
@@ -167,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cache",
         choices=("auto", "off"),
         default="auto",
-        help="use Model B incremental caches when available",
+        help="use incremental model caches when available",
     )
     generate_parser.add_argument(
         "--stream",
@@ -233,6 +242,7 @@ def _prepare_command(args: argparse.Namespace) -> int:
         min_frequency=args.min_frequency,
         show_progress=not args.quiet,
         force=args.force,
+        tokenizer_from=args.tokenizer_from,
     )
     _print_json(
         {
@@ -280,6 +290,20 @@ def _train_command(args: argparse.Namespace) -> int:
             mamba_dt_rank=args.mamba_dt_rank,
         )
         default_output_dir = Path("runs/model-d")
+    elif args.architecture == "cnn_interleaved_attention":
+        model_config = CNNInterleavedAttentionConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/model-e")
+    elif args.architecture == "cnn_deep_interleaved_attention":
+        model_config = CNNDeepInterleavedAttentionConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/model-f")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")

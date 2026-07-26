@@ -12,7 +12,9 @@ from kiwilm.cli import _load_trained_model
 from kiwilm.config import (
     CNNAttentionConfig,
     CNNAttentionMambaConfig,
+    CNNDeepInterleavedAttentionConfig,
     CNNDualAttentionConfig,
+    CNNInterleavedAttentionConfig,
     GatedCNNConfig,
 )
 from kiwilm.data import PreparedTokenData, prepare_from_stories
@@ -147,11 +149,21 @@ def test_model_b_one_step_training_smoke(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "config_type",
-    [CNNDualAttentionConfig, CNNAttentionMambaConfig],
+    [
+        CNNDualAttentionConfig,
+        CNNAttentionMambaConfig,
+        CNNInterleavedAttentionConfig,
+        CNNDeepInterleavedAttentionConfig,
+    ],
 )
-def test_models_c_and_d_one_step_training_smoke(
+def test_models_c_d_and_e_one_step_training_smoke(
     tmp_path: Path,
-    config_type: type[CNNDualAttentionConfig | CNNAttentionMambaConfig],
+    config_type: type[
+        CNNDualAttentionConfig
+        | CNNAttentionMambaConfig
+        | CNNInterleavedAttentionConfig
+        | CNNDeepInterleavedAttentionConfig
+    ],
 ) -> None:
     data_dir = tmp_path / "data"
     prepare_from_stories(

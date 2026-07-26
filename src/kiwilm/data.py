@@ -220,6 +220,7 @@ def _prepare(
     show_progress: bool,
     force: bool,
     streaming: bool,
+    tokenizer_from: str | Path | None,
 ) -> dict[str, Any]:
     _validate_limit("train_limit", train_limit)
     _validate_limit("validation_limit", validation_limit)
@@ -229,16 +230,26 @@ def _prepare(
     metadata_destination = output_dir / "metadata.json"
     previous_artifacts = _referenced_artifacts(metadata_destination)
 
-    tokenizer = ByteBPETokenizer.train(
-        _limited_texts(
-            train_factory(),
-            limit=train_limit,
-            text_field=text_field,
-        ),
-        vocab_size=vocab_size,
-        min_frequency=min_frequency,
-        show_progress=show_progress,
-    )
+    tokenizer_source: dict[str, str] | None = None
+    if tokenizer_from is None:
+        tokenizer = ByteBPETokenizer.train(
+            _limited_texts(
+                train_factory(),
+                limit=train_limit,
+                text_field=text_field,
+            ),
+            vocab_size=vocab_size,
+            min_frequency=min_frequency,
+            show_progress=show_progress,
+        )
+        tokenizer_json = (tokenizer.to_json() + "\n").encode("utf-8")
+    else:
+        tokenizer, tokenizer_json, tokenizer_source = _load_reused_tokenizer(
+            Path(tokenizer_from),
+            output_dir=output_dir,
+            vocab_size=vocab_size,
+            min_frequency=min_frequency,
+        )
     if tokenizer.vocab_size > MAX_UINT16_VOCAB_SIZE:
         raise ValueError("prepared token IDs require a vocabulary no larger than 65535")
 
@@ -249,7 +260,6 @@ def _prepare(
         "metadata": _temporary_path(metadata_destination),
     }
     try:
-        tokenizer_json = (tokenizer.to_json() + "\n").encode("utf-8")
         tokenizer_sha256 = _sha256_bytes(tokenizer_json)
         _write_bytes(temporary_paths["tokenizer"], tokenizer_json)
         train_details = _write_packed_split(
@@ -279,6 +289,29 @@ def _prepare(
         train_details["file"] = artifact_destinations["train"].name
         validation_details["file"] = artifact_destinations["validation"].name
 
+        tokenizer_metadata: dict[str, Any] = {
+            "file": artifact_destinations["tokenizer"].name,
+            "sha256": tokenizer_sha256,
+            "requested_vocab_size": vocab_size,
+            "vocab_size": tokenizer.vocab_size,
+            "min_frequency": min_frequency,
+            "special_tokens": {
+                token: token_id
+                for token, token_id in zip(
+                    SPECIAL_TOKENS,
+                    (
+                        tokenizer.pad_id,
+                        tokenizer.unk_id,
+                        tokenizer.bos_id,
+                        tokenizer.eos_id,
+                    ),
+                    strict=True,
+                )
+            },
+        }
+        if tokenizer_source is not None:
+            tokenizer_metadata["reused_from"] = tokenizer_source
+
         metadata: dict[str, Any] = {
             "schema_version": METADATA_SCHEMA_VERSION,
             "dataset": {
@@ -288,26 +321,7 @@ def _prepare(
             },
             "dtype": TOKEN_DTYPE,
             "byte_order": TOKEN_BYTE_ORDER,
-            "tokenizer": {
-                "file": artifact_destinations["tokenizer"].name,
-                "sha256": tokenizer_sha256,
-                "requested_vocab_size": vocab_size,
-                "vocab_size": tokenizer.vocab_size,
-                "min_frequency": min_frequency,
-                "special_tokens": {
-                    token: token_id
-                    for token, token_id in zip(
-                        SPECIAL_TOKENS,
-                        (
-                            tokenizer.pad_id,
-                            tokenizer.unk_id,
-                            tokenizer.bos_id,
-                            tokenizer.eos_id,
-                        ),
-                        strict=True,
-                    )
-                },
-            },
+            "tokenizer": tokenizer_metadata,
             "splits": {
                 "train": train_details,
                 "validation": validation_details,
@@ -340,6 +354,49 @@ def _prepare(
         raise
 
 
+def _load_reused_tokenizer(
+    source_dir: Path,
+    *,
+    output_dir: Path,
+    vocab_size: int,
+    min_frequency: int,
+) -> tuple[ByteBPETokenizer, bytes, dict[str, str]]:
+    if source_dir.resolve() == output_dir.resolve():
+        raise ValueError("tokenizer source and preparation output must differ")
+    source = PreparedTokenData(source_dir)
+    details = _require_mapping(source.metadata.get("tokenizer"), "tokenizer")
+    source_vocab_size = details.get("requested_vocab_size")
+    if source_vocab_size != vocab_size:
+        raise ValueError(
+            "vocab_size conflicts with the tokenizer source: "
+            f"expected {source_vocab_size}, found {vocab_size}"
+        )
+    source_min_frequency = details.get("min_frequency")
+    if source_min_frequency != min_frequency:
+        raise ValueError(
+            "min_frequency conflicts with the tokenizer source: "
+            f"expected {source_min_frequency}, found {min_frequency}"
+        )
+    file_name = details.get("file")
+    tokenizer_sha256 = details.get("sha256")
+    if not isinstance(file_name, str) or not isinstance(tokenizer_sha256, str):
+        raise ValueError("tokenizer source metadata is incomplete")
+    try:
+        tokenizer_json = (source_dir / file_name).read_bytes()
+    except OSError as error:
+        raise ValueError("cannot read the tokenizer source artifact") from error
+    if _sha256_bytes(tokenizer_json) != tokenizer_sha256:
+        raise ValueError("prepared tokenizer checksum mismatch")
+    return (
+        source.tokenizer,
+        tokenizer_json,
+        {
+            "dataset_fingerprint": source.fingerprint,
+            "tokenizer_sha256": tokenizer_sha256,
+        },
+    )
+
+
 def prepare_from_stories(
     output_dir: str | Path,
     train_stories: Iterable[Story],
@@ -355,6 +412,7 @@ def prepare_from_stories(
     min_frequency: int = 2,
     show_progress: bool = False,
     force: bool = False,
+    tokenizer_from: str | Path | None = None,
 ) -> dict[str, Any]:
     """Prepare packed data from local iterables without requiring network access."""
 
@@ -388,6 +446,7 @@ def prepare_from_stories(
         show_progress=show_progress,
         force=force,
         streaming=False,
+        tokenizer_from=tokenizer_from,
     )
 
 
@@ -428,8 +487,9 @@ def prepare_tinystories(
     show_progress: bool = True,
     force: bool = False,
     load_dataset_fn: Callable[..., Iterable[Story]] | None = None,
+    tokenizer_from: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Stream TinyStories, train on its training split, and pack both splits."""
+    """Stream TinyStories and pack both splits with a new or reused tokenizer."""
 
     destination = Path(output_dir)
     _validate_output_target(destination, force)
@@ -474,6 +534,7 @@ def prepare_tinystories(
         show_progress=show_progress,
         force=force,
         streaming=True,
+        tokenizer_from=tokenizer_from,
     )
 
 

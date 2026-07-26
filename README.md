@@ -35,6 +35,8 @@ blocks with one full Transformer-style attention block:
 | B | 3 gated CNNs + attention/FFN + 3 gated CNNs | 5,261,056 |
 | C | Model B + final attention/FFN | 6,050,816 |
 | D | Model B + final portable Mamba block | 6,027,648 |
+| E | 2 CNNs + attention + 2 CNNs + attention + 2 CNNs | 6,050,816 |
+| F | Model E + 3 refinement CNNs + final attention/FFN | 8,023,296 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
 can reuse the tokenizer, prepared token streams, trainer, checkpoints, metrics,
@@ -47,6 +49,10 @@ generator, and comparison tooling.
 ![KiwiLM Model C architecture](docs/model-c.svg)
 
 ![KiwiLM Model D architecture](docs/model-d.svg)
+
+![KiwiLM Model E architecture](docs/model-e.svg)
+
+![KiwiLM Model F architecture](docs/model-f.svg)
 
 ## Setup
 
@@ -107,6 +113,25 @@ uv run kiwilm prepare \
 
 Existing prepared files are not silently overwritten; pass `--force` when the
 target directory is intentionally being regenerated.
+
+To expand a corpus without changing the token vocabulary or token IDs, reuse a
+validated tokenizer from an existing prepared dataset:
+
+```bash
+uv run kiwilm prepare \
+  --output-dir data/tinystories-750k \
+  --revision f54c09fd23315a6f9c86f9dc80f725de7d8f9c64 \
+  --train-limit 750000 \
+  --validation-limit 10000 \
+  --tokenizer-from data/tinystories-550k
+```
+
+The tokenizer artifact is copied byte-for-byte. Preparation verifies the
+source dataset and rejects conflicting vocabulary or minimum-frequency
+settings. Metadata records only the source dataset fingerprint and tokenizer
+content hash, keeping fingerprints independent of machine-specific paths.
+For the pinned 750k preparation above, the resulting dataset fingerprint is
+`6b2687870c402c5e70e677e8a6c88bb854786c8dcb963f9c734feb022862ed82`.
 
 ## Train Model A
 
@@ -191,7 +216,7 @@ The full runner uploads the exact local prepared artifacts, trains for
 `runs/model-b2-colab`. It uses a named T4 session and always stops it during
 cleanup.
 
-## Train Models C and D
+## Train Models C, D, E, and F
 
 Model C adds a second attention block after the final CNN stack:
 
@@ -223,6 +248,94 @@ it runs on CPU and Apple MPS without CUDA extensions. Its selective scan is
 linear in sequence length, but it is a readable reference implementation rather
 than a fused performance kernel. Model D still contains one attention block, so
 the complete hybrid remains quadratic with a smaller coefficient than Model C.
+
+Model E keeps Model C's six gated CNN blocks and two attention blocks, but
+interleaves global routing throughout the stack:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_interleaved_attention \
+  --data-dir data/tinystories-550k \
+  --output-dir runs/model-e \
+  --device cuda \
+  --batch-mode story \
+  --precision fp16 \
+  --max-tokens 121016320 \
+  --warmup-tokens 6050816 \
+  --max-steps 14000 \
+  --batch-size 64 \
+  --eval-mode both \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+This is an exact 20-targets-per-parameter budget. It consumes approximately
+99.5% of one deterministic story-safe epoch in the prepared 550k-story dataset.
+Model E supports exact incremental CNN and attention caches during generation.
+Run the same profile on a named Colab T4 session with:
+
+```bash
+scripts/run_colab_model_e_full.sh
+```
+
+The runner validates and uploads the prepared data in chunks, downloads the
+best/latest checkpoints, metrics, and summary, exports the session history, and
+always stops the session during cleanup.
+
+Model F deepens Model E immediately before prediction. It resets the
+convolution dilations for local refinement and then performs one final global
+reconciliation:
+
+```text
+Embedding
+  -> CNN (1, 2)
+  -> attention
+  -> CNN (4, 8)
+  -> attention
+  -> CNN (16, 32)
+  -> CNN (1, 2, 4)
+  -> attention
+  -> LM head
+```
+
+Train its 8,023,296 parameters on the frozen-tokenizer 750k dataset with an
+exact 20-targets-per-parameter budget:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_deep_interleaved_attention \
+  --data-dir data/tinystories-750k \
+  --output-dir runs/model-f \
+  --device cuda \
+  --batch-mode story \
+  --precision fp16 \
+  --max-tokens 160465920 \
+  --warmup-tokens 8023296 \
+  --max-steps 17000 \
+  --batch-size 64 \
+  --eval-mode both \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+Or run the same profile in a named Colab T4 session:
+
+```bash
+scripts/run_colab_model_f_full.sh
+```
+
+The runner checks the 750k/10k story counts, pinned dataset revision, frozen
+tokenizer hash, provenance, and complete prepared-data integrity before
+allocation and again on the VM. It uploads in 32 MiB chunks and downloads
+`best.pt`, `latest.pt`, `metrics.jsonl`, `summary.json`, the focused/creative
+`examples.md` report, and `session.jsonl` to `runs/model-f-colab`. Cleanup stops
+the session after success, failure, or interruption.
 
 The fast profile trains for 2,000 optimizer steps with a batch size of 32,
 evaluates every 200 steps, and checkpoints every 500 steps. Common overrides
@@ -311,11 +424,11 @@ Streaming uses incremental byte-level decoding, so Unicode characters split
 across multiple tokens are emitted only after their complete byte sequence is
 available.
 
-Generation defaults to `--cache auto`. Model B uses incremental attention K/V
-and dilation-aware CNN caches, rebuilding them only when the 256-token context
-window rolls over. Other architectures automatically retain the original
-full-context path. Pass `--cache off` for legacy behavior or historical
-comparison reproduction:
+Generation defaults to `--cache auto`. Models B, E, and F use incremental
+attention K/V and dilation-aware CNN caches, rebuilding them only when the
+256-token context window rolls over. Unsupported architectures automatically
+retain the original full-context path. Pass `--cache off` for legacy behavior
+or historical comparison reproduction:
 
 ```bash
 uv run kiwilm generate \

@@ -247,6 +247,149 @@ def test_tinystories_loader_is_streaming_capped_and_train_only(
     assert all(call["revision"] == "resolved-sha" for call in calls)
 
 
+def test_frozen_tokenizer_reuses_exact_bytes_ids_and_stable_provenance(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    source_metadata = _prepare_test_data(source_dir)
+    stories = ["A new story.", "A second new story."]
+    validation = ["A frozen-tokenizer validation story."]
+
+    first = prepare_from_stories(
+        first_dir,
+        stories,
+        validation,
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        tokenizer_from=source_dir,
+    )
+    second = prepare_from_stories(
+        second_dir,
+        stories,
+        validation,
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        tokenizer_from=source_dir,
+    )
+    source_bytes = (source_dir / source_metadata["tokenizer"]["file"]).read_bytes()
+    first_bytes = (first_dir / first["tokenizer"]["file"]).read_bytes()
+    prepared = PreparedTokenData(first_dir)
+
+    assert first_bytes == source_bytes
+    assert first["tokenizer"]["sha256"] == source_metadata["tokenizer"]["sha256"]
+    assert first["tokenizer"]["special_tokens"] == source_metadata["tokenizer"][
+        "special_tokens"
+    ]
+    assert first["tokenizer"]["reused_from"] == {
+        "dataset_fingerprint": source_metadata["fingerprint"],
+        "tokenizer_sha256": source_metadata["tokenizer"]["sha256"],
+    }
+    assert first["fingerprint"] == second["fingerprint"]
+    assert str(source_dir) not in json.dumps(first)
+    assert prepared.tokens("train").tolist() == [
+        token_id
+        for story in stories
+        for token_id in prepared.tokenizer.encode(
+            story,
+            add_bos=True,
+            add_eos=True,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"vocab_size": TEST_VOCAB_SIZE + 1}, "vocab_size conflicts"),
+        ({"min_frequency": 2}, "min_frequency conflicts"),
+    ],
+)
+def test_frozen_tokenizer_rejects_conflicting_options(
+    tmp_path: Path,
+    overrides: dict[str, int],
+    message: str,
+) -> None:
+    source_dir = tmp_path / "source"
+    _prepare_test_data(source_dir)
+    options = {
+        "vocab_size": TEST_VOCAB_SIZE,
+        "min_frequency": 1,
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        prepare_from_stories(
+            tmp_path / "target",
+            ["train"],
+            ["validation"],
+            tokenizer_from=source_dir,
+            **options,
+        )
+
+
+def test_frozen_tokenizer_rejects_corrupt_source_and_same_output(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    metadata = _prepare_test_data(source_dir)
+    tokenizer_path = source_dir / metadata["tokenizer"]["file"]
+    tokenizer_path.write_bytes(tokenizer_path.read_bytes() + b"corrupt")
+
+    with pytest.raises(ValueError, match="tokenizer checksum mismatch"):
+        prepare_from_stories(
+            tmp_path / "target",
+            ["train"],
+            ["validation"],
+            vocab_size=TEST_VOCAB_SIZE,
+            min_frequency=1,
+            tokenizer_from=source_dir,
+        )
+
+    with pytest.raises(ValueError, match="source and preparation output"):
+        prepare_from_stories(
+            source_dir,
+            ["train"],
+            ["validation"],
+            vocab_size=TEST_VOCAB_SIZE,
+            min_frequency=1,
+            tokenizer_from=source_dir,
+            force=True,
+        )
+
+
+def test_frozen_tokenizer_streaming_loads_each_split_once(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    _prepare_test_data(source_dir)
+    rows = {
+        "train": [{"text": "first"}, {"text": "second"}],
+        "validation": [{"text": "validation"}],
+    }
+    calls: list[str] = []
+
+    def fake_load_dataset(_name: str, **kwargs):
+        calls.append(kwargs["split"])
+        return iter(rows[kwargs["split"]])
+
+    metadata = prepare_tinystories(
+        tmp_path / "target",
+        revision="revision-name",
+        resolved_revision="resolved-sha",
+        train_limit=2,
+        validation_limit=1,
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        show_progress=False,
+        load_dataset_fn=fake_load_dataset,
+        tokenizer_from=source_dir,
+    )
+
+    assert calls == ["train", "validation"]
+    assert metadata["splits"]["train"]["stories"] == 2
+    assert metadata["splits"]["validation"]["stories"] == 1
+
+
 def test_vocab_and_context_validation(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="65535"):
         ByteBPETokenizer.train(["story"], vocab_size=65_536)

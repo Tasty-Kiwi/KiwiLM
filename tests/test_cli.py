@@ -21,6 +21,7 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert prepare.train_limit == 25_000
     assert prepare.validation_limit == 2_000
     assert prepare.vocab_size == 8_192
+    assert prepare.tokenizer_from is None
     assert training.max_steps == 2_000
     assert training.batch_size == 32
     assert training.context_length == 256
@@ -72,6 +73,12 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     parser = build_parser()
     model_c = parser.parse_args(["train", "--architecture", "cnn_dual_attention"])
     model_d = parser.parse_args(["train", "--architecture", "cnn_attention_mamba"])
+    model_e = parser.parse_args(
+        ["train", "--architecture", "cnn_interleaved_attention"]
+    )
+    model_f = parser.parse_args(
+        ["train", "--architecture", "cnn_deep_interleaved_attention"]
+    )
     comparison = parser.parse_args(
         [
             "compare",
@@ -89,6 +96,8 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     assert model_c.architecture == "cnn_dual_attention"
     assert model_d.mamba_inner_dim == 896
     assert model_d.mamba_state_dim == 16
+    assert model_e.architecture == "cnn_interleaved_attention"
+    assert model_f.architecture == "cnn_deep_interleaved_attention"
     assert comparison.checkpoints == [
         Path("b.pt"),
         Path("c.pt"),

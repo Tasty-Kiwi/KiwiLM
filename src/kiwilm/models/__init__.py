@@ -5,7 +5,10 @@ from kiwilm.models.cnn_attention import (
     CausalSelfAttention,
     CNNAttentionLM,
     CNNAttentionMambaLM,
+    CNNDeepInterleavedAttentionLM,
     CNNDualAttentionLM,
+    CNNInterleavedAttentionCache,
+    CNNInterleavedAttentionLM,
     TransformerAttentionBlock,
 )
 from kiwilm.models.components import CausalConv1d, GatedCNNBlock
@@ -16,7 +19,10 @@ from kiwilm.models.registry import build_model, register_model
 __all__ = [
     "CNNAttentionLM",
     "CNNAttentionMambaLM",
+    "CNNDeepInterleavedAttentionLM",
     "CNNDualAttentionLM",
+    "CNNInterleavedAttentionCache",
+    "CNNInterleavedAttentionLM",
     "CausalConv1d",
     "CausalLanguageModel",
     "CausalSelfAttention",

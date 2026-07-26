@@ -64,6 +64,13 @@ class ModelConfig:
                 return cast(Self, CNNDualAttentionConfig.from_dict(data))
             if architecture == "cnn_attention_mamba":
                 return cast(Self, CNNAttentionMambaConfig.from_dict(data))
+            if architecture == "cnn_interleaved_attention":
+                return cast(Self, CNNInterleavedAttentionConfig.from_dict(data))
+            if architecture == "cnn_deep_interleaved_attention":
+                return cast(
+                    Self,
+                    CNNDeepInterleavedAttentionConfig.from_dict(data),
+                )
         return cls(**data)
 
 
@@ -184,6 +191,120 @@ class CNNAttentionMambaConfig(CNNAttentionConfig):
         return cls(**_normalize_cnn_attention_data(values))
 
 
+@dataclass(frozen=True, slots=True)
+class CNNInterleavedAttentionConfig(ModelConfig):
+    """Configuration for Model E with attention between pairs of CNN blocks."""
+
+    architecture: str = "cnn_interleaved_attention"
+    kernel_size: int = 3
+    dilations: tuple[int, ...] = (1, 2, 4, 8, 16, 32)
+    num_heads: int = 8
+    feedforward_dim: int = 1024
+
+    def __post_init__(self) -> None:
+        super(CNNInterleavedAttentionConfig, self).__post_init__()
+        if self.architecture != "cnn_interleaved_attention":
+            raise ValueError(
+                "CNNInterleavedAttentionConfig architecture must be "
+                "'cnn_interleaved_attention'"
+            )
+        _validate_interleaved_attention_fields(self)
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        """Reconstruct an interleaved-attention config from a mapping."""
+
+        return cls(**_normalize_dilation_data(values, ("dilations",)))
+
+
+@dataclass(frozen=True, slots=True)
+class CNNDeepInterleavedAttentionConfig(CNNInterleavedAttentionConfig):
+    """Configuration for Model F's final CNN-attention refinement stage."""
+
+    architecture: str = "cnn_deep_interleaved_attention"
+    refinement_dilations: tuple[int, ...] = (1, 2, 4)
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "cnn_deep_interleaved_attention":
+            raise ValueError(
+                "CNNDeepInterleavedAttentionConfig architecture must be "
+                "'cnn_deep_interleaved_attention'"
+            )
+        _validate_interleaved_attention_fields(self)
+        _validate_dilations(
+            self,
+            "refinement_dilations",
+            expected_length=3,
+        )
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        """Reconstruct a deep interleaved-attention config from a mapping."""
+
+        return cls(
+            **_normalize_dilation_data(
+                values,
+                ("dilations", "refinement_dilations"),
+            )
+        )
+
+
+def _validate_interleaved_attention_fields(
+    config: CNNInterleavedAttentionConfig,
+) -> None:
+    _require_positive_int("kernel_size", config.kernel_size)
+    _require_positive_int("num_heads", config.num_heads)
+    _require_positive_int("feedforward_dim", config.feedforward_dim)
+    _validate_dilations(config, "dilations", expected_length=6)
+    _validate_attention_dimensions(config)
+
+
+def _validate_dilations(
+    config: ModelConfig,
+    name: str,
+    *,
+    expected_length: int,
+) -> None:
+    values = getattr(config, name)
+    if not isinstance(values, tuple):
+        try:
+            values = tuple(values)
+            object.__setattr__(config, name, values)
+        except TypeError as error:
+            raise ValueError(
+                f"{name} must be a sequence of positive integers"
+            ) from error
+    if len(values) != expected_length:
+        raise ValueError(
+            f"{name} must contain exactly {expected_length} entries"
+        )
+    for dilation in values:
+        _require_positive_int(f"each {name}", dilation)
+
+
+def _normalize_dilation_data(
+    values: Mapping[str, object],
+    names: tuple[str, ...],
+) -> dict[str, object]:
+    data = dict(values)
+    for name in names:
+        if name not in data:
+            continue
+        raw_dilations = data[name]
+        if isinstance(raw_dilations, (str, bytes)):
+            raise ValueError(
+                f"{name} must be a sequence of positive integers"
+            )
+        try:
+            data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
+        except TypeError as error:
+            raise ValueError(
+                f"{name} must be a sequence of positive integers"
+            ) from error
+    return data
+
+
 def _normalize_cnn_attention_data(
     values: Mapping[str, object],
 ) -> dict[str, object]:
@@ -221,6 +342,12 @@ def _validate_cnn_attention_fields(config: CNNAttentionConfig) -> None:
             raise ValueError(f"{name} must contain exactly 3 entries")
         for dilation in values:
             _require_positive_int(f"each {name} dilation", dilation)
+    _validate_attention_dimensions(config)
+
+
+def _validate_attention_dimensions(
+    config: CNNAttentionConfig | CNNInterleavedAttentionConfig,
+) -> None:
     if config.d_model % config.num_heads != 0:
         raise ValueError("d_model must be divisible by num_heads")
     if (config.d_model // config.num_heads) % 2 != 0:

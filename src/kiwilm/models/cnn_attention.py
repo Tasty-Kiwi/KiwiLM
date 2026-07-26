@@ -11,7 +11,9 @@ from torch.nn import functional as F
 from kiwilm.config import (
     CNNAttentionConfig,
     CNNAttentionMambaConfig,
+    CNNDeepInterleavedAttentionConfig,
     CNNDualAttentionConfig,
+    CNNInterleavedAttentionConfig,
     ModelConfig,
 )
 from kiwilm.models.base import CausalLanguageModel
@@ -137,7 +139,17 @@ class CausalSelfAttention(nn.Module):
             self._split_heads(key, batch_size, 1), position_offset=position
         )
         value = self._split_heads(value, batch_size, 1)
+        if not isinstance(cache, tuple) or len(cache) != 2:
+            raise ValueError("incremental attention cache has an incompatible structure")
         cached_key, cached_value = cache
+        expected_shape = (
+            batch_size,
+            self.num_heads,
+            position,
+            self.head_dim,
+        )
+        if cached_key.shape != expected_shape or cached_value.shape != expected_shape:
+            raise ValueError("incremental attention cache has an incompatible shape")
         key = torch.cat((cached_key, key), dim=2)
         value = torch.cat((cached_value, value), dim=2)
         attended = F.scaled_dot_product_attention(
@@ -222,6 +234,15 @@ class CNNAttentionCache:
     post_cnn: list[Tensor]
 
 
+@dataclass(slots=True)
+class CNNInterleavedAttentionCache:
+    """Incremental state shared by interleaved-attention models."""
+
+    token_ids: Tensor
+    cnn_groups: list[list[Tensor]]
+    attention: list[tuple[Tensor, Tensor]]
+
+
 class CNNAttentionLM(CausalLanguageModel):
     """Embedding, 3 gated CNNs, attention, 3 gated CNNs, and an LM head."""
 
@@ -279,6 +300,12 @@ class CNNAttentionLM(CausalLanguageModel):
             input_ids = input_ids.unsqueeze(1)
         if input_ids.ndim != 2 or input_ids.shape[1] != 1:
             raise ValueError("decode_step input must have shape [batch, 1]")
+        if (
+            cache.token_ids.ndim != 2
+            or cache.token_ids.shape[1] < 1
+            or cache.token_ids.shape[1] > self.config.context_length
+        ):
+            raise ValueError("incremental cache has an incompatible token window")
         if cache.token_ids.shape[0] != input_ids.shape[0]:
             raise ValueError("decode_step batch size differs from the cache")
         token_ids = torch.cat((cache.token_ids, input_ids), dim=1)
@@ -365,6 +392,209 @@ class CNNAttentionMambaLM(CausalLanguageModel):
         return self.lm_head(self.final_norm(values))
 
 
+class CNNInterleavedAttentionLM(CausalLanguageModel):
+    """Model E: pairs of gated CNNs separated by two attention blocks."""
+
+    def __init__(
+        self,
+        config: CNNInterleavedAttentionConfig | None = None,
+    ) -> None:
+        super().__init__()
+        interleaved_config = config or CNNInterleavedAttentionConfig()
+        if (
+            not isinstance(
+                interleaved_config,
+                CNNInterleavedAttentionConfig,
+            )
+            or interleaved_config.architecture != "cnn_interleaved_attention"
+        ):
+            raise TypeError(
+                "CNNInterleavedAttentionLM requires "
+                "a CNNInterleavedAttentionConfig"
+            )
+        _initialize_interleaved_model(
+            self,
+            interleaved_config,
+            dilation_groups=(
+                interleaved_config.dilations[0:2],
+                interleaved_config.dilations[2:4],
+                interleaved_config.dilations[4:6],
+            ),
+            attention_count=2,
+        )
+
+    def forward(self, input_ids: Tensor) -> Tensor:
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.token_embedding(input_ids)
+        for group_index, cnn_group in enumerate(self.cnn_groups):
+            for block in cnn_group:
+                values = block(values)
+            if group_index < len(self.attention_blocks):
+                values = self.attention_blocks[group_index](values)
+        return self.lm_head(self.final_norm(values))
+
+    def prefill(
+        self, input_ids: Tensor
+    ) -> tuple[Tensor, CNNInterleavedAttentionCache]:
+        """Populate all CNN histories and both attention KV caches."""
+
+        input_ids = input_ids[:, -self.config.context_length :]
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.token_embedding(input_ids)
+        cnn_caches: list[list[Tensor]] = []
+        attention_caches: list[tuple[Tensor, Tensor]] = []
+        for group_index, cnn_group in enumerate(self.cnn_groups):
+            group_cache: list[Tensor] = []
+            for block in cnn_group:
+                values, history = block.prefill(values)
+                group_cache.append(history)
+            cnn_caches.append(group_cache)
+            if group_index < len(self.attention_blocks):
+                values, attention_cache = self.attention_blocks[
+                    group_index
+                ].prefill(values)
+                attention_caches.append(attention_cache)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNInterleavedAttentionCache(
+            token_ids=input_ids,
+            cnn_groups=cnn_caches,
+            attention=attention_caches,
+        )
+
+    def decode_step(
+        self,
+        input_ids: Tensor,
+        cache: CNNInterleavedAttentionCache,
+    ) -> tuple[Tensor, CNNInterleavedAttentionCache]:
+        """Decode one token with exact context-window rollover behavior."""
+
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(1)
+        if input_ids.ndim != 2 or input_ids.shape[1] != 1:
+            raise ValueError("decode_step input must have shape [batch, 1]")
+        if (
+            cache.token_ids.ndim != 2
+            or cache.token_ids.shape[1] < 1
+            or cache.token_ids.shape[1] > self.config.context_length
+        ):
+            raise ValueError("incremental cache has an incompatible token window")
+        if cache.token_ids.shape[0] != input_ids.shape[0]:
+            raise ValueError("decode_step batch size differs from the cache")
+        if (
+            len(cache.cnn_groups) != len(self.cnn_groups)
+            or len(cache.attention) != len(self.attention_blocks)
+            or any(
+                len(cached_group) != len(cnn_group)
+                for cached_group, cnn_group in zip(
+                    cache.cnn_groups,
+                    self.cnn_groups,
+                    strict=True,
+                )
+            )
+        ):
+            raise ValueError("incremental cache has an incompatible structure")
+        token_ids = torch.cat((cache.token_ids, input_ids), dim=1)
+        if token_ids.shape[1] > self.config.context_length:
+            return self.prefill(token_ids[:, -self.config.context_length :])
+
+        values = self.token_embedding(input_ids)
+        cnn_caches: list[list[Tensor]] = []
+        attention_caches: list[tuple[Tensor, Tensor]] = []
+        for group_index, (cnn_group, cached_group) in enumerate(
+            zip(self.cnn_groups, cache.cnn_groups, strict=True)
+        ):
+            group_cache: list[Tensor] = []
+            for block, history in zip(cnn_group, cached_group, strict=True):
+                values, history = block.decode_step(values, history)
+                group_cache.append(history)
+            cnn_caches.append(group_cache)
+            if group_index < len(self.attention_blocks):
+                values, attention_cache = self.attention_blocks[
+                    group_index
+                ].decode_step(
+                    values,
+                    cache.attention[group_index],
+                    position=cache.token_ids.shape[1],
+                )
+                attention_caches.append(attention_cache)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNInterleavedAttentionCache(
+            token_ids=token_ids,
+            cnn_groups=cnn_caches,
+            attention=attention_caches,
+        )
+
+
+class CNNDeepInterleavedAttentionLM(CNNInterleavedAttentionLM):
+    """Model F: Model E plus local refinement and final global attention."""
+
+    def __init__(
+        self,
+        config: CNNDeepInterleavedAttentionConfig | None = None,
+    ) -> None:
+        nn.Module.__init__(self)
+        deep_config = config or CNNDeepInterleavedAttentionConfig()
+        if not isinstance(deep_config, CNNDeepInterleavedAttentionConfig):
+            raise TypeError(
+                "CNNDeepInterleavedAttentionLM requires "
+                "a CNNDeepInterleavedAttentionConfig"
+            )
+        _initialize_interleaved_model(
+            self,
+            deep_config,
+            dilation_groups=(
+                deep_config.dilations[0:2],
+                deep_config.dilations[2:4],
+                (
+                    *deep_config.dilations[4:6],
+                    *deep_config.refinement_dilations,
+                ),
+            ),
+            attention_count=3,
+        )
+
+
+def _initialize_interleaved_model(
+    model: CNNInterleavedAttentionLM,
+    config: CNNInterleavedAttentionConfig,
+    *,
+    dilation_groups: tuple[tuple[int, ...], ...],
+    attention_count: int,
+) -> None:
+    model.config = config
+    model.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
+    model.cnn_groups = nn.ModuleList(
+        nn.ModuleList(
+            GatedCNNBlock(
+                config.d_model,
+                kernel_size=config.kernel_size,
+                dilation=dilation,
+                dropout=config.dropout,
+            )
+            for dilation in dilations
+        )
+        for dilations in dilation_groups
+    )
+    model.attention_blocks = nn.ModuleList(
+        TransformerAttentionBlock(
+            config.d_model,
+            num_heads=config.num_heads,
+            feedforward_dim=config.feedforward_dim,
+            dropout=config.dropout,
+        )
+        for _ in range(attention_count)
+    )
+    model.final_norm = nn.LayerNorm(config.d_model)
+    model.lm_head = nn.Linear(
+        config.d_model,
+        config.vocab_size,
+        bias=True,
+    )
+    model.apply(initialize_weights)
+    if config.tie_embeddings:
+        model.lm_head.weight = model.token_embedding.weight
+
+
 def _initialize_backbone(
     model: CausalLanguageModel,
     config: CNNAttentionConfig,
@@ -428,5 +658,35 @@ def _build_cnn_attention_mamba(config: ModelConfig) -> CausalLanguageModel:
     return CNNAttentionMambaLM(config)
 
 
+def _build_cnn_interleaved_attention(
+    config: ModelConfig,
+) -> CausalLanguageModel:
+    if not isinstance(config, CNNInterleavedAttentionConfig):
+        raise TypeError(
+            "cnn_interleaved_attention requires "
+            "CNNInterleavedAttentionConfig"
+        )
+    return CNNInterleavedAttentionLM(config)
+
+
+def _build_cnn_deep_interleaved_attention(
+    config: ModelConfig,
+) -> CausalLanguageModel:
+    if not isinstance(config, CNNDeepInterleavedAttentionConfig):
+        raise TypeError(
+            "cnn_deep_interleaved_attention requires "
+            "CNNDeepInterleavedAttentionConfig"
+        )
+    return CNNDeepInterleavedAttentionLM(config)
+
+
 register_model("cnn_dual_attention", _build_cnn_dual_attention)
 register_model("cnn_attention_mamba", _build_cnn_attention_mamba)
+register_model(
+    "cnn_interleaved_attention",
+    _build_cnn_interleaved_attention,
+)
+register_model(
+    "cnn_deep_interleaved_attention",
+    _build_cnn_deep_interleaved_attention,
+)
