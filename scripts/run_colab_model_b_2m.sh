@@ -8,6 +8,7 @@ artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/kiwilm-model-b-2m.XXXXXX")"
 result_dir="${KIWILM_RESULT_DIR:-runs/model-b-2m-colab}"
 bundle_dir="${artifact_dir}/tokenizer-bundle"
 session_started=0
+preserve_session=0
 
 mkdir -p "${artifact_dir}" "${bundle_dir}" "${result_dir}"
 
@@ -23,10 +24,35 @@ cleanup() {
   if [[ "${session_started}" -eq 1 ]]; then
     "${colab_bin}" log -s "${session_name}" \
       -o "${result_dir}/session.jsonl" || true
-    "${colab_bin}" stop -s "${session_name}" || true
+    if [[ "${preserve_session}" -eq 1 ]]; then
+      echo "[colab] Artifact handoff did not complete." >&2
+      echo "[colab] Preserving session '${session_name}' for recovery." >&2
+      "${colab_bin}" status -s "${session_name}" || true
+      "${colab_bin}" url -s "${session_name}" || true
+      echo "[colab] Stop it after recovery with:" >&2
+      echo "  ${colab_bin} stop -s ${session_name}" >&2
+    else
+      "${colab_bin}" stop -s "${session_name}" || true
+    fi
   fi
 }
 trap cleanup EXIT INT TERM
+
+download_colab_file() {
+  local remote_path="$1"
+  local local_path="$2"
+  local attempt
+  for attempt in 1 2 3; do
+    if "${colab_bin}" download -s "${session_name}" \
+      "${remote_path}" \
+      "${local_path}"; then
+      return 0
+    fi
+    echo "[colab] Download attempt ${attempt}/3 failed for ${remote_path}" >&2
+    sleep 2
+  done
+  return 1
+}
 
 if [[ ! -f "${tokenizer_data_dir}/metadata.json" ]]; then
   echo "Prepared tokenizer source not found at ${tokenizer_data_dir}" >&2
@@ -66,20 +92,24 @@ done
   --timeout 18000 \
   -f scripts/colab_model_b_2m.py
 
-"${colab_bin}" download -s "${session_name}" \
-  /content/kiwilm-model-b-2m/run/best.pt \
-  "${result_dir}/best.pt"
-"${colab_bin}" download -s "${session_name}" \
-  /content/kiwilm-model-b-2m/run/latest.pt \
-  "${result_dir}/latest.pt"
-"${colab_bin}" download -s "${session_name}" \
-  /content/kiwilm-model-b-2m/run/metrics.jsonl \
-  "${result_dir}/metrics.jsonl"
-"${colab_bin}" download -s "${session_name}" \
-  /content/kiwilm-model-b-2m-summary.json \
-  "${result_dir}/summary.json"
-"${colab_bin}" download -s "${session_name}" \
-  /content/kiwilm-model-b-2m-examples.md \
-  "${result_dir}/examples.md"
+# From this point onward the completed weights exist on the remote VM. Preserve
+# the billable session if download or verification fails so they can be
+# recovered manually instead of being destroyed by the EXIT trap.
+preserve_session=1
 
+download_colab_file \
+  /content/kiwilm-model-b-2m-artifacts.json \
+  "${result_dir}/artifact-manifest.json"
+
+while IFS= read -r part_name; do
+  download_colab_file \
+    "/content/${part_name}" \
+    "${result_dir}/${part_name}"
+done < <(jq -r '.parts[].name' "${result_dir}/artifact-manifest.json")
+
+uv run python scripts/reassemble_colab_artifacts.py \
+  "${result_dir}/artifact-manifest.json" \
+  "${result_dir}"
+
+preserve_session=0
 echo "Model B 2M artifacts downloaded to ${result_dir}"

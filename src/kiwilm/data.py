@@ -184,7 +184,19 @@ def _write_packed_split(
     path: Path,
     texts: Iterable[str],
     tokenizer: ByteBPETokenizer,
+    *,
+    split: str,
+    show_progress: bool,
 ) -> dict[str, Any]:
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        texts = tqdm(
+            texts,
+            desc=f"Packing {split}",
+            unit="stories",
+            mininterval=1.0,
+        )
     digest = hashlib.sha256()
     story_count = 0
     token_count = 0
@@ -280,6 +292,8 @@ def _prepare(
                 text_field=text_field,
             ),
             tokenizer,
+            split="train",
+            show_progress=show_progress,
         )
         validation_details = _write_packed_split(
             temporary_paths["validation"],
@@ -289,6 +303,8 @@ def _prepare(
                 text_field=text_field,
             ),
             tokenizer,
+            split="validation",
+            show_progress=show_progress,
         )
         artifact_destinations = {
             "tokenizer": output_dir / f"tokenizer-{tokenizer_sha256}.json",

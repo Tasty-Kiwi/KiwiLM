@@ -417,13 +417,18 @@ scripts/run_colab_model_b_2m.sh
 
 The runner exports the frozen tokenizer from `data/tinystories-550k` as a
 small, content-verified bundle and uploads it with the current KiwiLM wheel.
-Colab then streams and prepares the complete pinned TinyStories split directly,
-so no large local prepared dataset is needed. It trains Model B for exactly one
-shuffled story epoch: the token budget, five-percent warmup, and safety step cap
-are derived from the remotely prepared artifacts rather than estimated in
-advance. Checkpoints, metrics, summary, focused/creative report, and session
-history are downloaded to `runs/model-b-2m-colab`; the T4 session is always
-stopped during cleanup.
+Colab then downloads the five pinned parquet shards with visible byte progress,
+retries, and a low-speed timeout before preparing them from local disk, so no
+large local prepared dataset is needed and a blocked remote range request cannot
+hang silently. It trains Model B for exactly one shuffled story epoch: the token
+budget, five-percent warmup, and safety step cap are derived from the remotely
+prepared artifacts rather than estimated in advance. Checkpoints, metrics,
+summary, focused/creative report, and session history are downloaded to
+`runs/model-b-2m-colab`. Setup and training failures stop the T4 automatically.
+After training completes, however, exhausting all artifact-download retries or
+failing local checksum verification deliberately leaves the session running
+for manual recovery; the runner prints its URL and the exact `colab stop`
+command. A successful verified handoff still stops the session automatically.
 
 Portable tokenizer bundles can also be created directly:
 
