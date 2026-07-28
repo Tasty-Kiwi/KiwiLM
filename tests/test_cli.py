@@ -10,7 +10,12 @@ import torch
 import kiwilm.cli as cli
 from kiwilm.checkpoint import CheckpointCompatibilityError, save_checkpoint
 from kiwilm.cli import _load_trained_model, build_parser
-from kiwilm.config import CNNAttentionConfig, GatedCNNConfig, TransformerConfig
+from kiwilm.config import (
+    CNNAttentionConfig,
+    CNNFFNAttentionConfig,
+    GatedCNNConfig,
+    TransformerConfig,
+)
 from kiwilm.models import build_model
 
 
@@ -84,6 +89,7 @@ def test_cli_selects_model_b_and_comparison_defaults() -> None:
 def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     parser = build_parser()
     model_c = parser.parse_args(["train", "--architecture", "cnn_dual_attention"])
+    model_g = parser.parse_args(["train", "--architecture", "cnn_attention_ffn"])
     model_d = parser.parse_args(["train", "--architecture", "cnn_attention_mamba"])
     model_e = parser.parse_args(
         ["train", "--architecture", "cnn_interleaved_attention"]
@@ -107,6 +113,7 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     )
 
     assert model_c.architecture == "cnn_dual_attention"
+    assert model_g.architecture == "cnn_attention_ffn"
     assert model_d.mamba_inner_dim == 896
     assert model_d.mamba_state_dim == 16
     assert model_e.architecture == "cnn_interleaved_attention"
@@ -239,3 +246,36 @@ def test_transformer_cli_uses_default_output_directory(
     assert args.handler(args) == 0
     assert isinstance(captured["model_config"], TransformerConfig)
     assert captured["output_dir"] == Path("runs/transformer")
+
+
+def test_model_g_cli_uses_default_output_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyTokenizer:
+        vocab_size = 64
+
+    class DummyData:
+        tokenizer = DummyTokenizer()
+
+    def fake_train(
+        model_config: object,
+        _data: object,
+        output_dir: Path,
+        _train_config: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        captured["model_config"] = model_config
+        captured["output_dir"] = output_dir
+        return {}
+
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
+    monkeypatch.setattr(cli, "train", fake_train)
+    args = cli.build_parser().parse_args(
+        ["train", "--architecture", "cnn_attention_ffn", "--max-steps", "1"]
+    )
+
+    assert args.handler(args) == 0
+    assert isinstance(captured["model_config"], CNNFFNAttentionConfig)
+    assert captured["output_dir"] == Path("runs/model-g")

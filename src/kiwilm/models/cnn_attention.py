@@ -13,6 +13,7 @@ from kiwilm.config import (
     CNNAttentionMambaConfig,
     CNNDeepInterleavedAttentionConfig,
     CNNDualAttentionConfig,
+    CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     ModelConfig,
 )
@@ -224,6 +225,30 @@ class TransformerAttentionBlock(nn.Module):
         return values + self.feedforward(self.feedforward_norm(values)), cache
 
 
+class ResidualFeedForwardBlock(nn.Module):
+    """Pre-normalized GELU feed-forward layer with a residual connection."""
+
+    def __init__(
+        self,
+        d_model: int,
+        *,
+        feedforward_dim: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.feedforward = nn.Sequential(
+            nn.Linear(d_model, feedforward_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(feedforward_dim, d_model),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, values: Tensor) -> Tensor:
+        return values + self.feedforward(self.norm(values))
+
+
 @dataclass(slots=True)
 class CNNAttentionCache:
     """Incremental state for Model B generation."""
@@ -327,6 +352,153 @@ class CNNAttentionLM(CausalLanguageModel):
             self.post_attention_blocks, cache.post_cnn, strict=True
         ):
             values, history = block.decode_step(values, history)
+            post_cache.append(history)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNAttentionCache(
+            token_ids=token_ids,
+            pre_cnn=pre_cache,
+            attention=attention_cache,
+            post_cnn=post_cache,
+        )
+
+
+class CNNFFNAttentionLM(CausalLanguageModel):
+    """Model G: Model B with a residual FFN after every gated CNN."""
+
+    def __init__(self, config: CNNFFNAttentionConfig | None = None) -> None:
+        super().__init__()
+        ffn_config = config or CNNFFNAttentionConfig()
+        if not isinstance(ffn_config, CNNFFNAttentionConfig):
+            raise TypeError("CNNFFNAttentionLM requires a CNNFFNAttentionConfig")
+
+        _initialize_backbone(self, ffn_config)
+        self.pre_attention_ffn_blocks = nn.ModuleList(
+            ResidualFeedForwardBlock(
+                ffn_config.d_model,
+                feedforward_dim=ffn_config.feedforward_dim,
+                dropout=ffn_config.dropout,
+            )
+            for _ in ffn_config.pre_attention_dilations
+        )
+        self.post_attention_ffn_blocks = nn.ModuleList(
+            ResidualFeedForwardBlock(
+                ffn_config.d_model,
+                feedforward_dim=ffn_config.feedforward_dim,
+                dropout=ffn_config.dropout,
+            )
+            for _ in ffn_config.post_attention_dilations
+        )
+        self.apply(initialize_weights)
+        if ffn_config.tie_embeddings:
+            self.lm_head.weight = self.token_embedding.weight
+
+    def forward(self, input_ids: Tensor) -> Tensor:
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.token_embedding(input_ids)
+        for cnn, feedforward in zip(
+            self.pre_attention_blocks,
+            self.pre_attention_ffn_blocks,
+            strict=True,
+        ):
+            values = feedforward(cnn(values))
+        values = self.attention_block(values)
+        for cnn, feedforward in zip(
+            self.post_attention_blocks,
+            self.post_attention_ffn_blocks,
+            strict=True,
+        ):
+            values = feedforward(cnn(values))
+        return self.lm_head(self.final_norm(values))
+
+    def prefill(self, input_ids: Tensor) -> tuple[Tensor, CNNAttentionCache]:
+        """Populate Model B's incremental caches while applying every FFN."""
+
+        input_ids = input_ids[:, -self.config.context_length :]
+        validate_input_ids(input_ids, context_length=self.config.context_length)
+        values = self.token_embedding(input_ids)
+        pre_cache: list[Tensor] = []
+        for cnn, feedforward in zip(
+            self.pre_attention_blocks,
+            self.pre_attention_ffn_blocks,
+            strict=True,
+        ):
+            values, history = cnn.prefill(values)
+            values = feedforward(values)
+            pre_cache.append(history)
+        values, attention_cache = self.attention_block.prefill(values)
+        post_cache: list[Tensor] = []
+        for cnn, feedforward in zip(
+            self.post_attention_blocks,
+            self.post_attention_ffn_blocks,
+            strict=True,
+        ):
+            values, history = cnn.prefill(values)
+            values = feedforward(values)
+            post_cache.append(history)
+        logits = self.lm_head(self.final_norm(values))
+        return logits, CNNAttentionCache(
+            token_ids=input_ids,
+            pre_cnn=pre_cache,
+            attention=attention_cache,
+            post_cnn=post_cache,
+        )
+
+    def decode_step(
+        self,
+        input_ids: Tensor,
+        cache: CNNAttentionCache,
+    ) -> tuple[Tensor, CNNAttentionCache]:
+        """Decode one token with CNN histories and the shared attention cache."""
+
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(1)
+        if input_ids.ndim != 2 or input_ids.shape[1] != 1:
+            raise ValueError("decode_step input must have shape [batch, 1]")
+        if not isinstance(cache, CNNAttentionCache):
+            raise ValueError("incremental cache has an incompatible structure")
+        if (
+            cache.token_ids.ndim != 2
+            or cache.token_ids.shape[1] < 1
+            or cache.token_ids.shape[1] > self.config.context_length
+        ):
+            raise ValueError("incremental cache has an incompatible token window")
+        if cache.token_ids.shape[0] != input_ids.shape[0]:
+            raise ValueError("decode_step batch size differs from the cache")
+        if (
+            len(cache.pre_cnn) != len(self.pre_attention_blocks)
+            or len(cache.post_cnn) != len(self.post_attention_blocks)
+        ):
+            raise ValueError("incremental cache has an incompatible structure")
+
+        token_ids = torch.cat((cache.token_ids, input_ids), dim=1)
+        if token_ids.shape[1] > self.config.context_length:
+            return self.prefill(token_ids[:, -self.config.context_length :])
+
+        values = self.token_embedding(input_ids)
+        pre_cache: list[Tensor] = []
+        for cnn, feedforward, history in zip(
+            self.pre_attention_blocks,
+            self.pre_attention_ffn_blocks,
+            cache.pre_cnn,
+            strict=True,
+        ):
+            values, history = cnn.decode_step(values, history)
+            values = feedforward(values)
+            pre_cache.append(history)
+        values, attention_cache = self.attention_block.decode_step(
+            values,
+            cache.attention,
+            position=cache.token_ids.shape[1],
+        )
+        post_cache: list[Tensor] = []
+        for cnn, feedforward, history in zip(
+            self.post_attention_blocks,
+            self.post_attention_ffn_blocks,
+            cache.post_cnn,
+            strict=True,
+        ):
+            values, history = cnn.decode_step(values, history)
+            values = feedforward(values)
             post_cache.append(history)
         logits = self.lm_head(self.final_norm(values))
         return logits, CNNAttentionCache(
@@ -644,6 +816,15 @@ def _build_cnn_attention(config: ModelConfig) -> CausalLanguageModel:
 
 
 register_model("cnn_attention", _build_cnn_attention)
+
+
+def _build_cnn_attention_ffn(config: ModelConfig) -> CausalLanguageModel:
+    if not isinstance(config, CNNFFNAttentionConfig):
+        raise TypeError("cnn_attention_ffn requires CNNFFNAttentionConfig")
+    return CNNFFNAttentionLM(config)
+
+
+register_model("cnn_attention_ffn", _build_cnn_attention_ffn)
 
 
 def _build_cnn_dual_attention(config: ModelConfig) -> CausalLanguageModel:

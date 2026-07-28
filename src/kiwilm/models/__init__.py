@@ -3,12 +3,15 @@
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.cnn_attention import (
     CausalSelfAttention,
+    CNNAttentionCache,
     CNNAttentionLM,
     CNNAttentionMambaLM,
     CNNDeepInterleavedAttentionLM,
     CNNDualAttentionLM,
+    CNNFFNAttentionLM,
     CNNInterleavedAttentionCache,
     CNNInterleavedAttentionLM,
+    ResidualFeedForwardBlock,
     TransformerAttentionBlock,
 )
 from kiwilm.models.components import CausalConv1d, GatedCNNBlock
@@ -18,10 +21,12 @@ from kiwilm.models.registry import build_model, register_model
 from kiwilm.models.transformer import TransformerCache, TransformerLM
 
 __all__ = [
+    "CNNAttentionCache",
     "CNNAttentionLM",
     "CNNAttentionMambaLM",
     "CNNDeepInterleavedAttentionLM",
     "CNNDualAttentionLM",
+    "CNNFFNAttentionLM",
     "CNNInterleavedAttentionCache",
     "CNNInterleavedAttentionLM",
     "CausalConv1d",
@@ -30,6 +35,7 @@ __all__ = [
     "GatedCNNBlock",
     "GatedCNNLM",
     "MambaBlock",
+    "ResidualFeedForwardBlock",
     "SelectiveStateSpace",
     "TransformerAttentionBlock",
     "TransformerCache",

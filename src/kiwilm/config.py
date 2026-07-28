@@ -60,6 +60,8 @@ class ModelConfig:
                 return cast(Self, GatedCNNConfig.from_dict(data))
             if architecture == "cnn_attention":
                 return cast(Self, CNNAttentionConfig.from_dict(data))
+            if architecture == "cnn_attention_ffn":
+                return cast(Self, CNNFFNAttentionConfig.from_dict(data))
             if architecture == "cnn_dual_attention":
                 return cast(Self, CNNDualAttentionConfig.from_dict(data))
             if architecture == "cnn_attention_mamba":
@@ -140,6 +142,21 @@ class CNNAttentionConfig(ModelConfig):
         """Reconstruct a CNN-attention config from a plain mapping."""
 
         return cls(**_normalize_cnn_attention_data(values))
+
+
+@dataclass(frozen=True, slots=True)
+class CNNFFNAttentionConfig(CNNAttentionConfig):
+    """Configuration for Model G with an FFN after every gated CNN."""
+
+    architecture: str = "cnn_attention_ffn"
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "cnn_attention_ffn":
+            raise ValueError(
+                "CNNFFNAttentionConfig architecture must be 'cnn_attention_ffn'"
+            )
+        _validate_cnn_attention_fields(self)
 
 
 @dataclass(frozen=True, slots=True)

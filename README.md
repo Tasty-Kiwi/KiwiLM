@@ -37,6 +37,7 @@ blocks with one full Transformer-style attention block:
 | D | Model B + final portable Mamba block | 6,027,648 |
 | E | 2 CNNs + attention + 2 CNNs + attention + 2 CNNs | 6,050,816 |
 | F | Model E + 3 refinement CNNs + final attention/FFN | 8,023,296 |
+| G | Model B + residual FFN after every gated CNN | 8,417,536 |
 | GPT baseline | 4 decoder-only Transformer blocks | 5,264,896 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
@@ -54,6 +55,8 @@ generator, and comparison tooling.
 ![KiwiLM Model E architecture](docs/model-e.svg)
 
 ![KiwiLM Model F architecture](docs/model-f.svg)
+
+![KiwiLM Model G architecture](docs/model-g.svg)
 
 ![KiwiLM GPT-style Transformer baseline](docs/transformer-baseline.svg)
 
@@ -248,6 +251,61 @@ overwrite a non-empty result directory, evaluates both checkpoints on identical
 packed and story-safe validation batches, measures cached and uncached greedy
 generation, and writes the report and raw evidence under
 `runs/benchmarks/transformer-smoke`.
+
+Train the same Transformer on Model F's frozen-tokenizer 750k dataset and exact
+160,465,920-target budget with:
+
+```bash
+scripts/run_colab_transformer_750k.sh
+```
+
+The runner validates the prepared dataset locally, uploads it in 32 MiB chunks,
+allocates a named T4, and asks for interactive Google Drive authorization before
+training. It periodically publishes atomically replaced, SHA-256-verified
+checkpoints, metrics, tokenizer, and dataset metadata under
+`My Drive/KiwiLM/transformer-750k/<UTC timestamp>`, then adds the summary and
+focused/creative example report and marks the manifest complete. Successful
+artifacts are also downloaded to `runs/transformer-750k-colab`.
+
+Failures before Drive is mounted stop the session. Failures after the mount,
+including three failed CLI download attempts, preserve the VM for recovery and
+print its URL and exact stop command. Set `KIWILM_DRIVE_BACKUP_ROOT` to change
+the Drive parent directory; it must remain below `/content/drive/MyDrive`.
+
+## Train Model G
+
+Model G keeps Model B's six gated CNN mixers and central attention/FFN block,
+then adds a pre-normalized residual GELU FFN after every convolution:
+
+```text
+Embedding
+  -> 3 × [gated CNN -> FFN]
+  -> attention -> FFN
+  -> 3 × [gated CNN -> FFN]
+  -> LM head
+```
+
+Train it directly with:
+
+```bash
+uv run kiwilm train \
+  --architecture cnn_attention_ffn \
+  --data-dir data/tinystories \
+  --output-dir runs/model-g \
+  --device auto
+```
+
+After completing the Model B versus Transformer smoke benchmark, train only
+Model G and generate a matched three-way report:
+
+```bash
+uv run python scripts/run_model_g_smoke_benchmark.py \
+  --device auto
+```
+
+The runner validates the existing runtime, dataset, checkpoints, and training
+configuration under `runs/benchmarks/transformer-smoke`, then writes Model G
+and the three-way evidence under `runs/benchmarks/model-g-smoke`.
 
 ## Train Models C, D, E, and F
 
@@ -581,7 +639,7 @@ Streaming uses incremental byte-level decoding, so Unicode characters split
 across multiple tokens are emitted only after their complete byte sequence is
 available.
 
-Generation defaults to `--cache auto`. Models B, E, F, and the Transformer
+Generation defaults to `--cache auto`. Models B, E, F, G, and the Transformer
 baseline use incremental attention K/V caches; hybrid models additionally keep
 dilation-aware CNN histories. They rebuild caches only when the 256-token
 context window rolls over. Unsupported architectures automatically retain the

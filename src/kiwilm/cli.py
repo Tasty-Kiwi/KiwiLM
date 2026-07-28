@@ -17,6 +17,7 @@ from kiwilm.config import (
     CNNAttentionMambaConfig,
     CNNDeepInterleavedAttentionConfig,
     CNNDualAttentionConfig,
+    CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
     TransformerConfig,
@@ -90,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "gated_cnn",
             "cnn_attention",
+            "cnn_attention_ffn",
             "cnn_dual_attention",
             "cnn_attention_mamba",
             "cnn_interleaved_attention",
@@ -301,6 +303,13 @@ def _train_command(args: argparse.Namespace) -> int:
             feedforward_dim=args.attention_feedforward_dim,
         )
         default_output_dir = Path("runs/model-b")
+    elif args.architecture == "cnn_attention_ffn":
+        model_config = CNNFFNAttentionConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/model-g")
     elif args.architecture == "cnn_dual_attention":
         model_config = CNNDualAttentionConfig(
             **shared_config,
