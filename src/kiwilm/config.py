@@ -75,6 +75,8 @@ class ModelConfig:
                 )
             if architecture == "transformer":
                 return cast(Self, TransformerConfig.from_dict(data))
+            if architecture == "modern_transformer":
+                return cast(Self, ModernTransformerConfig.from_dict(data))
             if architecture == "model_x":
                 return cast(Self, ModelXConfig.from_dict(data))
         return cls(**data)
@@ -291,6 +293,35 @@ class TransformerConfig(ModelConfig):
 
 
 @dataclass(frozen=True, slots=True)
+class ModernTransformerConfig(ModelConfig):
+    """Configuration for the RMSNorm/SwiGLU Transformer control model."""
+
+    architecture: str = "modern_transformer"
+    num_layers: int = 4
+    num_heads: int = 8
+    swiglu_dim: int = 720
+    rms_norm_eps: float = 1e-5
+
+    def __post_init__(self) -> None:
+        super(ModernTransformerConfig, self).__post_init__()
+        if self.architecture != "modern_transformer":
+            raise ValueError(
+                "ModernTransformerConfig architecture must be 'modern_transformer'"
+            )
+        _require_positive_int("num_layers", self.num_layers)
+        _require_positive_int("num_heads", self.num_heads)
+        _require_positive_int("swiglu_dim", self.swiglu_dim)
+        _validate_attention_dimensions(self)
+        if (
+            isinstance(self.rms_norm_eps, bool)
+            or not isinstance(self.rms_norm_eps, (int, float))
+            or not math.isfinite(self.rms_norm_eps)
+            or self.rms_norm_eps <= 0
+        ):
+            raise ValueError("rms_norm_eps must be finite and positive")
+
+
+@dataclass(frozen=True, slots=True)
 class ModelXConfig(ModelConfig):
     """Configuration for the alternating local/global Model X hybrid."""
 
@@ -425,6 +456,7 @@ def _validate_attention_dimensions(
         CNNAttentionConfig
         | CNNInterleavedAttentionConfig
         | ModelXConfig
+        | ModernTransformerConfig
         | TransformerConfig
     ),
 ) -> None:

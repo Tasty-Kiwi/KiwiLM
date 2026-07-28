@@ -24,6 +24,11 @@ from kiwilm.models.model_x import (
     RMSAttentionBlock,
     RMSGatedCNNBlock,
 )
+from kiwilm.models.modern_transformer import (
+    ModernTransformerBlock,
+    ModernTransformerCache,
+    ModernTransformerLM,
+)
 from kiwilm.models.registry import build_model, register_model
 from kiwilm.models.transformer import TransformerCache, TransformerLM
 
@@ -44,6 +49,9 @@ __all__ = [
     "MambaBlock",
     "ModelXCache",
     "ModelXLM",
+    "ModernTransformerBlock",
+    "ModernTransformerCache",
+    "ModernTransformerLM",
     "RMSAttentionBlock",
     "RMSGatedCNNBlock",
     "ResidualFeedForwardBlock",

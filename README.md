@@ -39,6 +39,7 @@ blocks with one full Transformer-style attention block:
 | F | Model E + 3 refinement CNNs + final attention/FFN | 8,023,296 |
 | G | Model B + residual FFN after every gated CNN | 8,417,536 |
 | X | 2 gated CNNs + 2 attention mixers + 4 SwiGLU FFNs | 5,387,520 |
+| Modern Transformer | 4 RMSNorm attention mixers + 4 SwiGLU FFNs | 5,372,160 |
 | GPT baseline | 4 decoder-only Transformer blocks | 5,264,896 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
@@ -350,6 +351,31 @@ The benchmark refuses to overwrite a non-empty destination and writes training,
 dual-validation, cached/uncached generation, parameter, throughput, and
 focused/creative comparison evidence under
 `runs/benchmarks/model-x-smoke`.
+
+Run the parameter-matched mixer ablation between Model X and a modern
+Llama-style Transformer:
+
+```bash
+uv run python scripts/run_modern_transformer_smoke_benchmark.py \
+  --device auto
+```
+
+Both models use four pre-RMSNorm SwiGLUs, RoPE attention, a final RMSNorm, tied
+embeddings, and the same training/evaluation settings. The control replaces
+Model X's two gated convolutions with two additional attention mixers and uses
+a 720-wide SwiGLU to remain within 0.3% of Model X's parameter count. Results
+are written under
+`runs/benchmarks/model-x-vs-modern-transformer-smoke`.
+
+On a 4 GB CUDA GPU:
+
+```powershell
+uv run --no-sync python scripts/run_modern_transformer_smoke_benchmark.py `
+  --device cuda `
+  --precision fp16 `
+  --batch-size 8 `
+  --grad-accum-steps 4
+```
 
 On a 4 GB CUDA GPU, preserve the historical effective batch size and target
 count with a smaller FP16 microbatch:
