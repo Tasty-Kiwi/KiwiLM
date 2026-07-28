@@ -71,6 +71,8 @@ class ModelConfig:
                     Self,
                     CNNDeepInterleavedAttentionConfig.from_dict(data),
                 )
+            if architecture == "transformer":
+                return cast(Self, TransformerConfig.from_dict(data))
         return cls(**data)
 
 
@@ -250,6 +252,25 @@ class CNNDeepInterleavedAttentionConfig(CNNInterleavedAttentionConfig):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class TransformerConfig(ModelConfig):
+    """Configuration for the controlled decoder-only Transformer baseline."""
+
+    architecture: str = "transformer"
+    num_layers: int = 4
+    num_heads: int = 8
+    feedforward_dim: int = 1024
+
+    def __post_init__(self) -> None:
+        super(TransformerConfig, self).__post_init__()
+        if self.architecture != "transformer":
+            raise ValueError("TransformerConfig architecture must be 'transformer'")
+        _require_positive_int("num_layers", self.num_layers)
+        _require_positive_int("num_heads", self.num_heads)
+        _require_positive_int("feedforward_dim", self.feedforward_dim)
+        _validate_attention_dimensions(self)
+
+
 def _validate_interleaved_attention_fields(
     config: CNNInterleavedAttentionConfig,
 ) -> None:
@@ -346,7 +367,11 @@ def _validate_cnn_attention_fields(config: CNNAttentionConfig) -> None:
 
 
 def _validate_attention_dimensions(
-    config: CNNAttentionConfig | CNNInterleavedAttentionConfig,
+    config: (
+        CNNAttentionConfig
+        | CNNInterleavedAttentionConfig
+        | TransformerConfig
+    ),
 ) -> None:
     if config.d_model % config.num_heads != 0:
         raise ValueError("d_model must be divisible by num_heads")

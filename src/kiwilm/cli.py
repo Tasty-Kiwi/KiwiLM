@@ -19,6 +19,7 @@ from kiwilm.config import (
     CNNDualAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
+    TransformerConfig,
 )
 from kiwilm.data import (
     DEFAULT_DATASET_NAME,
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
             "cnn_attention_mamba",
             "cnn_interleaved_attention",
             "cnn_deep_interleaved_attention",
+            "transformer",
         ),
         default="gated_cnn",
     )
@@ -331,6 +333,13 @@ def _train_command(args: argparse.Namespace) -> int:
             feedforward_dim=args.attention_feedforward_dim,
         )
         default_output_dir = Path("runs/model-f")
+    elif args.architecture == "transformer":
+        model_config = TransformerConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            feedforward_dim=args.attention_feedforward_dim,
+        )
+        default_output_dir = Path("runs/transformer")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")

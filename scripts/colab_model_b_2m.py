@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import threading
 import time
 from hashlib import sha256
 from pathlib import Path
@@ -38,6 +39,9 @@ SUMMARY = Path("/content/kiwilm-model-b-2m-summary.json")
 ARTIFACT_MANIFEST = Path("/content/kiwilm-model-b-2m-artifacts.json")
 ARTIFACT_ARCHIVE = Path("/content/kiwilm-model-b-2m-artifacts.tar")
 ARTIFACT_PART_BYTES = 24 * 1024 * 1024
+BACKUP_CONFIG = Path("/content/kiwilm-drive-backup.json")
+DRIVE_ROOT = Path("/content/drive/MyDrive")
+BACKUP_INTERVAL_SECONDS = 20
 DATA_BASE_URL = (
     f"https://huggingface.co/datasets/roneneldan/TinyStories/resolve/{EXPECTED_REVISION}/data"
 )
@@ -81,6 +85,29 @@ def stage_tokenizer_bundle() -> None:
         raise RuntimeError("expected one tokenizer bundle manifest and one tokenizer artifact")
     shutil.move(str(manifest), BUNDLE_DIR / manifest.name)
     shutil.move(str(tokenizers[0]), BUNDLE_DIR / tokenizers[0].name)
+
+
+def load_drive_backup_directory() -> Path:
+    if not BACKUP_CONFIG.is_file():
+        raise RuntimeError(f"Drive backup configuration is missing: {BACKUP_CONFIG}")
+    config = json.loads(BACKUP_CONFIG.read_text(encoding="utf-8"))
+    configured = config.get("backup_dir")
+    if not isinstance(configured, str) or not configured:
+        raise RuntimeError("Drive backup configuration has no backup_dir")
+    if not DRIVE_ROOT.is_dir():
+        raise RuntimeError(
+            "Google Drive is not mounted at /content/drive; "
+            "run colab drivemount before training"
+        )
+    drive_root = DRIVE_ROOT.resolve()
+    backup_directory = Path(configured).resolve()
+    try:
+        backup_directory.relative_to(drive_root)
+    except ValueError as error:
+        raise RuntimeError(
+            f"Drive backup directory must be inside {drive_root}: {backup_directory}"
+        ) from error
+    return backup_directory
 
 
 def download_pinned_shards() -> dict[str, list[str]]:
@@ -234,11 +261,80 @@ stage_tokenizer_bundle()
 
 import torch  # noqa: E402
 
+from kiwilm.backup import VerifiedDirectoryBackup  # noqa: E402
 from kiwilm.cli import main as kiwilm_main  # noqa: E402
 from kiwilm.config import CNNAttentionConfig  # noqa: E402
 from kiwilm.data import PreparedTokenData, prepare_tinystories  # noqa: E402
 from kiwilm.example_report import generate_example_report  # noqa: E402
 from kiwilm.models import build_model  # noqa: E402
+
+
+class DriveBackupMonitor:
+    """Periodically copy newly published checkpoints to mounted Google Drive."""
+
+    def __init__(
+        self,
+        directory: Path,
+        sources: dict[str, Path],
+        metadata: dict[str, Any],
+    ) -> None:
+        self.backup = VerifiedDirectoryBackup(directory)
+        self.sources = sources
+        self.metadata = metadata
+        self.signatures: dict[str, tuple[int, int]] = {}
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(
+            target=self._run,
+            name="kiwilm-drive-backup",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.sync_changed(force=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.thread.join()
+
+    def sync_changed(
+        self,
+        *,
+        force: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        changed: dict[str, Path] = {}
+        next_signatures = dict(self.signatures)
+        for name, path in self.sources.items():
+            if not path.is_file():
+                continue
+            stat = path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            if force or self.signatures.get(name) != signature:
+                changed[name] = path
+                next_signatures[name] = signature
+        if not changed:
+            return
+        manifest = self.backup.sync(
+            changed,
+            metadata={**self.metadata, **dict(metadata or {})},
+        )
+        self.signatures = next_signatures
+        print(
+            f"[drive] Backed up {', '.join(sorted(changed))} to "
+            f"{self.backup.directory} ({len(manifest['files'])} files tracked).",
+            flush=True,
+        )
+
+    def add_sources(self, sources: dict[str, Path]) -> None:
+        self.sources.update(sources)
+
+    def _run(self) -> None:
+        while not self.stop_event.wait(BACKUP_INTERVAL_SECONDS):
+            try:
+                self.sync_changed()
+            except Exception as error:
+                print(f"[drive] Periodic backup failed; will retry: {error}", flush=True)
 
 
 def load_pinned_parquet(_dataset_name: str, **kwargs: Any) -> Any:
@@ -331,6 +427,27 @@ print(
     )
 )
 
+drive_backup_directory = load_drive_backup_directory()
+tokenizer_file = DATA_DIR / data.metadata["tokenizer"]["file"]
+backup_monitor = DriveBackupMonitor(
+    drive_backup_directory,
+    {
+        "data-metadata.json": DATA_DIR / "metadata.json",
+        tokenizer_file.name: tokenizer_file,
+        "best.pt": RUN_DIR / "best.pt",
+        "latest.pt": RUN_DIR / "latest.pt",
+        "metrics.jsonl": RUN_DIR / "metrics.jsonl",
+    },
+    {
+        "architecture": "cnn_attention",
+        "complete": False,
+        "data_fingerprint": data.fingerprint,
+        "parameter_count": parameter_count,
+        "train_stories": train_metadata["stories"],
+        "train_targets": max_tokens,
+    },
+)
+
 gpu = run(
     "nvidia-smi",
     "--query-gpu=name,memory.total,driver_version",
@@ -341,45 +458,50 @@ torch_info = f"{torch.__version__} {torch.cuda.get_device_name(0)} cuda={torch.c
 
 started = time.perf_counter()
 torch.cuda.reset_peak_memory_stats()
-exit_code = kiwilm_main(
-    [
-        "train",
-        "--architecture",
-        "cnn_attention",
-        "--data-dir",
-        str(DATA_DIR),
-        "--output-dir",
-        str(RUN_DIR),
-        "--device",
-        "cuda",
-        "--batch-mode",
-        "story",
-        "--precision",
-        "fp16",
-        "--max-tokens",
-        str(max_tokens),
-        "--warmup-tokens",
-        str(warmup_tokens),
-        "--max-steps",
-        str(max_steps),
-        "--batch-size",
-        str(BATCH_SIZE),
-        "--eval-mode",
-        "both",
-        "--eval-interval",
-        "1000",
-        "--eval-batches",
-        "50",
-        "--checkpoint-interval",
-        "1000",
-        "--log-interval",
-        "10",
-        "--sample-tokens",
-        "64",
-        "--seed",
-        "42",
-    ]
-)
+backup_monitor.start()
+try:
+    exit_code = kiwilm_main(
+        [
+            "train",
+            "--architecture",
+            "cnn_attention",
+            "--data-dir",
+            str(DATA_DIR),
+            "--output-dir",
+            str(RUN_DIR),
+            "--device",
+            "cuda",
+            "--batch-mode",
+            "story",
+            "--precision",
+            "fp16",
+            "--max-tokens",
+            str(max_tokens),
+            "--warmup-tokens",
+            str(warmup_tokens),
+            "--max-steps",
+            str(max_steps),
+            "--batch-size",
+            str(BATCH_SIZE),
+            "--eval-mode",
+            "both",
+            "--eval-interval",
+            "1000",
+            "--eval-batches",
+            "50",
+            "--checkpoint-interval",
+            "1000",
+            "--log-interval",
+            "10",
+            "--sample-tokens",
+            "64",
+            "--seed",
+            "42",
+        ]
+    )
+finally:
+    backup_monitor.stop()
+    backup_monitor.sync_changed(force=True, metadata={"phase": "training-stopped"})
 if exit_code:
     raise RuntimeError(f"KiwiLM training exited with status {exit_code}")
 elapsed = time.perf_counter() - started
@@ -454,6 +576,7 @@ SUMMARY.write_text(
             "padding_fraction": final_train["padding_fraction"],
             "best_validation_loss": best_metrics.get("best_validation_loss"),
             "best_validation_perplexity": best_metrics.get("best_validation_perplexity"),
+            "drive_backup_dir": str(drive_backup_directory),
             "generated": generated,
             "example_report": report_summary,
             "latest_checkpoint_exists": (RUN_DIR / "latest.pt").is_file(),
@@ -466,4 +589,21 @@ SUMMARY.write_text(
     encoding="utf-8",
 )
 print(SUMMARY.read_text(encoding="utf-8"))
+backup_monitor.add_sources(
+    {
+        "summary.json": SUMMARY,
+        "examples.md": EXAMPLES,
+    }
+)
+backup_monitor.sync_changed(
+    force=True,
+    metadata={
+        "complete": True,
+        "phase": "complete",
+        "step": final_train["step"],
+        "tokens_seen": final_train["tokens_seen"],
+    },
+)
+backup_monitor.backup.verify()
+print(f"[drive] Verified complete backup at {drive_backup_directory}.", flush=True)
 stage_artifacts()

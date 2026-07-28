@@ -37,6 +37,7 @@ blocks with one full Transformer-style attention block:
 | D | Model B + final portable Mamba block | 6,027,648 |
 | E | 2 CNNs + attention + 2 CNNs + attention + 2 CNNs | 6,050,816 |
 | F | Model E + 3 refinement CNNs + final attention/FFN | 8,023,296 |
+| GPT baseline | 4 decoder-only Transformer blocks | 5,264,896 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
 can reuse the tokenizer, prepared token streams, trainer, checkpoints, metrics,
@@ -53,6 +54,8 @@ generator, and comparison tooling.
 ![KiwiLM Model E architecture](docs/model-e.svg)
 
 ![KiwiLM Model F architecture](docs/model-f.svg)
+
+![KiwiLM GPT-style Transformer baseline](docs/transformer-baseline.svg)
 
 ## Setup
 
@@ -215,6 +218,36 @@ The full runner uploads the exact local prepared artifacts, trains for
 `metrics.jsonl`, `summary.json`, and the Colab session log to
 `runs/model-b2-colab`. It uses a named T4 session and always stops it during
 cleanup.
+
+## Train the GPT-style Transformer baseline
+
+The controlled Transformer baseline replaces Model B's gated convolutions with
+four decoder-only attention/FFN blocks. It deliberately reuses KiwiLM's RoPE,
+SDPA attention, pre-normalization, GELU feed-forward layers, tokenizer, tied
+head, and training pipeline. This isolates the sequence mixer instead of trying
+to reproduce every GPT-2 implementation detail:
+
+```bash
+uv run kiwilm train \
+  --architecture transformer \
+  --data-dir data/tinystories \
+  --output-dir runs/transformer \
+  --device auto
+```
+
+Run a controlled local smoke benchmark that retrains Model B and the Transformer
+for the historical 2,000-step, 16,384,000-target profile:
+
+```bash
+uv run python scripts/run_transformer_smoke_benchmark.py \
+  --device auto
+```
+
+The runner requires the checked 25k-story dataset fingerprint, refuses to
+overwrite a non-empty result directory, evaluates both checkpoints on identical
+packed and story-safe validation batches, measures cached and uncached greedy
+generation, and writes the report and raw evidence under
+`runs/benchmarks/transformer-smoke`.
 
 ## Train Models C, D, E, and F
 
@@ -424,11 +457,30 @@ hang silently. It trains Model B for exactly one shuffled story epoch: the token
 budget, five-percent warmup, and safety step cap are derived from the remotely
 prepared artifacts rather than estimated in advance. Checkpoints, metrics,
 summary, focused/creative report, and session history are downloaded to
-`runs/model-b-2m-colab`. Setup and training failures stop the T4 automatically.
-After training completes, however, exhausting all artifact-download retries or
-failing local checksum verification deliberately leaves the session running
-for manual recovery; the runner prints its URL and the exact `colab stop`
-command. A successful verified handoff still stops the session automatically.
+`runs/model-b-2m-colab`.
+
+Before training, the runner interactively mounts Google Drive and creates a
+timestamped backup under
+`My Drive/KiwiLM/model-b-2m/<UTC timestamp>`. Complete the authorization prompt
+shown by `colab drivemount`. Published `best.pt`, `latest.pt`, metrics, dataset
+metadata, and the frozen tokenizer are copied there throughout training. The
+final summary and focused/creative report are added at completion. Every copied
+file is SHA-256 verified, temporary files are replaced atomically, and
+`backup-manifest.json` is published last with a `complete` flag. Override the
+remote parent directory with `KIWILM_DRIVE_BACKUP_ROOT`; it must remain beneath
+`/content/drive/MyDrive`.
+
+T4 allocation retries transient Colab `503`, bad-gateway, and gateway-timeout
+responses five times with exponential backoff. It retries only while the
+server-side assignment list is unchanged, preventing an ambiguous failed
+request from leaking a second VM.
+
+Setup failures before Drive is mounted stop the T4 automatically. Once training
+can publish checkpoints, any training, artifact-download, or checksum failure
+deliberately leaves the session running for manual recovery; the runner prints
+its URL and exact `colab stop` command. Google Drive remains the primary durable
+backup, while the verified CLI artifact archive is a second handoff path. A
+successful verified handoff still stops the session automatically.
 
 Portable tokenizer bundles can also be created directly:
 
@@ -529,11 +581,12 @@ Streaming uses incremental byte-level decoding, so Unicode characters split
 across multiple tokens are emitted only after their complete byte sequence is
 available.
 
-Generation defaults to `--cache auto`. Models B, E, and F use incremental
-attention K/V and dilation-aware CNN caches, rebuilding them only when the
-256-token context window rolls over. Unsupported architectures automatically
-retain the original full-context path. Pass `--cache off` for legacy behavior
-or historical comparison reproduction:
+Generation defaults to `--cache auto`. Models B, E, F, and the Transformer
+baseline use incremental attention K/V caches; hybrid models additionally keep
+dilation-aware CNN histories. They rebuild caches only when the 256-token
+context window rolls over. Unsupported architectures automatically retain the
+original full-context path. Pass `--cache off` for legacy behavior or historical
+comparison reproduction:
 
 ```bash
 uv run kiwilm generate \

@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 import torch
 
+import kiwilm.cli as cli
 from kiwilm.checkpoint import CheckpointCompatibilityError, save_checkpoint
 from kiwilm.cli import _load_trained_model, build_parser
-from kiwilm.config import CNNAttentionConfig, GatedCNNConfig
+from kiwilm.config import CNNAttentionConfig, GatedCNNConfig, TransformerConfig
 from kiwilm.models import build_model
 
 
@@ -90,6 +91,7 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     model_f = parser.parse_args(
         ["train", "--architecture", "cnn_deep_interleaved_attention"]
     )
+    transformer = parser.parse_args(["train", "--architecture", "transformer"])
     comparison = parser.parse_args(
         [
             "compare",
@@ -109,6 +111,7 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     assert model_d.mamba_state_dim == 16
     assert model_e.architecture == "cnn_interleaved_attention"
     assert model_f.architecture == "cnn_deep_interleaved_attention"
+    assert transformer.architecture == "transformer"
     assert comparison.checkpoints == [
         Path("b.pt"),
         Path("c.pt"),
@@ -175,3 +178,64 @@ def test_cli_loads_model_b_checkpoint(tmp_path: Path) -> None:
 
     assert loaded_config == config
     assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 64)
+
+
+def test_cli_loads_transformer_checkpoint(tmp_path: Path) -> None:
+    config = TransformerConfig(
+        vocab_size=64,
+        context_length=8,
+        d_model=16,
+        dropout=0.0,
+        num_layers=2,
+        num_heads=2,
+        feedforward_dim=32,
+    )
+    checkpoint = save_checkpoint(
+        tmp_path / "transformer.pt",
+        model=build_model(config),
+        step=1,
+        model_config=config,
+        data_fingerprint="a" * 64,
+    )
+
+    model, loaded_config = _load_trained_model(
+        checkpoint,
+        data_fingerprint="a" * 64,
+        device=torch.device("cpu"),
+    )
+
+    assert loaded_config == config
+    assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 64)
+
+
+def test_transformer_cli_uses_default_output_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyTokenizer:
+        vocab_size = 64
+
+    class DummyData:
+        tokenizer = DummyTokenizer()
+
+    def fake_train(
+        model_config: object,
+        _data: object,
+        output_dir: Path,
+        _train_config: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        captured["model_config"] = model_config
+        captured["output_dir"] = output_dir
+        return {}
+
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
+    monkeypatch.setattr(cli, "train", fake_train)
+    args = cli.build_parser().parse_args(
+        ["train", "--architecture", "transformer", "--max-steps", "1"]
+    )
+
+    assert args.handler(args) == 0
+    assert isinstance(captured["model_config"], TransformerConfig)
+    assert captured["output_dir"] == Path("runs/transformer")
