@@ -63,6 +63,8 @@ The architecture identifier is `model_y`. Checkpoints produced under the
 temporary `modern_transformer` name still load and are normalized to Model Y
 during reconstruction.
 
+![KiwiLM Model Y architecture](docs/model-y.svg)
+
 ## Setup
 
 KiwiLM uses [uv](https://docs.astral.sh/uv/) for dependency management:
