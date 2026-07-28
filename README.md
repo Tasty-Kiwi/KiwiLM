@@ -38,6 +38,7 @@ blocks with one full Transformer-style attention block:
 | E | 2 CNNs + attention + 2 CNNs + attention + 2 CNNs | 6,050,816 |
 | F | Model E + 3 refinement CNNs + final attention/FFN | 8,023,296 |
 | G | Model B + residual FFN after every gated CNN | 8,417,536 |
+| X | 2 gated CNNs + 2 attention mixers + 4 SwiGLU FFNs | 5,387,520 |
 | GPT baseline | 4 decoder-only Transformer blocks | 5,264,896 |
 
 Architecture selection is isolated behind a registry, so later Mamba variants
@@ -57,6 +58,8 @@ generator, and comparison tooling.
 ![KiwiLM Model F architecture](docs/model-f.svg)
 
 ![KiwiLM Model G architecture](docs/model-g.svg)
+
+![KiwiLM Model X architecture](docs/model-x.svg)
 
 ![KiwiLM GPT-style Transformer baseline](docs/transformer-baseline.svg)
 
@@ -306,6 +309,58 @@ uv run python scripts/run_model_g_smoke_benchmark.py \
 The runner validates the existing runtime, dataset, checkpoints, and training
 configuration under `runs/benchmarks/transformer-smoke`, then writes Model G
 and the three-way evidence under `runs/benchmarks/model-g-smoke`.
+
+## Train Model X
+
+Model X alternates efficient local and content-dependent global mixing while
+retaining four nonlinear channel mixers:
+
+```text
+Embedding
+  -> gated CNN (dilation 1) -> SwiGLU
+  -> RoPE causal attention -> SwiGLU
+  -> gated CNN (dilation 2) -> SwiGLU
+  -> RoPE causal attention -> SwiGLU
+  -> final RMSNorm -> tied LM head
+```
+
+Every mixer and SwiGLU uses its own pre-RMSNorm residual path. The default
+640-wide bias-free SwiGLUs keep the complete architecture at 5,387,520
+parameters, 2.40% above Model B.
+
+Train it directly with:
+
+```bash
+uv run kiwilm train \
+  --architecture model_x \
+  --data-dir data/tinystories \
+  --output-dir runs/model-x \
+  --device auto
+```
+
+Run the controlled 25k-story smoke comparison, retraining Model B, the
+Transformer, and Model X from scratch in the same runtime:
+
+```bash
+uv run python scripts/run_model_x_smoke_benchmark.py \
+  --device auto
+```
+
+The benchmark refuses to overwrite a non-empty destination and writes training,
+dual-validation, cached/uncached generation, parameter, throughput, and
+focused/creative comparison evidence under
+`runs/benchmarks/model-x-smoke`.
+
+On a 4 GB CUDA GPU, preserve the historical effective batch size and target
+count with a smaller FP16 microbatch:
+
+```powershell
+uv run --no-sync python scripts/run_model_x_smoke_benchmark.py `
+  --device cuda `
+  --precision fp16 `
+  --batch-size 8 `
+  --grad-accum-steps 4
+```
 
 ## Train Models C, D, E, and F
 

@@ -20,6 +20,7 @@ from kiwilm.config import (
     CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
+    ModelXConfig,
     TransformerConfig,
 )
 from kiwilm.data import (
@@ -97,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
             "cnn_interleaved_attention",
             "cnn_deep_interleaved_attention",
             "transformer",
+            "model_x",
         ),
         default="gated_cnn",
     )
@@ -108,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--dropout", type=float, default=0.1)
     train_parser.add_argument("--attention-heads", type=int, default=8)
     train_parser.add_argument("--attention-feedforward-dim", type=int, default=1024)
+    train_parser.add_argument("--swiglu-dim", type=int, default=640)
     train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
     train_parser.add_argument("--mamba-state-dim", type=int, default=16)
     train_parser.add_argument("--mamba-conv-kernel", type=int, default=4)
@@ -349,6 +352,13 @@ def _train_command(args: argparse.Namespace) -> int:
             feedforward_dim=args.attention_feedforward_dim,
         )
         default_output_dir = Path("runs/transformer")
+    elif args.architecture == "model_x":
+        model_config = ModelXConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            swiglu_dim=args.swiglu_dim,
+        )
+        default_output_dir = Path("runs/model-x")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")
