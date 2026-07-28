@@ -75,8 +75,9 @@ class ModelConfig:
                 )
             if architecture == "transformer":
                 return cast(Self, TransformerConfig.from_dict(data))
-            if architecture == "modern_transformer":
-                return cast(Self, ModernTransformerConfig.from_dict(data))
+            if architecture in {"model_y", "modern_transformer"}:
+                data["architecture"] = "model_y"
+                return cast(Self, ModelYConfig.from_dict(data))
             if architecture == "model_x":
                 return cast(Self, ModelXConfig.from_dict(data))
         return cls(**data)
@@ -293,21 +294,19 @@ class TransformerConfig(ModelConfig):
 
 
 @dataclass(frozen=True, slots=True)
-class ModernTransformerConfig(ModelConfig):
-    """Configuration for the RMSNorm/SwiGLU Transformer control model."""
+class ModelYConfig(ModelConfig):
+    """Configuration for the RMSNorm/SwiGLU Transformer, Model Y."""
 
-    architecture: str = "modern_transformer"
+    architecture: str = "model_y"
     num_layers: int = 4
     num_heads: int = 8
     swiglu_dim: int = 720
     rms_norm_eps: float = 1e-5
 
     def __post_init__(self) -> None:
-        super(ModernTransformerConfig, self).__post_init__()
-        if self.architecture != "modern_transformer":
-            raise ValueError(
-                "ModernTransformerConfig architecture must be 'modern_transformer'"
-            )
+        super(ModelYConfig, self).__post_init__()
+        if self.architecture != "model_y":
+            raise ValueError("ModelYConfig architecture must be 'model_y'")
         _require_positive_int("num_layers", self.num_layers)
         _require_positive_int("num_heads", self.num_heads)
         _require_positive_int("swiglu_dim", self.swiglu_dim)
@@ -354,7 +353,6 @@ class ModelXConfig(ModelConfig):
         """Reconstruct Model X from a JSON-compatible mapping."""
 
         return cls(**_normalize_dilation_data(values, ("cnn_dilations",)))
-
 
 def _validate_interleaved_attention_fields(
     config: CNNInterleavedAttentionConfig,
@@ -456,7 +454,7 @@ def _validate_attention_dimensions(
         CNNAttentionConfig
         | CNNInterleavedAttentionConfig
         | ModelXConfig
-        | ModernTransformerConfig
+        | ModelYConfig
         | TransformerConfig
     ),
 ) -> None:

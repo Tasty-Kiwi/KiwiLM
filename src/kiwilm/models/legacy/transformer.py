@@ -9,8 +9,8 @@ from torch import Tensor, nn
 
 from kiwilm.config import ModelConfig, TransformerConfig
 from kiwilm.models.base import CausalLanguageModel
-from kiwilm.models.cnn_attention import TransformerAttentionBlock
 from kiwilm.models.components import initialize_weights, validate_input_ids
+from kiwilm.models.legacy.cnn_attention import TransformerAttentionBlock
 from kiwilm.models.registry import register_model
 
 

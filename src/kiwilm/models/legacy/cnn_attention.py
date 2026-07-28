@@ -23,7 +23,7 @@ from kiwilm.models.components import (
     initialize_weights,
     validate_input_ids,
 )
-from kiwilm.models.mamba import MambaBlock
+from kiwilm.models.legacy.mamba import MambaBlock
 from kiwilm.models.registry import register_model
 
 

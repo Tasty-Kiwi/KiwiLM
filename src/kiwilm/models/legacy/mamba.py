@@ -1,4 +1,4 @@
-"""Portable Mamba-1-style selective state-space components."""
+"""Legacy portable Mamba-1-style selective state-space components."""
 
 from __future__ import annotations
 

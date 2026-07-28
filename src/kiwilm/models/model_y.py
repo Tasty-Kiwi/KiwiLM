@@ -1,4 +1,4 @@
-"""Modern RMSNorm/SwiGLU decoder-only Transformer control model."""
+"""Model Y: a modern RMSNorm/SwiGLU decoder-only Transformer."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from kiwilm.config import ModelConfig, ModernTransformerConfig
+from kiwilm.config import ModelConfig, ModelYConfig
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.components import initialize_weights, validate_input_ids
 from kiwilm.models.model_x import ResidualSwiGLUBlock, RMSAttentionBlock
 from kiwilm.models.registry import register_model
 
 
-class ModernTransformerBlock(nn.Module):
+class ModelYBlock(nn.Module):
     """Pre-RMSNorm RoPE attention followed by a pre-RMSNorm SwiGLU."""
 
     def __init__(
@@ -63,21 +63,21 @@ class ModernTransformerBlock(nn.Module):
 
 
 @dataclass(slots=True)
-class ModernTransformerCache:
+class ModelYCache:
     """Raw token window plus one rotated attention KV cache per block."""
 
     token_ids: Tensor
     attention: list[tuple[Tensor, Tensor]]
 
 
-class ModernTransformerLM(CausalLanguageModel):
+class ModelYLM(CausalLanguageModel):
     """Four modern decoder blocks, final RMSNorm, and a tied LM head."""
 
-    def __init__(self, config: ModernTransformerConfig | None = None) -> None:
+    def __init__(self, config: ModelYConfig | None = None) -> None:
         super().__init__()
-        model_config = config or ModernTransformerConfig()
-        if not isinstance(model_config, ModernTransformerConfig):
-            raise TypeError("ModernTransformerLM requires a ModernTransformerConfig")
+        model_config = config or ModelYConfig()
+        if not isinstance(model_config, ModelYConfig):
+            raise TypeError("ModelYLM requires a ModelYConfig")
 
         self.config = model_config
         self.token_embedding = nn.Embedding(
@@ -85,7 +85,7 @@ class ModernTransformerLM(CausalLanguageModel):
             model_config.d_model,
         )
         self.blocks = nn.ModuleList(
-            ModernTransformerBlock(
+            ModelYBlock(
                 model_config.d_model,
                 num_heads=model_config.num_heads,
                 swiglu_dim=model_config.swiglu_dim,
@@ -117,7 +117,7 @@ class ModernTransformerLM(CausalLanguageModel):
     def prefill(
         self,
         input_ids: Tensor,
-    ) -> tuple[Tensor, ModernTransformerCache]:
+    ) -> tuple[Tensor, ModelYCache]:
         input_ids = input_ids[:, -self.config.context_length :]
         validate_input_ids(input_ids, context_length=self.config.context_length)
         values = self.token_embedding(input_ids)
@@ -125,7 +125,7 @@ class ModernTransformerLM(CausalLanguageModel):
         for block in self.blocks:
             values, attention_cache = block.prefill(values)
             attention_caches.append(attention_cache)
-        return self.lm_head(self.final_norm(values)), ModernTransformerCache(
+        return self.lm_head(self.final_norm(values)), ModelYCache(
             token_ids=input_ids,
             attention=attention_caches,
         )
@@ -133,13 +133,13 @@ class ModernTransformerLM(CausalLanguageModel):
     def decode_step(
         self,
         input_ids: Tensor,
-        cache: ModernTransformerCache,
-    ) -> tuple[Tensor, ModernTransformerCache]:
+        cache: ModelYCache,
+    ) -> tuple[Tensor, ModelYCache]:
         if input_ids.ndim == 1:
             input_ids = input_ids.unsqueeze(1)
         if input_ids.ndim != 2 or input_ids.shape[1] != 1:
             raise ValueError("decode_step input must have shape [batch, 1]")
-        if not isinstance(cache, ModernTransformerCache):
+        if not isinstance(cache, ModelYCache):
             raise ValueError("incremental cache has an incompatible structure")
         if (
             cache.token_ids.ndim != 2
@@ -170,23 +170,23 @@ class ModernTransformerLM(CausalLanguageModel):
                 position=position,
             )
             attention_caches.append(attention_cache)
-        return self.lm_head(self.final_norm(values)), ModernTransformerCache(
+        return self.lm_head(self.final_norm(values)), ModelYCache(
             token_ids=token_ids,
             attention=attention_caches,
         )
 
 
-def _build_modern_transformer(config: ModelConfig) -> CausalLanguageModel:
-    if not isinstance(config, ModernTransformerConfig):
-        raise TypeError("modern_transformer requires ModernTransformerConfig")
-    return ModernTransformerLM(config)
+def _build_model_y(config: ModelConfig) -> CausalLanguageModel:
+    if not isinstance(config, ModelYConfig):
+        raise TypeError("model_y requires ModelYConfig")
+    return ModelYLM(config)
 
 
-register_model("modern_transformer", _build_modern_transformer)
+register_model("model_y", _build_model_y)
 
 
 __all__ = [
-    "ModernTransformerBlock",
-    "ModernTransformerCache",
-    "ModernTransformerLM",
+    "ModelYBlock",
+    "ModelYCache",
+    "ModelYLM",
 ]

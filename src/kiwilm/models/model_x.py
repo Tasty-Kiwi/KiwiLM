@@ -9,8 +9,8 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from kiwilm.config import ModelConfig, ModelXConfig
+from kiwilm.models.attention import CausalSelfAttention
 from kiwilm.models.base import CausalLanguageModel
-from kiwilm.models.cnn_attention import CausalSelfAttention
 from kiwilm.models.components import CausalConv1d, initialize_weights, validate_input_ids
 from kiwilm.models.registry import register_model
 

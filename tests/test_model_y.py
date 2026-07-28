@@ -1,4 +1,4 @@
-"""Coverage for the parameter-matched modern Transformer control."""
+"""Coverage for Model Y and the matched X/Y smoke benchmark."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ import pytest
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.config import ModelConfig, ModernTransformerConfig
+from kiwilm.config import ModelConfig, ModelYConfig
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.generation import generate_token_stream, generate_tokens
 from kiwilm.inference import load_trained_model
 from kiwilm.models import (
-    ModernTransformerBlock,
-    ModernTransformerCache,
-    ModernTransformerLM,
+    ModelYBlock,
+    ModelYCache,
+    ModelYLM,
     ResidualSwiGLUBlock,
     RMSAttentionBlock,
     build_model,
 )
 
 
-def small_config(**overrides: object) -> ModernTransformerConfig:
+def small_config(**overrides: object) -> ModelYConfig:
     values: dict[str, object] = {
         "vocab_size": 67,
         "context_length": 12,
@@ -35,20 +35,20 @@ def small_config(**overrides: object) -> ModernTransformerConfig:
         "swiglu_dim": 24,
     }
     values.update(overrides)
-    return ModernTransformerConfig(**values)
+    return ModelYConfig(**values)
 
 
 def test_default_shape_parameter_count_weight_tying_and_recipe() -> None:
-    config = ModernTransformerConfig()
+    config = ModelYConfig()
     model = build_model(config)
     logits = model(torch.randint(config.vocab_size, (1, 8)))
 
     assert logits.shape == (1, 8, config.vocab_size)
     assert sum(parameter.numel() for parameter in model.parameters()) == 5_372_160
-    assert isinstance(model, ModernTransformerLM)
+    assert isinstance(model, ModelYLM)
     assert model.lm_head.weight is model.token_embedding.weight
     assert len(model.blocks) == 4
-    assert all(isinstance(block, ModernTransformerBlock) for block in model.blocks)
+    assert all(isinstance(block, ModelYBlock) for block in model.blocks)
     assert all(isinstance(block.attention, RMSAttentionBlock) for block in model.blocks)
     assert all(
         isinstance(block.feedforward, ResidualSwiGLUBlock)
@@ -60,7 +60,7 @@ def test_default_shape_parameter_count_weight_tying_and_recipe() -> None:
 def test_model_is_strictly_causal_deterministic_and_supports_backward() -> None:
     torch.manual_seed(61)
     config = small_config(dropout=0.5)
-    model = ModernTransformerLM(config).eval()
+    model = ModelYLM(config).eval()
     original = torch.randint(config.vocab_size, (2, config.context_length))
     changed = original.clone()
     changed[:, 7:] = torch.randint(config.vocab_size, (2, 5))
@@ -89,8 +89,10 @@ def test_config_round_trip_and_validation() -> None:
     serialized = config.to_dict()
 
     assert json.loads(json.dumps(serialized)) == serialized
-    assert ModernTransformerConfig.from_dict(serialized) == config
+    assert ModelYConfig.from_dict(serialized) == config
     assert ModelConfig.from_dict(serialized) == config
+    legacy_serialized = {**serialized, "architecture": "modern_transformer"}
+    assert ModelConfig.from_dict(legacy_serialized) == config
     with pytest.raises(ValueError, match="architecture"):
         small_config(architecture="transformer")
     with pytest.raises(ValueError, match="num_layers"):
@@ -110,7 +112,7 @@ def test_config_round_trip_and_validation() -> None:
 def test_cache_matches_forward_generation_stream_and_rollover() -> None:
     torch.manual_seed(67)
     config = small_config(context_length=8)
-    model = ModernTransformerLM(config).eval()
+    model = ModelYLM(config).eval()
     prompt = torch.randint(config.vocab_size, (2, 4))
 
     logits, cache = model.prefill(prompt)
@@ -157,13 +159,13 @@ def test_cache_matches_forward_generation_stream_and_rollover() -> None:
 
 
 def test_decode_step_rejects_malformed_cache() -> None:
-    model = ModernTransformerLM(small_config()).eval()
+    model = ModelYLM(small_config()).eval()
     _, cache = model.prefill(torch.randint(67, (2, 4)))
 
     with pytest.raises(ValueError, match="incompatible structure"):
         model.decode_step(
             torch.randint(67, (2, 1)),
-            ModernTransformerCache(
+            ModelYCache(
                 token_ids=cache.token_ids,
                 attention=cache.attention[:-1],
             ),
@@ -177,7 +179,7 @@ def test_decode_step_rejects_malformed_cache() -> None:
     with pytest.raises(ValueError, match="attention cache"):
         model.decode_step(
             torch.randint(67, (2, 1)),
-            ModernTransformerCache(
+            ModelYCache(
                 token_ids=cache.token_ids,
                 attention=malformed_attention,
             ),
@@ -187,7 +189,7 @@ def test_decode_step_rejects_malformed_cache() -> None:
 def test_checkpoint_reconstruction_on_available_devices(tmp_path: Path) -> None:
     config = small_config(context_length=8)
     checkpoint = save_checkpoint(
-        tmp_path / "modern-transformer.pt",
+        tmp_path / "model-y.pt",
         model=build_model(config),
         step=1,
         model_config=config,
@@ -212,6 +214,31 @@ def test_checkpoint_reconstruction_on_available_devices(tmp_path: Path) -> None:
 
         assert loaded_config == config
         assert torch.isfinite(loss)
+
+
+def test_checkpoint_reconstruction_accepts_temporary_architecture_name(
+    tmp_path: Path,
+) -> None:
+    config = small_config(context_length=8)
+    checkpoint = save_checkpoint(
+        tmp_path / "temporary-name.pt",
+        model=build_model(config),
+        step=1,
+        model_config=config,
+        data_fingerprint="a" * 64,
+    )
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    payload["model_config"]["architecture"] = "modern_transformer"
+    torch.save(payload, checkpoint)
+
+    model, loaded_config = load_trained_model(
+        checkpoint,
+        data_fingerprint="a" * 64,
+        device=torch.device("cpu"),
+    )
+
+    assert isinstance(model, ModelYLM)
+    assert loaded_config == config
 
 
 def test_reduced_smoke_benchmark_runner(
@@ -253,9 +280,9 @@ def test_reduced_smoke_benchmark_runner(
     )
     scripts_dir = Path(__file__).parents[1] / "scripts"
     monkeypatch.syspath_prepend(str(scripts_dir))
-    module_path = scripts_dir / "run_modern_transformer_smoke_benchmark.py"
+    module_path = scripts_dir / "run_model_xy_smoke_benchmark.py"
     spec = importlib.util.spec_from_file_location(
-        "modern_transformer_smoke",
+        "model_xy_smoke",
         module_path,
     )
     assert spec is not None and spec.loader is not None
@@ -290,7 +317,7 @@ def test_reduced_smoke_benchmark_runner(
             "1",
             "--model-x-swiglu-dim",
             "12",
-            "--transformer-swiglu-dim",
+            "--model-y-swiglu-dim",
             "12",
             "--warmup-steps",
             "0",
@@ -316,7 +343,7 @@ def test_reduced_smoke_benchmark_runner(
 
     assert exit_code == 0
     assert summary["models"]["model_x"]["training"]["step"] == 1
-    assert summary["models"]["modern_transformer"]["training"]["step"] == 1
+    assert summary["models"]["model_y"]["training"]["step"] == 1
     assert summary["comparison"]["generation_count"] == 2
     assert summary["settings"]["training_targets_per_model"] == 16
     assert (output_dir / "comparison" / "report.md").is_file()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retrain Model X and a parameter-matched modern Transformer."""
+"""Retrain the parameter-matched active candidates, Models X and Y."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ from run_transformer_smoke_benchmark import (
 )
 
 from kiwilm.comparison import compare_checkpoints
-from kiwilm.config import ModelXConfig, ModernTransformerConfig
+from kiwilm.config import ModelXConfig, ModelYConfig
 from kiwilm.data import PreparedTokenData
 from kiwilm.inference import load_trained_model
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
 
-DEFAULT_MODERN_TRANSFORMER_PARAMETERS = 5_372_160
+DEFAULT_MODEL_Y_PARAMETERS = 5_372_160
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("runs/benchmarks/model-x-vs-modern-transformer-smoke"),
+        default=Path("runs/benchmarks/model-xy-smoke"),
     )
     parser.add_argument(
         "--suite",
@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--d-model", type=int, default=256)
     parser.add_argument("--attention-heads", type=int, default=8)
     parser.add_argument("--model-x-swiglu-dim", type=int, default=640)
-    parser.add_argument("--transformer-swiglu-dim", type=int, default=720)
+    parser.add_argument("--model-y-swiglu-dim", type=int, default=720)
     parser.add_argument("--warmup-steps", type=int, default=100)
     parser.add_argument("--eval-interval", type=int, default=200)
     parser.add_argument("--eval-batches", type=int, default=20)
@@ -98,10 +98,10 @@ def main(argv: list[str] | None = None) -> int:
             **shared,
             swiglu_dim=args.model_x_swiglu_dim,
         ),
-        "modern_transformer": ModernTransformerConfig(
+        "model_y": ModelYConfig(
             **shared,
             num_layers=4,
-            swiglu_dim=args.transformer_swiglu_dim,
+            swiglu_dim=args.model_y_swiglu_dim,
         ),
     }
     train_config = TrainConfig(
@@ -198,14 +198,12 @@ def main(argv: list[str] | None = None) -> int:
         suite_path=args.suite,
         output_dir=args.output_dir / "comparison",
         device=device,
-        labels=["Model X", "Modern Transformer"],
+        labels=["Model X", "Model Y"],
     )
     model_x_parameters = int(model_results["model_x"]["parameter_count"])
-    transformer_parameters = int(
-        model_results["modern_transformer"]["parameter_count"]
-    )
+    model_y_parameters = int(model_results["model_y"]["parameter_count"])
     summary = {
-        "benchmark": "model-x-vs-modern-transformer-smoke",
+        "benchmark": "model-x-vs-model-y-smoke",
         "data_dir": str(args.data_dir.resolve()),
         "data_fingerprint": data.fingerprint,
         "device": str(device),
@@ -230,10 +228,10 @@ def main(argv: list[str] | None = None) -> int:
             "batch_mode": "packed",
         },
         "parameter_delta": {
-            "absolute": transformer_parameters - model_x_parameters,
+            "absolute": model_y_parameters - model_x_parameters,
             "percent_of_model_x": (
                 100.0
-                * (transformer_parameters - model_x_parameters)
+                * (model_y_parameters - model_x_parameters)
                 / model_x_parameters
             ),
         },
@@ -253,13 +251,13 @@ def _assert_default_parameter_counts(
         args.d_model,
         args.attention_heads,
         args.model_x_swiglu_dim,
-        args.transformer_swiglu_dim,
+        args.model_y_swiglu_dim,
     ) != (256, 8, 640, 720):
         return
     actual = {name: result["parameter_count"] for name, result in results.items()}
     expected = {
         "model_x": DEFAULT_MODEL_X_PARAMETERS,
-        "modern_transformer": DEFAULT_MODERN_TRANSFORMER_PARAMETERS,
+        "model_y": DEFAULT_MODEL_Y_PARAMETERS,
     }
     if actual != expected:
         raise RuntimeError(

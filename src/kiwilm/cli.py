@@ -21,7 +21,7 @@ from kiwilm.config import (
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
     ModelXConfig,
-    ModernTransformerConfig,
+    ModelYConfig,
     TransformerConfig,
 )
 from kiwilm.data import (
@@ -99,8 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
             "cnn_interleaved_attention",
             "cnn_deep_interleaved_attention",
             "transformer",
-            "modern_transformer",
             "model_x",
+            "model_y",
         ),
         default="gated_cnn",
     )
@@ -114,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--attention-feedforward-dim", type=int, default=1024)
     train_parser.add_argument("--swiglu-dim", type=int, default=640)
     train_parser.add_argument(
-        "--modern-transformer-swiglu-dim",
+        "--model-y-swiglu-dim",
         type=int,
         default=720,
     )
@@ -359,13 +359,13 @@ def _train_command(args: argparse.Namespace) -> int:
             feedforward_dim=args.attention_feedforward_dim,
         )
         default_output_dir = Path("runs/transformer")
-    elif args.architecture == "modern_transformer":
-        model_config = ModernTransformerConfig(
+    elif args.architecture == "model_y":
+        model_config = ModelYConfig(
             **shared_config,
             num_heads=args.attention_heads,
-            swiglu_dim=args.modern_transformer_swiglu_dim,
+            swiglu_dim=args.model_y_swiglu_dim,
         )
-        default_output_dir = Path("runs/modern-transformer")
+        default_output_dir = Path("runs/model-y")
     elif args.architecture == "model_x":
         model_config = ModelXConfig(
             **shared_config,

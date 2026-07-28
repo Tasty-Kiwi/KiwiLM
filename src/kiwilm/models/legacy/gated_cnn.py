@@ -1,4 +1,4 @@
-"""Causal gated-convolution language model."""
+"""Legacy causal gated-convolution language model."""
 
 from __future__ import annotations
 

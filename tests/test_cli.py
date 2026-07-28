@@ -15,7 +15,7 @@ from kiwilm.config import (
     CNNFFNAttentionConfig,
     GatedCNNConfig,
     ModelXConfig,
-    ModernTransformerConfig,
+    ModelYConfig,
     TransformerConfig,
 )
 from kiwilm.models import build_model
@@ -100,9 +100,7 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
         ["train", "--architecture", "cnn_deep_interleaved_attention"]
     )
     transformer = parser.parse_args(["train", "--architecture", "transformer"])
-    modern_transformer = parser.parse_args(
-        ["train", "--architecture", "modern_transformer"]
-    )
+    model_y = parser.parse_args(["train", "--architecture", "model_y"])
     model_x = parser.parse_args(["train", "--architecture", "model_x"])
     comparison = parser.parse_args(
         [
@@ -125,8 +123,8 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     assert model_e.architecture == "cnn_interleaved_attention"
     assert model_f.architecture == "cnn_deep_interleaved_attention"
     assert transformer.architecture == "transformer"
-    assert modern_transformer.architecture == "modern_transformer"
-    assert modern_transformer.modern_transformer_swiglu_dim == 720
+    assert model_y.architecture == "model_y"
+    assert model_y.model_y_swiglu_dim == 720
     assert model_x.architecture == "model_x"
     assert model_x.swiglu_dim == 640
     assert comparison.checkpoints == [
@@ -324,7 +322,7 @@ def test_model_x_cli_uses_default_output_directory(
     assert captured["output_dir"] == Path("runs/model-x")
 
 
-def test_modern_transformer_cli_uses_default_output_directory(
+def test_model_y_cli_uses_default_output_directory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -349,10 +347,10 @@ def test_modern_transformer_cli_uses_default_output_directory(
     monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
     monkeypatch.setattr(cli, "train", fake_train)
     args = cli.build_parser().parse_args(
-        ["train", "--architecture", "modern_transformer", "--max-steps", "1"]
+        ["train", "--architecture", "model_y", "--max-steps", "1"]
     )
 
     assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], ModernTransformerConfig)
+    assert isinstance(captured["model_config"], ModelYConfig)
     assert captured["model_config"].swiglu_dim == 720
-    assert captured["output_dir"] == Path("runs/modern-transformer")
+    assert captured["output_dir"] == Path("runs/model-y")
