@@ -32,9 +32,16 @@ from kiwilm.models.model_y import (
     ModelYCache,
     ModelYLM,
 )
+from kiwilm.models.model_z_parallel import (
+    PARALLEL_BRANCH_SCALE,
+    ModelZParallelBlock,
+    ModelZParallelCache,
+    ModelZParallelLM,
+)
 from kiwilm.models.registry import build_model, register_model
 
 __all__ = [
+    "PARALLEL_BRANCH_SCALE",
     "CNNAttentionCache",
     "CNNAttentionLM",
     "CNNAttentionMambaLM",
@@ -54,6 +61,9 @@ __all__ = [
     "ModelYBlock",
     "ModelYCache",
     "ModelYLM",
+    "ModelZParallelBlock",
+    "ModelZParallelCache",
+    "ModelZParallelLM",
     "RMSAttentionBlock",
     "RMSGatedCNNBlock",
     "ResidualFeedForwardBlock",

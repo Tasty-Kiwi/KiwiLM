@@ -80,6 +80,8 @@ class ModelConfig:
                 return cast(Self, ModelYConfig.from_dict(data))
             if architecture == "model_x":
                 return cast(Self, ModelXConfig.from_dict(data))
+            if architecture == "model_z_parallel":
+                return cast(Self, ModelZParallelConfig.from_dict(data))
         return cls(**data)
 
 
@@ -354,6 +356,44 @@ class ModelXConfig(ModelConfig):
 
         return cls(**_normalize_dilation_data(values, ("cnn_dilations",)))
 
+
+@dataclass(frozen=True, slots=True)
+class ModelZParallelConfig(ModelConfig):
+    """Configuration for Model Z-P's fixed parallel local/global fusion."""
+
+    architecture: str = "model_z_parallel"
+    kernel_size: int = 3
+    cnn_dilations: tuple[int, ...] = (1, 2)
+    num_heads: int = 8
+    swiglu_dim: int = 1280
+    rms_norm_eps: float = 1e-5
+
+    def __post_init__(self) -> None:
+        super(ModelZParallelConfig, self).__post_init__()
+        if self.architecture != "model_z_parallel":
+            raise ValueError(
+                "ModelZParallelConfig architecture must be 'model_z_parallel'"
+            )
+        _require_positive_int("kernel_size", self.kernel_size)
+        _require_positive_int("num_heads", self.num_heads)
+        _require_positive_int("swiglu_dim", self.swiglu_dim)
+        _validate_dilations(self, "cnn_dilations", expected_length=2)
+        _validate_attention_dimensions(self)
+        if (
+            isinstance(self.rms_norm_eps, bool)
+            or not isinstance(self.rms_norm_eps, (int, float))
+            or not math.isfinite(self.rms_norm_eps)
+            or self.rms_norm_eps <= 0
+        ):
+            raise ValueError("rms_norm_eps must be finite and positive")
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        """Reconstruct Model Z-P from a JSON-compatible mapping."""
+
+        return cls(**_normalize_dilation_data(values, ("cnn_dilations",)))
+
+
 def _validate_interleaved_attention_fields(
     config: CNNInterleavedAttentionConfig,
 ) -> None:
@@ -455,6 +495,7 @@ def _validate_attention_dimensions(
         | CNNInterleavedAttentionConfig
         | ModelXConfig
         | ModelYConfig
+        | ModelZParallelConfig
         | TransformerConfig
     ),
 ) -> None:

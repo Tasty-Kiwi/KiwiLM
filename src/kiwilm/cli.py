@@ -22,6 +22,7 @@ from kiwilm.config import (
     GatedCNNConfig,
     ModelXConfig,
     ModelYConfig,
+    ModelZParallelConfig,
     TransformerConfig,
 )
 from kiwilm.data import (
@@ -101,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
             "transformer",
             "model_x",
             "model_y",
+            "model_z_parallel",
         ),
         default="gated_cnn",
     )
@@ -117,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-y-swiglu-dim",
         type=int,
         default=720,
+    )
+    train_parser.add_argument(
+        "--model-z-swiglu-dim",
+        type=int,
+        default=1280,
     )
     train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
     train_parser.add_argument("--mamba-state-dim", type=int, default=16)
@@ -373,6 +380,13 @@ def _train_command(args: argparse.Namespace) -> int:
             swiglu_dim=args.swiglu_dim,
         )
         default_output_dir = Path("runs/model-x")
+    elif args.architecture == "model_z_parallel":
+        model_config = ModelZParallelConfig(
+            **shared_config,
+            num_heads=args.attention_heads,
+            swiglu_dim=args.model_z_swiglu_dim,
+        )
+        default_output_dir = Path("runs/model-z-parallel")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")

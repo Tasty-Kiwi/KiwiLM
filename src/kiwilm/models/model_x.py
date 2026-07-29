@@ -38,18 +38,29 @@ class RMSGatedCNNBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, values: Tensor) -> Tensor:
+        return values + self.mix(values)
+
+    def mix(self, values: Tensor) -> Tensor:
+        """Return the normalized gated-convolution update without a residual."""
+
         normalized = self.norm(values)
         convolved = self.conv(normalized.transpose(1, 2))
         gated = F.glu(convolved, dim=1).transpose(1, 2)
-        return values + self.dropout(gated)
+        return self.dropout(gated)
 
     def prefill(self, values: Tensor) -> tuple[Tensor, Tensor]:
         """Run a sequence and retain normalized convolution history."""
 
+        update, history = self.prefill_update(values)
+        return values + update, history
+
+    def prefill_update(self, values: Tensor) -> tuple[Tensor, Tensor]:
+        """Return a branch-only update and its normalized convolution history."""
+
         normalized = self.norm(values)
         convolved = self.conv(normalized.transpose(1, 2))
         gated = F.glu(convolved, dim=1).transpose(1, 2)
-        output = values + self.dropout(gated)
+        update = self.dropout(gated)
         history_length = self.conv.left_padding
         history = normalized[:, -history_length:, :] if history_length else normalized[:, :0, :]
         if history.shape[1] < history_length:
@@ -57,10 +68,20 @@ class RMSGatedCNNBlock(nn.Module):
                 history.transpose(1, 2),
                 (history_length - history.shape[1], 0),
             ).transpose(1, 2)
-        return output, history
+        return update, history
 
     def decode_step(self, values: Tensor, history: Tensor) -> tuple[Tensor, Tensor]:
         """Process one position from a cache produced by :meth:`prefill`."""
+
+        update, next_history = self.decode_step_update(values, history)
+        return values + update, next_history
+
+    def decode_step_update(
+        self,
+        values: Tensor,
+        history: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Return one branch-only update and advance convolution history."""
 
         if values.ndim != 3 or values.shape[1] != 1:
             raise ValueError("incremental CNN input must have shape [batch, 1, width]")
@@ -71,9 +92,9 @@ class RMSGatedCNNBlock(nn.Module):
         window = torch.cat((history, normalized), dim=1)
         convolved = self.conv.conv(window.transpose(1, 2))
         gated = F.glu(convolved, dim=1).transpose(1, 2)
-        output = values + self.dropout(gated)
+        update = self.dropout(gated)
         next_history = window[:, -required:, :] if required else window[:, :0, :]
-        return output, next_history
+        return update, next_history
 
 
 class ResidualSwiGLUBlock(nn.Module):
@@ -121,13 +142,26 @@ class RMSAttentionBlock(nn.Module):
         )
 
     def forward(self, values: Tensor) -> Tensor:
-        return values + self.attention(self.norm(values))
+        return values + self.mix(values)
+
+    def mix(self, values: Tensor) -> Tensor:
+        """Return the normalized attention update without a residual."""
+
+        return self.attention(self.norm(values))
 
     def prefill(self, values: Tensor) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         """Attend over a prompt and return the rotated attention cache."""
 
-        attended, cache = self.attention.prefill(self.norm(values))
-        return values + attended, cache
+        update, cache = self.prefill_update(values)
+        return values + update, cache
+
+    def prefill_update(
+        self,
+        values: Tensor,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        """Return a branch-only attention update and its KV cache."""
+
+        return self.attention.prefill(self.norm(values))
 
     def decode_step(
         self,
@@ -138,12 +172,27 @@ class RMSAttentionBlock(nn.Module):
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         """Attend one position over cached keys and values."""
 
-        attended, cache = self.attention.decode_step(
+        update, cache = self.decode_step_update(
+            values,
+            cache,
+            position=position,
+        )
+        return values + update, cache
+
+    def decode_step_update(
+        self,
+        values: Tensor,
+        cache: tuple[Tensor, Tensor],
+        *,
+        position: int,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        """Return one branch-only attention update and advance its KV cache."""
+
+        return self.attention.decode_step(
             self.norm(values),
             cache,
             position=position,
         )
-        return values + attended, cache
 
 
 @dataclass(slots=True)

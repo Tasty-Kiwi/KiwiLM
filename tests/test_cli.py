@@ -16,6 +16,7 @@ from kiwilm.config import (
     GatedCNNConfig,
     ModelXConfig,
     ModelYConfig,
+    ModelZParallelConfig,
     TransformerConfig,
 )
 from kiwilm.models import build_model
@@ -102,6 +103,7 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     transformer = parser.parse_args(["train", "--architecture", "transformer"])
     model_y = parser.parse_args(["train", "--architecture", "model_y"])
     model_x = parser.parse_args(["train", "--architecture", "model_x"])
+    model_z = parser.parse_args(["train", "--architecture", "model_z_parallel"])
     comparison = parser.parse_args(
         [
             "compare",
@@ -127,6 +129,8 @@ def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
     assert model_y.model_y_swiglu_dim == 720
     assert model_x.architecture == "model_x"
     assert model_x.swiglu_dim == 640
+    assert model_z.architecture == "model_z_parallel"
+    assert model_z.model_z_swiglu_dim == 1280
     assert comparison.checkpoints == [
         Path("b.pt"),
         Path("c.pt"),
@@ -354,3 +358,37 @@ def test_model_y_cli_uses_default_output_directory(
     assert isinstance(captured["model_config"], ModelYConfig)
     assert captured["model_config"].swiglu_dim == 720
     assert captured["output_dir"] == Path("runs/model-y")
+
+
+def test_model_z_parallel_cli_uses_default_output_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyTokenizer:
+        vocab_size = 64
+
+    class DummyData:
+        tokenizer = DummyTokenizer()
+
+    def fake_train(
+        model_config: object,
+        _data: object,
+        output_dir: Path,
+        _train_config: object,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        captured["model_config"] = model_config
+        captured["output_dir"] = output_dir
+        return {}
+
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
+    monkeypatch.setattr(cli, "train", fake_train)
+    args = cli.build_parser().parse_args(
+        ["train", "--architecture", "model_z_parallel", "--max-steps", "1"]
+    )
+
+    assert args.handler(args) == 0
+    assert isinstance(captured["model_config"], ModelZParallelConfig)
+    assert captured["model_config"].swiglu_dim == 1280
+    assert captured["output_dir"] == Path("runs/model-z-parallel")

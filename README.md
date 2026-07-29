@@ -3,14 +3,16 @@
 KiwiLM is a small PyTorch research project for comparing causal language-model
 architectures on
 [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories). The
-current work focuses on two parameter-matched candidates:
+current work compares two parameter-matched finalists with an experimental
+parallel-fusion wildcard:
 
 | Model | Architecture | Parameters |
 | --- | --- | ---: |
 | X | 2 gated CNN mixers, 2 attention mixers, 4 SwiGLU FFNs | 5,387,520 |
 | Y | 4 attention mixers, 4 SwiGLU FFNs | 5,372,160 |
+| Z-P | 2 parallel CNN/attention mixers, 2 wide SwiGLU FFNs | 5,387,008 |
 
-Both use 256-wide embeddings, pre-RMSNorm residual paths, RoPE causal
+All three use 256-wide embeddings, pre-RMSNorm residual paths, RoPE causal
 self-attention, bias-free SwiGLU projections, a final RMSNorm, and tied
 token/LM-head weights. They share the tokenizer, prepared-data format,
 token-counted trainer, evaluation, checkpoint, streaming-generation, and
@@ -64,6 +66,34 @@ temporary `modern_transformer` name still load and are normalized to Model Y
 during reconstruction.
 
 ![KiwiLM Model Y architecture](docs/model-y.svg)
+
+### Model Z-P
+
+Model Z-P tests whether local and global mixing are more useful when they
+operate on the same representation rather than sequentially:
+
+```text
+Embedding
+  -> 2 x [
+       ├─ pre-RMSNorm gated causal CNN
+       └─ pre-RMSNorm RoPE causal attention
+       -> residual + (CNN update + attention update) / sqrt(2)
+       -> pre-RMSNorm wide SwiGLU 1280 -> residual
+     ]
+  -> final RMSNorm -> tied LM head
+```
+
+The branches return updates without their own residual additions. This avoids
+accidentally adding the block input three times. Separate branch norms allow
+local and global processing to specialize while both receive the same residual
+representation. The fixed `1 / sqrt(2)` merge isolates parallel topology
+without introducing learned routing.
+
+The architecture identifier is `model_z_parallel`. Its cache contains two CNN
+histories and two attention KV caches, with the same exact 256-token
+crop-and-prefill rollover behavior as Model X.
+
+![KiwiLM Model Z-P architecture](docs/model-z-parallel.svg)
 
 ## Setup
 
@@ -120,32 +150,36 @@ Expected metadata:
 | Vocabulary | 8,192 |
 | Fingerprint | `a01d7037441e4cc0f1fe48615d384761c47cea506101708bbe42a0cee8ec7418` |
 
-The controlled smoke benchmark retrains X and Y from scratch for 2,000 packed
-steps and 16,384,000 targets each:
+The controlled smoke benchmark retrains X, Y, and Z-P from scratch for 2,000
+packed steps and 16,384,000 targets each:
 
 ```bash
-uv run python scripts/run_model_xy_smoke_benchmark.py \
+uv run python scripts/run_model_xyz_smoke_benchmark.py \
   --device auto
 ```
 
 Results are written under:
 
 ```text
-runs/benchmarks/model-xy-smoke/
+runs/benchmarks/model-xyz-smoke/
   model-x/
   model-y/
+  model-z-parallel/
   comparison/report.md
   comparison/results.jsonl
   summary.json
 ```
 
-The runner refuses to overwrite a non-empty output directory.
+The runner refuses to overwrite a non-empty output directory. In addition to
+matched loss, throughput, and cached/uncached generation measurements, it
+records each Z-P block's CNN and attention output RMS, norm ratio, cosine
+similarity, and merged-update-to-residual RMS.
 
 For a 4 GB Windows CUDA GPU, retain the same effective batch and exact target
 count with FP16 microbatches:
 
 ```powershell
-uv run --no-sync python scripts/run_model_xy_smoke_benchmark.py `
+uv run --no-sync python scripts/run_model_xyz_smoke_benchmark.py `
   --device cuda `
   --precision fp16 `
   --batch-size 8 `
@@ -300,12 +334,13 @@ src/kiwilm/
     attention.py       shared RoPE/SDPA attention
     model_x.py         active hybrid
     model_y.py         active modern Transformer
+    model_z_parallel.py experimental fixed parallel fusion
     legacy/            Models A-G, Mamba, and GPT baseline
   data.py              TinyStories preparation and batching
   training.py          packed/story-safe token-counted training
   generation.py        cached and streaming autoregressive generation
 scripts/
-  run_model_xy_smoke_benchmark.py
+  run_model_xyz_smoke_benchmark.py
 eval/
   story-consistency-prompts.json
 ```
