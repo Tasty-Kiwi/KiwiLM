@@ -20,12 +20,14 @@ from torch import nn
 from kiwilm.checkpoint import (
     CheckpointCompatibilityError,
     load_checkpoint,
+    load_model_weights,
     save_checkpoint,
 )
 from kiwilm.config import ModelConfig
 from kiwilm.data import PreparedTokenData, StoryBatchSampler
 from kiwilm.generation import generate as generate_text
 from kiwilm.models import build_model
+from kiwilm.sft import SFTBatchSampler
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +42,8 @@ class TrainConfig:
     warmup_steps: int = 100
     max_tokens: int | None = None
     warmup_tokens: int | None = None
-    batch_mode: Literal["packed", "story"] = "packed"
-    eval_mode: Literal["packed", "story", "both"] = "packed"
+    batch_mode: Literal["packed", "story", "sft"] = "packed"
+    eval_mode: Literal["packed", "story", "sft", "both"] = "packed"
     precision: Literal["fp32", "fp16", "bf16", "auto"] = "fp32"
     weight_decay: float = 0.1
     beta2: float = 0.95
@@ -68,10 +70,10 @@ class TrainConfig:
                 raise ValueError("warmup_tokens requires max_tokens")
             if self.warmup_tokens > self.max_tokens:
                 raise ValueError("warmup_tokens cannot exceed max_tokens")
-        if self.batch_mode not in {"packed", "story"}:
-            raise ValueError("batch_mode must be 'packed' or 'story'")
-        if self.eval_mode not in {"packed", "story", "both"}:
-            raise ValueError("eval_mode must be 'packed', 'story', or 'both'")
+        if self.batch_mode not in {"packed", "story", "sft"}:
+            raise ValueError("batch_mode must be 'packed', 'story', or 'sft'")
+        if self.eval_mode not in {"packed", "story", "sft", "both"}:
+            raise ValueError("eval_mode must be packed, story, sft, or both")
         if self.precision not in {"fp32", "fp16", "bf16", "auto"}:
             raise ValueError("precision must be fp32, fp16, bf16, or auto")
         _non_negative_int("eval_interval", self.eval_interval)
@@ -195,7 +197,7 @@ def evaluate(
     device: str | torch.device | None = None,
     generator: torch.Generator | None = None,
     split: str = "validation",
-    batch_mode: Literal["packed", "story"] = "packed",
+    batch_mode: Literal["packed", "story", "sft"] = "packed",
     precision: str = "fp32",
     seed: int = 43,
 ) -> dict[str, float]:
@@ -260,18 +262,21 @@ def evaluate(
 
 def train(
     model_config: ModelConfig,
-    data: PreparedTokenData,
+    data: PreparedTokenData | Any,
     output_dir: str | Path,
     train_config: TrainConfig | None = None,
     *,
     device: str | torch.device = "auto",
     resume_from: str | Path | None = None,
+    init_from: str | Path | None = None,
     model: nn.Module | None = None,
     log_fn: Callable[[str], None] | None = print,
 ) -> dict[str, Any]:
     """Train a model and return a JSON-serializable run summary."""
 
     settings = train_config or TrainConfig()
+    if resume_from is not None and init_from is not None:
+        raise ValueError("resume_from and init_from are mutually exclusive")
     resolved_device = choose_device(device)
     resolved_precision = _resolve_precision(settings.precision, resolved_device)
     run_directory = Path(output_dir)
@@ -301,7 +306,7 @@ def train(
     eval_generator = torch.Generator(device="cpu")
     eval_generator.manual_seed(settings.seed + 1)
     generators = {"train": train_generator, "validation": eval_generator}
-    story_sampler = (
+    batch_sampler = (
         StoryBatchSampler(
             data,
             "train",
@@ -309,9 +314,18 @@ def train(
             seed=settings.seed,
         )
         if settings.batch_mode == "story"
-        else None
+        else (
+            SFTBatchSampler(
+                data,
+                "train",
+                context_length=model_config.context_length,
+                seed=settings.seed,
+            )
+            if settings.batch_mode == "sft"
+            else None
+        )
     )
-    checkpoint_batcher = story_sampler if story_sampler is not None else data
+    checkpoint_batcher = batch_sampler if batch_sampler is not None else data
     scaler = torch.amp.GradScaler(
         "cuda",
         enabled=resolved_device.type == "cuda" and resolved_precision == "fp16",
@@ -321,6 +335,14 @@ def train(
     tokens_seen = 0
     best_validation_loss = math.inf
     best_validation_perplexity = math.inf
+    initialization: dict[str, Any] | None = None
+    if init_from is not None:
+        initialization = load_model_weights(
+            init_from,
+            model=network,
+            expected_model_config=model_config,
+            map_location="cpu",
+        )
     if resume_from is not None:
         _validate_resume_settings(resume_from, settings)
         checkpoint = load_checkpoint(
@@ -340,6 +362,9 @@ def train(
         if scaler_state:
             scaler.load_state_dict(scaler_state)
         checkpoint_metrics = checkpoint.get("metrics") or {}
+        saved_initialization = training_state.get("initialization")
+        if isinstance(saved_initialization, Mapping):
+            initialization = dict(saved_initialization)
         best_validation_loss = float(
             checkpoint_metrics.get("best_validation_loss", math.inf)
         )
@@ -364,7 +389,7 @@ def train(
             step_valid_targets = 0
             step_model_tokens = 0
             for _ in range(settings.grad_accum_steps):
-                if story_sampler is None:
+                if batch_sampler is None:
                     inputs, targets = _get_batch(
                         data,
                         "train",
@@ -374,7 +399,7 @@ def train(
                         generator=train_generator,
                     )
                 else:
-                    inputs, targets = story_sampler.get_batch(
+                    inputs, targets = batch_sampler.get_batch(
                         batch_size=settings.batch_size,
                         device=resolved_device,
                     )
@@ -517,7 +542,11 @@ def train(
                             best_validation_loss,
                             best_validation_perplexity,
                         ),
-                        training_state=_training_state(tokens_seen, scaler),
+                        training_state=_training_state(
+                            tokens_seen,
+                            scaler,
+                            initialization,
+                        ),
                     )
 
             should_checkpoint = (
@@ -544,7 +573,11 @@ def train(
                         best_validation_loss,
                         best_validation_perplexity,
                     ),
-                    training_state=_training_state(tokens_seen, scaler),
+                    training_state=_training_state(
+                        tokens_seen,
+                        scaler,
+                        initialization,
+                    ),
                 )
 
         if not latest_path.exists():
@@ -564,7 +597,11 @@ def train(
                     best_validation_loss,
                     best_validation_perplexity,
                 ),
-                training_state=_training_state(tokens_seen, scaler),
+                training_state=_training_state(
+                    tokens_seen,
+                    scaler,
+                    initialization,
+                ),
             )
 
         tokenizer = getattr(data, "tokenizer", None)
@@ -630,6 +667,7 @@ def train(
         "stop_reason": stop_reason,
         "validation_metrics": latest_validation,
         "sample": generated_sample,
+        "initialization": initialization,
     }
 
 
@@ -757,17 +795,22 @@ def _autocast_context(device: torch.device, precision: str) -> Any:
 
 
 def _training_state(
-    tokens_seen: int, scaler: torch.amp.GradScaler
+    tokens_seen: int,
+    scaler: torch.amp.GradScaler,
+    initialization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    state = {
         "tokens_seen": tokens_seen,
         "scaler_state": scaler.state_dict(),
     }
+    if initialization is not None:
+        state["initialization"] = dict(initialization)
+    return state
 
 
 def _evaluate_modes(
     model: nn.Module,
-    data: PreparedTokenData,
+    data: PreparedTokenData | Any,
     settings: TrainConfig,
     model_config: ModelConfig,
     device: torch.device,

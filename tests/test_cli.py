@@ -25,12 +25,18 @@ from kiwilm.models import build_model
 def test_cli_defaults_select_fast_smoke_profile() -> None:
     parser = build_parser()
     prepare = parser.parse_args(["prepare"])
+    prepare_instruct = parser.parse_args(
+        ["prepare-instruct", "--tokenizer-from", "data/tinystories-750k"]
+    )
     training = parser.parse_args(["train"])
 
     assert prepare.train_limit == 25_000
     assert prepare.validation_limit == 2_000
     assert prepare.vocab_size == 8_192
     assert prepare.tokenizer_from is None
+    assert prepare_instruct.train_limit == 50_000
+    assert prepare_instruct.validation_limit == 5_000
+    assert prepare_instruct.tokenizer_from == Path("data/tinystories-750k")
     exported = parser.parse_args(
         [
             "export-tokenizer",
@@ -54,6 +60,72 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert generation.cache == "auto"
     assert training.batch_mode == "packed"
     assert training.precision == "fp32"
+
+
+def test_cli_sft_defaults_and_requires_checkpoint() -> None:
+    parser = build_parser()
+    sft = parser.parse_args(["sft", "--init-from", "runs/model-x-750k/best.pt"])
+
+    assert sft.data_dir == Path("data/tinystories-instruct-50k")
+    assert sft.init_from == Path("runs/model-x-750k/best.pt")
+    assert sft.resume is None
+    assert sft.max_tokens == 10_000_000
+    assert sft.warmup_tokens == 250_000
+    assert sft.batch_size == 8
+    assert sft.grad_accum_steps == 4
+    assert sft.precision == "auto"
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["sft"])
+
+
+def test_sft_cli_uses_checkpoint_architecture_and_weight_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    model_config = ModelXConfig(
+        vocab_size=64,
+        context_length=8,
+        d_model=16,
+        dropout=0.0,
+        num_heads=2,
+        swiglu_dim=32,
+    )
+
+    class DummyTokenizer:
+        vocab_size = 64
+
+    class DummyData:
+        tokenizer = DummyTokenizer()
+
+    def fake_train(
+        received_config: object,
+        _data: object,
+        output_dir: Path,
+        settings: object,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        captured["model_config"] = received_config
+        captured["output_dir"] = output_dir
+        captured["settings"] = settings
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(cli, "PreparedSFTData", lambda *_args, **_kwargs: DummyData())
+    monkeypatch.setattr(cli, "_checkpoint_model_config", lambda _path: model_config)
+    monkeypatch.setattr(cli, "train", fake_train)
+    args = build_parser().parse_args(
+        ["sft", "--init-from", "runs/model-x-750k/best.pt"]
+    )
+
+    assert args.handler(args) == 0
+    assert captured["model_config"] == model_config
+    assert captured["output_dir"] == Path("runs/model-x-sft")
+    assert captured["init_from"] == Path("runs/model-x-750k/best.pt")
+    assert captured["resume_from"] is None
+    settings = captured["settings"]
+    assert settings.batch_mode == "sft"
+    assert settings.eval_mode == "sft"
 
 
 def test_cli_accepts_streaming_generation() -> None:

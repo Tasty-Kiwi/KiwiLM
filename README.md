@@ -292,6 +292,97 @@ do not count toward the token budget, loss denominator, or valid-token
 throughput. With `--eval-mode both`, story-safe validation selects the best
 checkpoint and packed validation is reported as a secondary metric.
 
+## Supervised instruction fine-tuning
+
+The SFT path uses the official `roneneldan/TinyStoriesInstruct` text files and
+the tokenizer already frozen for the 750k pretraining comparison. Preparation
+parses `<|endoftext|>`-separated records into a canonical conditional prompt:
+
+```text
+Features: ...
+Words: ...
+Summary: ...
+Random sentence: ...
+Story:
+```
+
+Only fields present in a source record are included. Prompt tokens are masked
+from the loss; the story response and its final EOS token are supervised.
+Long responses are split into non-overlapping target chunks, so each response
+target is counted exactly once per epoch and examples never mix. Chunks are
+shuffled deterministically; sampler epoch and cursor are checkpointed for exact
+resume.
+
+Prepare a 50k/5k instruction split:
+
+```bash
+uv run kiwilm prepare-instruct \
+  --output-dir data/tinystories-instruct-50k \
+  --tokenizer-from data/tinystories-750k \
+  --train-limit 50000 \
+  --validation-limit 5000
+```
+
+The download is pinned to a known TinyStoriesInstruct revision. For an offline
+or manually downloaded copy, add both `--train-file` and `--validation-file`.
+Preparation copies the tokenizer bytes and token IDs exactly and records
+content hashes rather than a machine-specific tokenizer source path. The
+official training text contains a few truncated UTF-8 punctuation sequences;
+preparation deterministically replaces only malformed sequences while
+preserving the ASCII record delimiters and surrounding story text. It also
+skips and reports structurally incomplete fragments, including the partial
+record at the beginning of the pinned validation file; limits count valid
+instruction examples.
+
+Fine-tune Model X from its best 750k checkpoint:
+
+```bash
+uv run kiwilm sft \
+  --data-dir data/tinystories-instruct-50k \
+  --init-from runs/model-x-750k/best.pt \
+  --output-dir runs/model-x-instruct \
+  --device cuda \
+  --precision fp16 \
+  --batch-size 8 \
+  --grad-accum-steps 4 \
+  --max-tokens 10000000 \
+  --warmup-tokens 250000 \
+  --max-steps 10000 \
+  --seed 42
+```
+
+Use `runs/model-y-750k/best.pt` and `runs/model-y-instruct` for the matched
+Model Y run. `--init-from` loads model weights only: optimizer, learning-rate
+schedule, sampler, token count, and AMP scaler start fresh. To continue an
+interrupted SFT run exactly, use `--resume runs/model-x-instruct/latest.pt`
+instead; `--init-from` and `--resume` are intentionally mutually exclusive.
+
+Evaluate response-only validation:
+
+```bash
+uv run kiwilm evaluate \
+  --data-dir data/tinystories-instruct-50k \
+  --checkpoint runs/model-x-instruct/best.pt \
+  --batch-mode sft \
+  --batches 50 \
+  --precision fp16 \
+  --device cuda
+```
+
+Generate from the same conditional format:
+
+```bash
+uv run kiwilm generate \
+  --data-dir data/tinystories-instruct-50k \
+  --checkpoint runs/model-x-instruct/best.pt \
+  --prompt $'Features: Dialogue\nWords: oak, gloomy, kind\nSummary: Two friends help each other get home before dark.\nStory:\n' \
+  --max-new-tokens 200 \
+  --temperature 0.7 \
+  --top-k 40 \
+  --cache auto \
+  --stream
+```
+
 ## Evaluate and generate
 
 Evaluate story-safe validation:
@@ -337,6 +428,7 @@ src/kiwilm/
     model_z_parallel.py experimental fixed parallel fusion
     legacy/            Models A-G, Mamba, and GPT baseline
   data.py              TinyStories preparation and batching
+  sft.py               instruction parsing and response-only SFT batches
   training.py          packed/story-safe token-counted training
   generation.py        cached and streaming autoregressive generation
 scripts/

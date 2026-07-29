@@ -20,6 +20,7 @@ from kiwilm.config import (
     CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
+    ModelConfig,
     ModelXConfig,
     ModelYConfig,
     ModelZParallelConfig,
@@ -37,6 +38,15 @@ from kiwilm.data import (
 )
 from kiwilm.generation import generate, generate_stream
 from kiwilm.inference import load_trained_model
+from kiwilm.sft import (
+    DEFAULT_INSTRUCT_DATASET,
+    DEFAULT_INSTRUCT_REVISION,
+    DEFAULT_INSTRUCT_TRAIN_LIMIT,
+    DEFAULT_INSTRUCT_VALIDATION_LIMIT,
+    PreparedSFTData,
+    load_prepared_data,
+    prepare_tinystories_instruct,
+)
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
 
 _load_trained_model = load_trained_model
@@ -74,6 +84,40 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--force", action="store_true")
     prepare_parser.add_argument("--quiet", action="store_true")
     prepare_parser.set_defaults(handler=_prepare_command)
+
+    prepare_instruct_parser = subparsers.add_parser(
+        "prepare-instruct",
+        help="prepare response-masked TinyStoriesInstruct data",
+    )
+    prepare_instruct_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("data/tinystories-instruct-50k"),
+    )
+    prepare_instruct_parser.add_argument("--tokenizer-from", type=Path, required=True)
+    prepare_instruct_parser.add_argument(
+        "--dataset-name",
+        default=DEFAULT_INSTRUCT_DATASET,
+    )
+    prepare_instruct_parser.add_argument(
+        "--revision",
+        default=DEFAULT_INSTRUCT_REVISION,
+    )
+    prepare_instruct_parser.add_argument(
+        "--train-limit",
+        type=int,
+        default=DEFAULT_INSTRUCT_TRAIN_LIMIT,
+    )
+    prepare_instruct_parser.add_argument(
+        "--validation-limit",
+        type=int,
+        default=DEFAULT_INSTRUCT_VALIDATION_LIMIT,
+    )
+    prepare_instruct_parser.add_argument("--train-file", type=Path)
+    prepare_instruct_parser.add_argument("--validation-file", type=Path)
+    prepare_instruct_parser.add_argument("--force", action="store_true")
+    prepare_instruct_parser.add_argument("--quiet", action="store_true")
+    prepare_instruct_parser.set_defaults(handler=_prepare_instruct_command)
 
     export_tokenizer_parser = subparsers.add_parser(
         "export-tokenizer",
@@ -166,6 +210,51 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.set_defaults(handler=_train_command)
 
+    sft_parser = subparsers.add_parser(
+        "sft",
+        help="supervised fine-tune a checkpoint on prepared instruction data",
+    )
+    _add_data_argument(
+        sft_parser,
+        default=Path("data/tinystories-instruct-50k"),
+    )
+    initialization = sft_parser.add_mutually_exclusive_group(required=True)
+    initialization.add_argument("--init-from", type=Path)
+    initialization.add_argument("--resume", type=Path)
+    sft_parser.add_argument("--output-dir", type=Path)
+    sft_parser.add_argument("--device", default="auto")
+    sft_parser.add_argument("--max-tokens", type=int, default=10_000_000)
+    sft_parser.add_argument("--warmup-tokens", type=int, default=250_000)
+    sft_parser.add_argument("--max-steps", type=int, default=10_000)
+    sft_parser.add_argument("--batch-size", type=int, default=8)
+    sft_parser.add_argument("--grad-accum-steps", type=int, default=4)
+    sft_parser.add_argument("--learning-rate", type=float, default=1e-5)
+    sft_parser.add_argument("--min-learning-rate", type=float, default=1e-6)
+    sft_parser.add_argument(
+        "--precision",
+        choices=("fp32", "fp16", "bf16", "auto"),
+        default="auto",
+    )
+    sft_parser.add_argument("--weight-decay", type=float, default=0.1)
+    sft_parser.add_argument("--beta2", type=float, default=0.95)
+    sft_parser.add_argument("--grad-clip", type=float, default=1.0)
+    sft_parser.add_argument("--eval-interval", type=int, default=250)
+    sft_parser.add_argument("--eval-batches", type=int, default=50)
+    sft_parser.add_argument("--checkpoint-interval", type=int, default=500)
+    sft_parser.add_argument("--log-interval", type=int, default=10)
+    sft_parser.add_argument(
+        "--sample-prompt",
+        default=(
+            "Features: Dialogue\n"
+            "Words: oak, gloomy, kind\n"
+            "Summary: Two friends help each other get home before dark.\n"
+            "Story:\n"
+        ),
+    )
+    sft_parser.add_argument("--sample-tokens", type=int, default=160)
+    sft_parser.add_argument("--seed", type=int, default=42)
+    sft_parser.set_defaults(handler=_sft_command)
+
     evaluate_parser = subparsers.add_parser(
         "evaluate",
         help="measure sampled validation loss and perplexity",
@@ -177,7 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--batches", type=int, default=20)
     evaluate_parser.add_argument("--seed", type=int, default=42)
     evaluate_parser.add_argument(
-        "--batch-mode", choices=("packed", "story"), default="packed"
+        "--batch-mode", choices=("packed", "story", "sft"), default="packed"
     )
     evaluate_parser.add_argument(
         "--precision",
@@ -252,11 +341,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_data_argument(parser: argparse.ArgumentParser) -> None:
+def _add_data_argument(
+    parser: argparse.ArgumentParser,
+    *,
+    default: Path = Path("data/tinystories"),
+) -> None:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path("data/tinystories"),
+        default=default,
         help="directory containing metadata.json and prepared token artifacts",
     )
 
@@ -281,6 +374,31 @@ def _prepare_command(args: argparse.Namespace) -> int:
             "fingerprint": metadata["fingerprint"],
             "dataset": metadata["dataset"],
             "vocab_size": metadata["tokenizer"]["vocab_size"],
+            "splits": metadata["splits"],
+        }
+    )
+    return 0
+
+
+def _prepare_instruct_command(args: argparse.Namespace) -> int:
+    metadata = prepare_tinystories_instruct(
+        args.output_dir,
+        tokenizer_from=args.tokenizer_from,
+        dataset_name=args.dataset_name,
+        revision=args.revision,
+        train_limit=args.train_limit,
+        validation_limit=args.validation_limit,
+        train_file=args.train_file,
+        validation_file=args.validation_file,
+        show_progress=not args.quiet,
+        force=args.force,
+    )
+    _print_json(
+        {
+            "output_dir": str(args.output_dir.resolve()),
+            "fingerprint": metadata["fingerprint"],
+            "dataset": metadata["dataset"],
+            "task": metadata["task"],
             "splits": metadata["splits"],
         }
     )
@@ -426,8 +544,55 @@ def _train_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sft_command(args: argparse.Namespace) -> int:
+    data = PreparedSFTData(args.data_dir, seed=args.seed)
+    source_checkpoint = args.init_from or args.resume
+    model_config = _checkpoint_model_config(source_checkpoint)
+    if model_config.vocab_size != data.tokenizer.vocab_size:
+        raise ValueError(
+            "SFT tokenizer vocabulary does not match the source checkpoint"
+        )
+    output_dir = args.output_dir or Path(
+        f"runs/{model_config.architecture.replace('_', '-')}-sft"
+    )
+    settings = TrainConfig(
+        max_steps=args.max_steps,
+        batch_size=args.batch_size,
+        grad_accum_steps=args.grad_accum_steps,
+        lr=args.learning_rate,
+        min_lr=args.min_learning_rate,
+        warmup_steps=0,
+        max_tokens=args.max_tokens,
+        warmup_tokens=args.warmup_tokens,
+        batch_mode="sft",
+        eval_mode="sft",
+        precision=args.precision,
+        weight_decay=args.weight_decay,
+        beta2=args.beta2,
+        grad_clip=args.grad_clip,
+        eval_interval=args.eval_interval,
+        eval_batches=args.eval_batches,
+        checkpoint_interval=args.checkpoint_interval,
+        log_interval=args.log_interval,
+        sample_prompt=args.sample_prompt,
+        sample_tokens=args.sample_tokens,
+        seed=args.seed,
+    )
+    summary = train(
+        model_config,
+        data,
+        output_dir,
+        settings,
+        device=args.device,
+        resume_from=args.resume,
+        init_from=args.init_from,
+    )
+    _print_json(summary)
+    return 0
+
+
 def _evaluate_command(args: argparse.Namespace) -> int:
-    data = PreparedTokenData(args.data_dir, seed=args.seed)
+    data = load_prepared_data(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
     model, config = load_trained_model(
         args.checkpoint,
@@ -459,7 +624,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
 
 
 def _generate_command(args: argparse.Namespace) -> int:
-    data = PreparedTokenData(args.data_dir, seed=args.seed)
+    data = load_prepared_data(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
     model, config = load_trained_model(
         args.checkpoint,
@@ -496,7 +661,7 @@ def _generate_command(args: argparse.Namespace) -> int:
 
 
 def _compare_command(args: argparse.Namespace) -> int:
-    data = PreparedTokenData(args.data_dir, seed=args.seed)
+    data = load_prepared_data(args.data_dir, seed=args.seed)
     if args.checkpoints is not None:
         if (
             args.checkpoint_a is not None
@@ -530,6 +695,16 @@ def _compare_command(args: argparse.Namespace) -> int:
     )
     _print_json(summary)
     return 0
+
+
+def _checkpoint_model_config(path: Path) -> ModelConfig:
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint must contain a mapping")
+    serialized = payload.get("model_config")
+    if not isinstance(serialized, dict):
+        raise ValueError("checkpoint does not contain a model configuration")
+    return ModelConfig.from_dict(serialized)
 
 
 def _print_json(value: Any) -> None:

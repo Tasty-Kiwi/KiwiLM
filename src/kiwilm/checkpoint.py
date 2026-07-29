@@ -6,6 +6,7 @@ containers so it can be loaded with ``torch.load(..., weights_only=True)``.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 import tempfile
@@ -23,6 +24,46 @@ CHECKPOINT_FORMAT_VERSION = 1
 
 class CheckpointCompatibilityError(ValueError):
     """Raised when a checkpoint does not belong to the requested run."""
+
+
+def load_model_weights(
+    path: str | Path,
+    *,
+    model: nn.Module,
+    expected_model_config: Any | None = None,
+    map_location: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Warm-start model weights without restoring run-specific training state."""
+
+    source = Path(path)
+    payload = torch.load(source, map_location=map_location, weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError(f"checkpoint {source} does not contain a mapping")
+    if payload.get("format_version") != CHECKPOINT_FORMAT_VERSION:
+        raise ValueError("unsupported checkpoint format for weight initialization")
+    resolved_expected_config = (
+        expected_model_config
+        if expected_model_config is not None
+        else getattr(model, "config", None)
+    )
+    if resolved_expected_config is not None:
+        expected = config_to_dict(resolved_expected_config)
+        actual = _normalise(payload.get("model_config", {}))
+        if (
+            isinstance(actual, dict)
+            and actual.get("architecture") == "modern_transformer"
+        ):
+            actual = {**actual, "architecture": "model_y"}
+        if actual != expected:
+            raise CheckpointCompatibilityError(
+                "checkpoint model configuration does not match the requested model"
+            )
+    model.load_state_dict(payload["model_state_dict"], strict=True)
+    return {
+        "checkpoint_sha256": _sha256_file(source),
+        "source_step": payload.get("step"),
+        "source_data_fingerprint": payload.get("data_fingerprint"),
+    }
 
 
 def config_to_dict(config: Any) -> dict[str, Any]:
@@ -249,3 +290,11 @@ def _nested_tuple(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return tuple(_nested_tuple(item) for item in value)
     return value
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
