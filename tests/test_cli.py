@@ -37,6 +37,21 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert prepare_instruct.train_limit == 50_000
     assert prepare_instruct.validation_limit == 5_000
     assert prepare_instruct.tokenizer_from == Path("data/tinystories-750k")
+    assert prepare_instruct.sft_format == "v1"
+    assert prepare_instruct.required_word_weight == 3.0
+    prepare_instruct_v2 = parser.parse_args(
+        [
+            "prepare-instruct",
+            "--tokenizer-from",
+            "data/tinystories-750k",
+            "--sft-format",
+            "v2",
+            "--required-word-weight",
+            "4",
+        ]
+    )
+    assert prepare_instruct_v2.sft_format == "v2"
+    assert prepare_instruct_v2.required_word_weight == 4.0
     exported = parser.parse_args(
         [
             "export-tokenizer",
@@ -108,6 +123,10 @@ def test_sft_cli_uses_checkpoint_architecture_and_weight_initialization(
     class DummyData:
         tokenizer = DummyTokenizer()
 
+        @staticmethod
+        def format_prompt(prompt: str) -> str:
+            return "v2:" + prompt
+
     def fake_train(
         received_config: object,
         _data: object,
@@ -136,6 +155,7 @@ def test_sft_cli_uses_checkpoint_architecture_and_weight_initialization(
     settings = captured["settings"]
     assert settings.batch_mode == "sft"
     assert settings.eval_mode == "sft"
+    assert settings.sample_prompt.startswith("v2:")
 
 
 def test_cli_accepts_streaming_generation() -> None:
@@ -151,6 +171,45 @@ def test_cli_accepts_streaming_generation() -> None:
     )
 
     assert args.stream
+
+
+def test_generate_applies_prepared_sft_prompt_format(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, str] = {}
+
+    class DummySFTData:
+        fingerprint = "a" * 64
+        tokenizer = object()
+
+        @staticmethod
+        def format_prompt(prompt: str) -> str:
+            return "instruction\n" + prompt
+
+    monkeypatch.setattr(cli, "PreparedSFTData", DummySFTData)
+    monkeypatch.setattr(cli, "load_prepared_data", lambda *_args, **_kwargs: DummySFTData())
+    monkeypatch.setattr(
+        cli,
+        "load_trained_model",
+        lambda *_args, **_kwargs: (
+            torch.nn.Identity(),
+            type("Config", (), {"context_length": 8})(),
+        ),
+    )
+
+    def fake_generate(_model: object, _tokenizer: object, prompt: str, **_kwargs: object) -> str:
+        captured["prompt"] = prompt
+        return "story"
+
+    monkeypatch.setattr(cli, "generate", fake_generate)
+    args = build_parser().parse_args(
+        ["generate", "--checkpoint", "model.pt", "--prompt", "Features: Dialogue"]
+    )
+
+    assert args.handler(args) == 0
+    assert captured["prompt"] == "instruction\nFeatures: Dialogue"
+    assert capsys.readouterr().out == "story\n"
 
 
 def test_cli_selects_model_b_and_comparison_defaults() -> None:

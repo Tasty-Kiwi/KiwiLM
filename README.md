@@ -313,15 +313,32 @@ target is counted exactly once per epoch and examples never mix. Chunks are
 shuffled deterministically; sampler epoch and cursor are checkpointed for exact
 resume.
 
-Prepare a 50k/5k instruction split:
+Prepare the recommended constraint-aware v2 50k/5k instruction split:
 
 ```bash
 uv run kiwilm prepare-instruct \
-  --output-dir data/tinystories-instruct-50k \
+  --output-dir data/tinystories-instruct-v2-50k \
   --tokenizer-from data/tinystories-750k \
   --train-limit 50000 \
-  --validation-limit 5000
+  --validation-limit 5000 \
+  --sft-format v2 \
+  --required-word-weight 3
 ```
+
+SFT v2 prepends a fixed instruction telling the model to follow every
+condition and use each requested word. It also writes a content-addressed
+one-byte-per-token constraint mask. During training, response tokens that
+spell exact requested-word occurrences receive 3x loss weight; all other
+response tokens retain weight 1, while prompt and padding tokens remain at
+zero. Valid-target token budgets still count every response target once, and
+validation remains ordinary unweighted response perplexity. This keeps
+checkpoint selection and X/Y comparisons directly interpretable.
+
+The original artifact format remains available by omitting `--sft-format v2`.
+Existing v1 datasets and checkpoints continue to load unchanged. Generation,
+training samples, and adherence reports automatically add the v2 instruction
+prefix when the selected prepared dataset requires it, so prompts supplied at
+the CLI still begin with `Features:`.
 
 The download is pinned to a known TinyStoriesInstruct revision. For an offline
 or manually downloaded copy, add both `--train-file` and `--validation-file`.
@@ -338,9 +355,9 @@ Fine-tune Model X from its best 750k checkpoint:
 
 ```bash
 uv run kiwilm sft \
-  --data-dir data/tinystories-instruct-50k \
+  --data-dir data/tinystories-instruct-v2-50k \
   --init-from runs/model-x-750k/best.pt \
-  --output-dir runs/model-x-instruct \
+  --output-dir runs/model-x-instruct-v2 \
   --device cuda \
   --precision fp16 \
   --batch-size 8 \
@@ -361,8 +378,8 @@ Evaluate response-only validation:
 
 ```bash
 uv run kiwilm evaluate \
-  --data-dir data/tinystories-instruct-50k \
-  --checkpoint runs/model-x-instruct/best.pt \
+  --data-dir data/tinystories-instruct-v2-50k \
+  --checkpoint runs/model-x-instruct-v2/best.pt \
   --batch-mode sft \
   --batches 50 \
   --precision fp16 \
@@ -378,8 +395,8 @@ Generate from the same conditional format:
 
 ```bash
 uv run kiwilm generate \
-  --data-dir data/tinystories-instruct-50k \
-  --checkpoint runs/model-x-instruct/best.pt \
+  --data-dir data/tinystories-instruct-v2-50k \
+  --checkpoint runs/model-x-instruct-v2/best.pt \
   --prompt $'Features: Dialogue\nWords: oak, gloomy, kind\nSummary: Two friends help each other get home before dark.\nStory:\n' \
   --max-new-tokens 200 \
   --temperature 0.7 \

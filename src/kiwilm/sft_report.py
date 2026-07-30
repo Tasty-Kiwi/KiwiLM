@@ -65,10 +65,11 @@ def generate_sft_adherence_report(
         for profile in suite["sampling_profiles"]:
             for model, config, label, checkpoint in models:
                 top_k = profile["top_k"]
+                formatted_prompt = data.format_prompt(prompt_case["prompt"])
                 response = generate(
                     model,
                     data.tokenizer,
-                    prompt_case["prompt"],
+                    formatted_prompt,
                     max_new_tokens=profile.get(
                         "max_new_tokens",
                         suite["max_new_tokens"],
@@ -92,7 +93,7 @@ def generate_sft_adherence_report(
                         "architecture": config.architecture,
                         "data_fingerprint": data.fingerprint,
                         "cache": cache,
-                        "prompt": prompt_case["prompt"],
+                        "prompt": formatted_prompt,
                         "response": response,
                         "scores": scores,
                         "temperature": profile["temperature"],

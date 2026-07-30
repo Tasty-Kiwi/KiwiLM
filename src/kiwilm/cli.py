@@ -43,6 +43,8 @@ from kiwilm.sft import (
     DEFAULT_INSTRUCT_REVISION,
     DEFAULT_INSTRUCT_TRAIN_LIMIT,
     DEFAULT_INSTRUCT_VALIDATION_LIMIT,
+    DEFAULT_REQUIRED_WORD_WEIGHT,
+    SFT_FORMATS,
     PreparedSFTData,
     load_prepared_data,
     prepare_tinystories_instruct,
@@ -116,6 +118,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prepare_instruct_parser.add_argument("--train-file", type=Path)
     prepare_instruct_parser.add_argument("--validation-file", type=Path)
+    prepare_instruct_parser.add_argument(
+        "--sft-format",
+        choices=SFT_FORMATS,
+        default="v1",
+    )
+    prepare_instruct_parser.add_argument(
+        "--required-word-weight",
+        type=float,
+        default=DEFAULT_REQUIRED_WORD_WEIGHT,
+    )
     prepare_instruct_parser.add_argument("--force", action="store_true")
     prepare_instruct_parser.add_argument("--quiet", action="store_true")
     prepare_instruct_parser.set_defaults(handler=_prepare_instruct_command)
@@ -424,6 +436,8 @@ def _prepare_instruct_command(args: argparse.Namespace) -> int:
         validation_limit=args.validation_limit,
         train_file=args.train_file,
         validation_file=args.validation_file,
+        sft_format=args.sft_format,
+        required_word_weight=args.required_word_weight,
         show_progress=not args.quiet,
         force=args.force,
     )
@@ -433,6 +447,7 @@ def _prepare_instruct_command(args: argparse.Namespace) -> int:
             "fingerprint": metadata["fingerprint"],
             "dataset": metadata["dataset"],
             "task": metadata["task"],
+            "config": metadata["config"],
             "splits": metadata["splits"],
         }
     )
@@ -608,7 +623,7 @@ def _sft_command(args: argparse.Namespace) -> int:
         eval_batches=args.eval_batches,
         checkpoint_interval=args.checkpoint_interval,
         log_interval=args.log_interval,
-        sample_prompt=args.sample_prompt,
+        sample_prompt=data.format_prompt(args.sample_prompt),
         sample_tokens=args.sample_tokens,
         seed=args.seed,
     )
@@ -674,11 +689,16 @@ def _generate_command(args: argparse.Namespace) -> int:
         "device": device,
         "cache": args.cache,
     }
+    prompt = (
+        data.format_prompt(args.prompt)
+        if isinstance(data, PreparedSFTData)
+        else args.prompt
+    )
     if args.stream:
         for chunk in generate_stream(
             model,
             data.tokenizer,
-            args.prompt,
+            prompt,
             **generation_options,
         ):
             print(chunk, end="", flush=True)
@@ -687,7 +707,7 @@ def _generate_command(args: argparse.Namespace) -> int:
         text = generate(
             model,
             data.tokenizer,
-            args.prompt,
+            prompt,
             **generation_options,
         )
         print(text)

@@ -44,7 +44,11 @@ def test_byte_bpe_round_trip_special_tokens_and_json(tmp_path: Path) -> None:
     )
     text = "Привет 👋"
     plain = tokenizer.encode(text)
+    offset_ids, offsets = tokenizer.encode_with_offsets(text)
     bounded = tokenizer.encode(text, add_bos=True, add_eos=True)
+    assert offset_ids == plain
+    assert len(offsets) == len(plain)
+    assert all(0 <= start <= end <= len(text) for start, end in offsets)
     assert bounded == [tokenizer.bos_id, *plain, tokenizer.eos_id]
     assert tokenizer.decode(bounded) == text
 

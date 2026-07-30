@@ -77,7 +77,11 @@ def test_sft_report_writes_scored_machine_and_human_outputs(
         ),
         encoding="utf-8",
     )
-    data = SimpleNamespace(fingerprint="a" * 64, tokenizer=object())
+    data = SimpleNamespace(
+        fingerprint="a" * 64,
+        tokenizer=object(),
+        format_prompt=lambda prompt: prompt,
+    )
     config = SimpleNamespace(architecture="model_x", context_length=32)
     monkeypatch.setattr(
         sft_report,

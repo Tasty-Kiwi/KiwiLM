@@ -31,6 +31,14 @@ SFT_TASK = "conditional_story_sft"
 SFT_SOURCE_DECODING = "utf-8-replace"
 SFT_SPLITS = ("train", "validation")
 SFT_INDEX_COLUMNS = 3
+SFT_FORMAT_V1 = "v1"
+SFT_FORMAT_V2 = "v2"
+SFT_FORMATS = (SFT_FORMAT_V1, SFT_FORMAT_V2)
+SFT_V2_INSTRUCTION = (
+    "Instruction: Write a story that follows every provided condition. "
+    "Use every requested word exactly as written.\n"
+)
+DEFAULT_REQUIRED_WORD_WEIGHT = 3.0
 
 SFTSplit = Literal["train", "validation"]
 _FIELD_PATTERN = re.compile(
@@ -46,13 +54,19 @@ class InstructionExample:
 
     prompt: str
     response: str
+    required_words: tuple[str, ...]
 
 
-def parse_tinystories_instruct_record(record: str) -> InstructionExample:
+def parse_tinystories_instruct_record(
+    record: str,
+    *,
+    sft_format: str = SFT_FORMAT_V1,
+) -> InstructionExample:
     """Canonicalize one raw TinyStoriesInstruct record."""
 
     if not isinstance(record, str):
         raise TypeError("instruction record must be a string")
+    _validate_sft_format(sft_format)
     normalized = record.replace("\r\n", "\n").replace("\r", "\n").strip()
     if normalized.endswith(INSTRUCT_RECORD_SEPARATOR):
         normalized = normalized[: -len(INSTRUCT_RECORD_SEPARATOR)].rstrip()
@@ -95,9 +109,19 @@ def parse_tinystories_instruct_record(record: str) -> InstructionExample:
     if not prompt_lines:
         raise ValueError("instruction record has no conditioning fields")
     prompt_lines.append("Story:")
+    required_words = tuple(
+        word.strip()
+        for word in fields.get("Words", "").split(",")
+        if word.strip()
+    )
     return InstructionExample(
-        prompt="\n".join(prompt_lines) + "\n",
+        prompt=(
+            (SFT_V2_INSTRUCTION if sft_format == SFT_FORMAT_V2 else "")
+            + "\n".join(prompt_lines)
+            + "\n"
+        ),
         response=response,
+        required_words=required_words,
     )
 
 
@@ -131,6 +155,8 @@ def prepare_tinystories_instruct(
     validation_limit: int = DEFAULT_INSTRUCT_VALIDATION_LIMIT,
     train_file: str | Path | None = None,
     validation_file: str | Path | None = None,
+    sft_format: str = SFT_FORMAT_V1,
+    required_word_weight: float = DEFAULT_REQUIRED_WORD_WEIGHT,
     show_progress: bool = True,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -163,6 +189,8 @@ def prepare_tinystories_instruct(
         revision=revision,
         train_limit=train_limit,
         validation_limit=validation_limit,
+        sft_format=sft_format,
+        required_word_weight=required_word_weight,
         show_progress=show_progress,
         force=force,
     )
@@ -178,6 +206,8 @@ def prepare_instruct_from_records(
     revision: str | None = None,
     train_limit: int = 0,
     validation_limit: int = 0,
+    sft_format: str = SFT_FORMAT_V1,
+    required_word_weight: float = DEFAULT_REQUIRED_WORD_WEIGHT,
     show_progress: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
@@ -185,6 +215,8 @@ def prepare_instruct_from_records(
 
     _validate_limit("train_limit", train_limit)
     _validate_limit("validation_limit", validation_limit)
+    _validate_sft_format(sft_format)
+    _validate_required_word_weight(required_word_weight)
     destination = Path(output_dir)
     metadata_path = destination / "metadata.json"
     if metadata_path.exists() and not force:
@@ -215,6 +247,13 @@ def prepare_instruct_from_records(
         "validation_index": _temporary_path(destination / "validation.index"),
         "metadata": _temporary_path(metadata_path),
     }
+    if sft_format == SFT_FORMAT_V2:
+        temporary["train_constraint_mask"] = _temporary_path(
+            destination / "train.constraint-mask"
+        )
+        temporary["validation_constraint_mask"] = _temporary_path(
+            destination / "validation.constraint-mask"
+        )
     try:
         _write_bytes(temporary["tokenizer"], tokenizer_bytes)
         train_details = _write_sft_split(
@@ -222,6 +261,8 @@ def prepare_instruct_from_records(
             temporary["train_index"],
             train_records,
             tokenizer_source.tokenizer,
+            constraint_mask_path=temporary.get("train_constraint_mask"),
+            sft_format=sft_format,
             split="train",
             limit=train_limit,
             show_progress=show_progress,
@@ -231,6 +272,8 @@ def prepare_instruct_from_records(
             temporary["validation_index"],
             validation_records,
             tokenizer_source.tokenizer,
+            constraint_mask_path=temporary.get("validation_constraint_mask"),
+            sft_format=sft_format,
             split="validation",
             limit=validation_limit,
             show_progress=show_progress,
@@ -246,10 +289,26 @@ def prepare_instruct_from_records(
             "validation_index": destination
             / f"validation-index-{validation_details['index_sha256']}.bin",
         }
+        if sft_format == SFT_FORMAT_V2:
+            artifacts["train_constraint_mask"] = destination / (
+                "train-constraint-mask-"
+                f"{train_details['constraint_mask_sha256']}.bin"
+            )
+            artifacts["validation_constraint_mask"] = destination / (
+                "validation-constraint-mask-"
+                f"{validation_details['constraint_mask_sha256']}.bin"
+            )
         train_details["token_file"] = artifacts["train_tokens"].name
         train_details["index_file"] = artifacts["train_index"].name
         validation_details["token_file"] = artifacts["validation_tokens"].name
         validation_details["index_file"] = artifacts["validation_index"].name
+        if sft_format == SFT_FORMAT_V2:
+            train_details["constraint_mask_file"] = artifacts[
+                "train_constraint_mask"
+            ].name
+            validation_details["constraint_mask_file"] = artifacts[
+                "validation_constraint_mask"
+            ].name
         copied_tokenizer = dict(tokenizer_details)
         copied_tokenizer["file"] = artifacts["tokenizer"].name
         copied_tokenizer["reused_from"] = {
@@ -276,6 +335,15 @@ def prepare_instruct_from_records(
                 "source_decoding": SFT_SOURCE_DECODING,
             },
         }
+        if sft_format == SFT_FORMAT_V2:
+            metadata["config"].update(
+                {
+                    "sft_format": SFT_FORMAT_V2,
+                    "instruction_prefix": SFT_V2_INSTRUCTION,
+                    "required_word_weight": float(required_word_weight),
+                    "constraint_mask": "required_word_response_tokens",
+                }
+            )
         metadata["fingerprint"] = metadata_fingerprint(metadata)
         _write_json(temporary["metadata"], metadata)
         for name, artifact in artifacts.items():
@@ -298,6 +366,8 @@ def _write_sft_split(
     records: Iterable[str],
     tokenizer: ByteBPETokenizer,
     *,
+    constraint_mask_path: Path | None,
+    sft_format: str,
     split: str,
     limit: int,
     show_progress: bool,
@@ -314,51 +384,92 @@ def _write_sft_split(
         )
     token_digest = hashlib.sha256()
     index_digest = hashlib.sha256()
+    constraint_mask_digest = hashlib.sha256()
     record_count = 0
     skipped_records = 0
     token_count = 0
     response_targets = 0
-    with token_path.open("wb") as token_stream, index_path.open("wb") as index_stream:
-        for raw_record in selected:
-            if limit and record_count >= limit:
-                break
-            try:
-                example = parse_tinystories_instruct_record(raw_record)
-            except ValueError:
-                # The pinned validation file begins with a truncated fragment
-                # from a preceding record. Keep preparation robust to such
-                # structurally incomplete source fragments and record how many
-                # were excluded.
-                skipped_records += 1
-                continue
-            prompt_ids = tokenizer.encode(example.prompt)
-            response_ids = tokenizer.encode(example.response)
-            sequence = [
-                tokenizer.bos_id,
-                *prompt_ids,
-                *response_ids,
-                tokenizer.eos_id,
-            ]
-            response_start = 1 + len(prompt_ids)
-            encoded_tokens = np.asarray(sequence, dtype="<u2").tobytes()
-            encoded_index = np.asarray(
-                (token_count, response_start, len(sequence)),
-                dtype="<u8",
-            ).tobytes()
-            token_stream.write(encoded_tokens)
-            index_stream.write(encoded_index)
-            token_digest.update(encoded_tokens)
-            index_digest.update(encoded_index)
-            record_count += 1
-            token_count += len(sequence)
-            response_targets += len(sequence) - response_start
-        token_stream.flush()
-        index_stream.flush()
-        os.fsync(token_stream.fileno())
-        os.fsync(index_stream.fileno())
+    constraint_targets = 0
+    required_words = 0
+    matched_required_words = 0
+    mask_stream = (
+        constraint_mask_path.open("wb") if constraint_mask_path is not None else None
+    )
+    try:
+        token_stream = token_path.open("wb")
+        index_stream = index_path.open("wb")
+        try:
+            for raw_record in selected:
+                if limit and record_count >= limit:
+                    break
+                try:
+                    example = parse_tinystories_instruct_record(
+                        raw_record,
+                        sft_format=sft_format,
+                    )
+                except ValueError:
+                    # The pinned validation file begins with a truncated fragment
+                    # from a preceding record. Keep preparation robust to such
+                    # structurally incomplete source fragments and record how many
+                    # were excluded.
+                    skipped_records += 1
+                    continue
+                prompt_ids = tokenizer.encode(example.prompt)
+                if mask_stream is None:
+                    response_ids = tokenizer.encode(example.response)
+                    response_offsets: list[tuple[int, int]] = []
+                else:
+                    response_ids, response_offsets = tokenizer.encode_with_offsets(
+                        example.response
+                    )
+                sequence = [
+                    tokenizer.bos_id,
+                    *prompt_ids,
+                    *response_ids,
+                    tokenizer.eos_id,
+                ]
+                response_start = 1 + len(prompt_ids)
+                encoded_tokens = np.asarray(sequence, dtype="<u2").tobytes()
+                encoded_index = np.asarray(
+                    (token_count, response_start, len(sequence)),
+                    dtype="<u8",
+                ).tobytes()
+                token_stream.write(encoded_tokens)
+                index_stream.write(encoded_index)
+                token_digest.update(encoded_tokens)
+                index_digest.update(encoded_index)
+                if mask_stream is not None:
+                    constraint_mask, matched = _constraint_mask(
+                        example,
+                        response_offsets,
+                        sequence_length=len(sequence),
+                        response_start=response_start,
+                    )
+                    encoded_mask = constraint_mask.tobytes()
+                    mask_stream.write(encoded_mask)
+                    constraint_mask_digest.update(encoded_mask)
+                    constraint_targets += int(constraint_mask.sum())
+                    required_words += len(example.required_words)
+                    matched_required_words += matched
+                record_count += 1
+                token_count += len(sequence)
+                response_targets += len(sequence) - response_start
+            token_stream.flush()
+            index_stream.flush()
+            os.fsync(token_stream.fileno())
+            os.fsync(index_stream.fileno())
+            if mask_stream is not None:
+                mask_stream.flush()
+                os.fsync(mask_stream.fileno())
+        finally:
+            token_stream.close()
+            index_stream.close()
+    finally:
+        if mask_stream is not None:
+            mask_stream.close()
     if record_count == 0:
         raise ValueError(f"{split} contains no valid instruction records")
-    return {
+    details = {
         "records": record_count,
         "skipped_records": skipped_records,
         "tokens": token_count,
@@ -368,6 +479,17 @@ def _write_sft_split(
         "token_sha256": token_digest.hexdigest(),
         "index_sha256": index_digest.hexdigest(),
     }
+    if mask_stream is not None:
+        details.update(
+            {
+                "constraint_mask_bytes": token_count,
+                "constraint_mask_sha256": constraint_mask_digest.hexdigest(),
+                "constraint_targets": constraint_targets,
+                "required_words": required_words,
+                "matched_required_words": matched_required_words,
+            }
+        )
+    return details
 
 
 class PreparedSFTData:
@@ -407,8 +529,20 @@ class PreparedSFTData:
         ):
             raise ValueError("prepared SFT tokenizer checksum mismatch")
         self.tokenizer = ByteBPETokenizer.load(tokenizer_path)
+        config = _mapping(self.metadata.get("config"), "config")
+        self.sft_format = config.get("sft_format", SFT_FORMAT_V1)
+        _validate_sft_format(self.sft_format)
+        raw_required_word_weight = config.get("required_word_weight", 1.0)
+        _validate_required_word_weight(raw_required_word_weight)
+        self.required_word_weight = float(raw_required_word_weight)
+        if (
+            self.sft_format == SFT_FORMAT_V2
+            and config.get("instruction_prefix") != SFT_V2_INSTRUCTION
+        ):
+            raise ValueError("prepared SFT v2 instruction prefix is incompatible")
         self._tokens: dict[str, np.memmap] = {}
         self._indices: dict[str, np.memmap] = {}
+        self._constraint_masks: dict[str, np.memmap] = {}
         self._chunks: dict[tuple[str, int], np.ndarray] = {}
         splits = _mapping(self.metadata.get("splits"), "splits")
         for split in SFT_SPLITS:
@@ -447,6 +581,27 @@ class PreparedSFTData:
                 mode="r",
                 shape=(records, SFT_INDEX_COLUMNS),
             )
+            if self.sft_format == SFT_FORMAT_V2:
+                mask_path = self.data_dir / _safe_name(
+                    details.get("constraint_mask_file"),
+                    "constraint mask file",
+                )
+                if verify_integrity and _sha256_file(mask_path) != details.get(
+                    "constraint_mask_sha256"
+                ):
+                    raise ValueError(
+                        f"prepared SFT {split} constraint mask checksum mismatch"
+                    )
+                if mask_path.stat().st_size != tokens:
+                    raise ValueError(
+                        f"prepared SFT {split} constraint mask size mismatch"
+                    )
+                self._constraint_masks[split] = np.memmap(
+                    mask_path,
+                    dtype=np.uint8,
+                    mode="r",
+                    shape=(tokens,),
+                )
         self._generator = torch.Generator(device="cpu").manual_seed(seed)
 
     def chunks(self, split: SFTSplit, context_length: int) -> np.ndarray:
@@ -477,7 +632,11 @@ class PreparedSFTData:
         *,
         context_length: int,
         device: str | torch.device | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        include_loss_weights: bool = False,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor]
+        | tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ):
         """Materialize chunks with prompt and padding targets masked to -100."""
 
         chunks = self.chunks(split, context_length)
@@ -492,6 +651,14 @@ class PreparedSFTData:
             dtype=np.int64,
         )
         targets = np.full((len(selected), context_length), -100, dtype=np.int64)
+        loss_weights = (
+            np.zeros(
+                (len(selected), context_length),
+                dtype=np.float32,
+            )
+            if include_loss_weights
+            else None
+        )
         for row, chunk_index in enumerate(selected):
             record_index, local_offset = chunks[int(chunk_index)]
             start, response_start, total_length = (
@@ -509,12 +676,49 @@ class PreparedSFTData:
             target_positions = local_offset + 1 + np.arange(valid)
             supervised = target_positions >= response_start
             targets[row, :valid][supervised] = target_values[supervised]
+            if loss_weights is not None:
+                loss_weights[row, :valid][supervised] = 1.0
+            if self.sft_format == SFT_FORMAT_V2 and loss_weights is not None:
+                constraint_mask = np.asarray(
+                    self._constraint_masks[split][
+                        start
+                        + local_offset
+                        + 1 : start
+                        + local_offset
+                        + valid
+                        + 1
+                    ],
+                    dtype=np.bool_,
+                )
+                loss_weights[row, :valid][
+                    supervised & constraint_mask
+                ] = self.required_word_weight
         input_tensor = torch.from_numpy(inputs)
         target_tensor = torch.from_numpy(targets)
         if device is not None:
             input_tensor = input_tensor.to(device, non_blocking=True)
             target_tensor = target_tensor.to(device, non_blocking=True)
+        if include_loss_weights:
+            assert loss_weights is not None
+            loss_weight_tensor = torch.from_numpy(loss_weights)
+            if device is not None:
+                loss_weight_tensor = loss_weight_tensor.to(
+                    device,
+                    non_blocking=True,
+                )
+            return input_tensor, target_tensor, loss_weight_tensor
         return input_tensor, target_tensor
+
+    def format_prompt(self, prompt: str) -> str:
+        """Apply the prepared dataset's instruction prefix exactly once."""
+
+        if not isinstance(prompt, str):
+            raise TypeError("prompt must be a string")
+        if self.sft_format == SFT_FORMAT_V2 and not prompt.startswith(
+            SFT_V2_INSTRUCTION
+        ):
+            return SFT_V2_INSTRUCTION + prompt
+        return prompt
 
     def get_batch(
         self,
@@ -601,6 +805,22 @@ class SFTBatchSampler:
             device=device,
         )
 
+    def get_training_batch(
+        self,
+        *,
+        batch_size: int,
+        device: str | torch.device | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        result = self.data.sft_batch(
+            self.split,
+            self.next_indices(batch_size),
+            context_length=self.context_length,
+            device=device,
+            include_loss_weights=True,
+        )
+        assert len(result) == 3
+        return result
+
     def state_dict(self) -> dict[str, Any]:
         return {
             "fingerprint": self.data.fingerprint,
@@ -656,6 +876,30 @@ def load_prepared_data(
     return PreparedTokenData(data_dir, seed=seed)
 
 
+def _constraint_mask(
+    example: InstructionExample,
+    response_offsets: list[tuple[int, int]],
+    *,
+    sequence_length: int,
+    response_start: int,
+) -> tuple[np.ndarray, int]:
+    mask = np.zeros(sequence_length, dtype=np.uint8)
+    matched_words = 0
+    for required_word in example.required_words:
+        pattern = re.compile(
+            r"(?<![A-Za-z])" + re.escape(required_word) + r"(?![A-Za-z])",
+            flags=re.IGNORECASE,
+        )
+        matches = list(pattern.finditer(example.response))
+        if matches:
+            matched_words += 1
+        for match in matches:
+            for token_index, (start, end) in enumerate(response_offsets):
+                if end > match.start() and start < match.end():
+                    mask[response_start + token_index] = 1
+    return mask, matched_words
+
+
 def _referenced_artifacts(metadata_path: Path) -> set[Path]:
     if not metadata_path.exists():
         return set()
@@ -667,6 +911,7 @@ def _referenced_artifacts(metadata_path: Path) -> set[Path]:
         for split in SFT_SPLITS:
             details = _mapping(splits.get(split), f"splits.{split}")
             names.extend((details.get("token_file"), details.get("index_file")))
+            names.append(details.get("constraint_mask_file"))
     except (OSError, json.JSONDecodeError, ValueError):
         return set()
     return {
@@ -699,6 +944,18 @@ def _validate_limit(name: str, value: int) -> None:
         raise TypeError(f"{name} must be an integer")
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
+
+
+def _validate_sft_format(value: str) -> None:
+    if value not in SFT_FORMATS:
+        raise ValueError(f"sft_format must be one of {SFT_FORMATS}")
+
+
+def _validate_required_word_weight(value: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("required_word_weight must be numeric")
+    if not np.isfinite(value) or value < 1:
+        raise ValueError("required_word_weight must be finite and at least 1")
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -750,8 +1007,13 @@ __all__ = [
     "DEFAULT_INSTRUCT_REVISION",
     "DEFAULT_INSTRUCT_TRAIN_LIMIT",
     "DEFAULT_INSTRUCT_VALIDATION_LIMIT",
+    "DEFAULT_REQUIRED_WORD_WEIGHT",
     "INSTRUCT_RECORD_SEPARATOR",
+    "SFT_FORMATS",
+    "SFT_FORMAT_V1",
+    "SFT_FORMAT_V2",
     "SFT_SOURCE_DECODING",
+    "SFT_V2_INSTRUCTION",
     "InstructionExample",
     "PreparedSFTData",
     "SFTBatchSampler",

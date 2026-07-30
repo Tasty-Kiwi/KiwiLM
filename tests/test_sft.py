@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,10 @@ from kiwilm.config import ModelXConfig
 from kiwilm.data import prepare_from_stories
 from kiwilm.models import build_model
 from kiwilm.sft import (
+    DEFAULT_REQUIRED_WORD_WEIGHT,
     INSTRUCT_RECORD_SEPARATOR,
+    SFT_FORMAT_V2,
+    SFT_V2_INSTRUCTION,
     PreparedSFTData,
     SFTBatchSampler,
     iter_raw_instruct_records,
@@ -68,6 +72,20 @@ def _prepare_sft(path: Path, tokenizer_source: Path) -> dict:
     )
 
 
+def _prepare_sft_v2(path: Path, tokenizer_source: Path) -> dict:
+    return prepare_instruct_from_records(
+        path,
+        train_records=[RECORD_A, RECORD_B] * 3,
+        validation_records=[RECORD_A, RECORD_B],
+        tokenizer_from=tokenizer_source,
+        dataset_name="test/instruct",
+        revision="abc123",
+        train_limit=4,
+        validation_limit=2,
+        sft_format=SFT_FORMAT_V2,
+    )
+
+
 def test_parser_canonicalizes_fields_and_removes_trailing_metadata() -> None:
     example = parse_tinystories_instruct_record(RECORD_B)
 
@@ -80,6 +98,9 @@ def test_parser_canonicalizes_fields_and_removes_trailing_metadata() -> None:
     assert example.response == (
         "Lily gave Ben a red ball.\nBen shared the ball with Lily."
     )
+    assert example.required_words == ("red", "ball", "share")
+    v2 = parse_tinystories_instruct_record(RECORD_B, sft_format=SFT_FORMAT_V2)
+    assert v2.prompt == SFT_V2_INSTRUCTION + example.prompt
     with pytest.raises(ValueError, match="Story"):
         parse_tinystories_instruct_record("Words: one, two")
     with pytest.raises(ValueError, match="conditioning"):
@@ -145,6 +166,55 @@ def test_preparation_reuses_tokenizer_and_is_deterministic(tmp_path: Path) -> No
     ).read_bytes()
     assert prepared_tokenizer == source_tokenizer
     assert isinstance(load_prepared_data(tmp_path / "first"), PreparedSFTData)
+
+
+def test_v2_preparation_adds_constraint_masks_and_weighted_batches(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    _tokenizer_source(source)
+    v1_metadata = _prepare_sft(tmp_path / "v1", source)
+    v2_metadata = _prepare_sft_v2(tmp_path / "v2", source)
+    data = PreparedSFTData(tmp_path / "v2")
+    chunks = data.chunks("train", context_length=8)
+    inputs, targets, loss_weights = data.sft_batch(
+        "train",
+        list(range(len(chunks))),
+        context_length=8,
+        include_loss_weights=True,
+    )
+
+    assert v2_metadata["fingerprint"] != v1_metadata["fingerprint"]
+    assert v2_metadata["config"]["sft_format"] == SFT_FORMAT_V2
+    assert (
+        v2_metadata["config"]["required_word_weight"]
+        == DEFAULT_REQUIRED_WORD_WEIGHT
+    )
+    assert v2_metadata["splits"]["train"]["constraint_targets"] > 0
+    # "share" does not count as an exact occurrence inside "shared".
+    assert v2_metadata["splits"]["train"]["matched_required_words"] == 10
+    assert data.format_prompt("Features: Dialogue\nStory:\n").startswith(
+        SFT_V2_INSTRUCTION
+    )
+    assert data.format_prompt(SFT_V2_INSTRUCTION + "Story:\n").count(
+        SFT_V2_INSTRUCTION
+    ) == 1
+    assert inputs.shape == targets.shape == loss_weights.shape
+    supervised = targets.ne(-100)
+    assert torch.all(loss_weights[~supervised] == 0)
+    assert torch.all(loss_weights[supervised] >= 1)
+    assert int(loss_weights.eq(DEFAULT_REQUIRED_WORD_WEIGHT).sum()) == v2_metadata[
+        "splits"
+    ]["train"]["constraint_targets"]
+
+    mask_path = (
+        tmp_path
+        / "v2"
+        / v2_metadata["splits"]["train"]["constraint_mask_file"]
+    )
+    mask_path.write_bytes(mask_path.read_bytes() + b"\x00")
+    with pytest.raises(ValueError, match="constraint mask"):
+        PreparedSFTData(tmp_path / "v2")
 
 
 def test_preparation_skips_incomplete_fragments_and_limits_valid_records(
@@ -353,6 +423,54 @@ def test_weight_only_sft_warm_start_and_exact_token_budget(tmp_path: Path) -> No
     assert checkpoint["data_fingerprint"] == data.fingerprint
     assert checkpoint["train_config"]["batch_mode"] == "sft"
     assert checkpoint["step"] < 17
+
+
+def test_v2_weighted_sft_trains_to_an_exact_unweighted_token_budget(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    _tokenizer_source(source)
+    _prepare_sft_v2(tmp_path / "sft-v2", source)
+    data = PreparedSFTData(tmp_path / "sft-v2")
+    config = ModelXConfig(
+        vocab_size=data.tokenizer.vocab_size,
+        context_length=16,
+        d_model=16,
+        dropout=0.0,
+        kernel_size=3,
+        cnn_dilations=(1, 2),
+        num_heads=2,
+        swiglu_dim=24,
+    )
+
+    result = train(
+        config,
+        data,
+        tmp_path / "run-v2",
+        TrainConfig(
+            max_steps=5,
+            batch_size=2,
+            grad_accum_steps=2,
+            lr=1e-4,
+            min_lr=1e-5,
+            warmup_steps=0,
+            max_tokens=13,
+            warmup_tokens=2,
+            batch_mode="sft",
+            eval_mode="sft",
+            eval_interval=1,
+            eval_batches=1,
+            checkpoint_interval=1,
+            log_interval=0,
+            sample_tokens=0,
+        ),
+        device="cpu",
+        log_fn=None,
+    )
+
+    assert result["tokens_seen"] == 13
+    assert result["stop_reason"] == "max_tokens"
+    assert math.isfinite(result["best_validation_loss"])
 
 
 def test_preparation_rejects_existing_target_and_invalid_limits(

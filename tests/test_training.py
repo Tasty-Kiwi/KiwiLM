@@ -73,6 +73,32 @@ class TinyData:
         self.generator.set_state(generator_state)
 
 
+def test_weighted_loss_preserves_target_count_and_changes_only_denominator() -> None:
+    logits = torch.tensor([[[3.0, 0.0], [0.0, 1.0]]])
+    targets = torch.tensor([[0, 1]])
+    weights = torch.tensor([[1.0, 3.0]])
+
+    unweighted, valid_targets, unweighted_total = (
+        training_module._loss_sum_and_count(logits, targets)
+    )
+    weighted, weighted_targets, weight_total = training_module._loss_sum_and_count(
+        logits,
+        targets,
+        loss_weights=weights,
+    )
+    per_target = torch.nn.functional.cross_entropy(
+        logits.reshape(-1, 2),
+        targets.reshape(-1),
+        reduction="none",
+    )
+
+    torch.testing.assert_close(unweighted, per_target.sum())
+    torch.testing.assert_close(weighted, per_target[0] + 3 * per_target[1])
+    assert valid_targets == weighted_targets == 2
+    assert unweighted_total == 2.0
+    assert weight_total == 4.0
+
+
 class TinyLM(nn.Module):
     def __init__(self, config: GatedCNNConfig) -> None:
         super().__init__()

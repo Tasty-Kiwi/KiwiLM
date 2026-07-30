@@ -181,17 +181,25 @@ class ByteBPETokenizer:
     ) -> list[int]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
-        reserved = next((token for token in SPECIAL_TOKENS if token in text), None)
-        if reserved is not None:
-            raise ValueError(
-                f"text contains reserved tokenizer control token {reserved!r}"
-            )
+        self._validate_text(text)
         ids = [int(token_id) for token_id in self._tokenizer.encode(text).ids]
         if add_bos:
             ids.insert(0, self.bos_id)
         if add_eos:
             ids.append(self.eos_id)
         return ids
+
+    def encode_with_offsets(self, text: str) -> tuple[list[int], list[tuple[int, int]]]:
+        """Encode text and return source-character offsets for each token."""
+
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        self._validate_text(text)
+        encoding = self._tokenizer.encode(text)
+        return (
+            [int(token_id) for token_id in encoding.ids],
+            [(int(start), int(end)) for start, end in encoding.offsets],
+        )
 
     def decode(
         self,
@@ -232,6 +240,14 @@ class ByteBPETokenizer:
     @property
     def vocab_size(self) -> int:
         return int(self._tokenizer.get_vocab_size(with_added_tokens=True))
+
+    @staticmethod
+    def _validate_text(text: str) -> None:
+        reserved = next((token for token in SPECIAL_TOKENS if token in text), None)
+        if reserved is not None:
+            raise ValueError(
+                f"text contains reserved tokenizer control token {reserved!r}"
+            )
 
 
 # The shorter alias is useful in type annotations while keeping the byte-level

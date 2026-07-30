@@ -27,7 +27,7 @@ from kiwilm.config import ModelConfig
 from kiwilm.data import PreparedTokenData, StoryBatchSampler
 from kiwilm.generation import generate as generate_text
 from kiwilm.models import build_model
-from kiwilm.sft import SFTBatchSampler
+from kiwilm.sft import SFT_FORMAT_V2, SFTBatchSampler
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,7 +251,7 @@ def evaluate(
                 )
             with _autocast_context(resolved_device, resolved_precision):
                 logits = model(inputs)
-                loss_sum, valid_targets = _loss_sum_and_count(logits, targets)
+                loss_sum, valid_targets, _ = _loss_sum_and_count(logits, targets)
             total_nll += float(loss_sum)
             total_targets += valid_targets
     finally:
@@ -394,9 +394,12 @@ def train(
             settings.max_tokens is None or tokens_seen < settings.max_tokens
         ):
             step_index = completed_step
-            microbatches: list[tuple[torch.Tensor, torch.Tensor]] = []
+            microbatches: list[
+                tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
+            ] = []
             step_valid_targets = 0
             step_model_tokens = 0
+            step_loss_weight = 0.0
             for _ in range(settings.grad_accum_steps):
                 if batch_sampler is None:
                     inputs, targets = _get_batch(
@@ -407,11 +410,23 @@ def train(
                         device=resolved_device,
                         generator=train_generator,
                     )
+                    loss_weights = None
+                elif (
+                    isinstance(batch_sampler, SFTBatchSampler)
+                    and batch_sampler.data.sft_format == SFT_FORMAT_V2
+                ):
+                    inputs, targets, loss_weights = (
+                        batch_sampler.get_training_batch(
+                            batch_size=settings.batch_size,
+                            device=resolved_device,
+                        )
+                    )
                 else:
                     inputs, targets = batch_sampler.get_batch(
                         batch_size=settings.batch_size,
                         device=resolved_device,
                     )
+                    loss_weights = None
                 if settings.max_tokens is not None:
                     remaining = settings.max_tokens - tokens_seen - step_valid_targets
                     targets = _trim_targets(targets, remaining)
@@ -420,7 +435,12 @@ def train(
                     break
                 step_valid_targets += valid_targets
                 step_model_tokens += targets.numel()
-                microbatches.append((inputs, targets))
+                step_loss_weight += (
+                    float(loss_weights[targets.ne(-100)].sum().item())
+                    if loss_weights is not None
+                    else valid_targets
+                )
+                microbatches.append((inputs, targets, loss_weights))
                 if (
                     settings.max_tokens is not None
                     and tokens_seen + step_valid_targets >= settings.max_tokens
@@ -438,10 +458,14 @@ def train(
 
             optimizer.zero_grad(set_to_none=True)
             accumulated_nll = 0.0
-            for inputs, targets in microbatches:
+            for inputs, targets, loss_weights in microbatches:
                 with _autocast_context(resolved_device, resolved_precision):
-                    loss_sum, _ = _loss_sum_and_count(network(inputs), targets)
-                    normalized_loss = loss_sum / step_valid_targets
+                    loss_sum, _, _ = _loss_sum_and_count(
+                        network(inputs),
+                        targets,
+                        loss_weights=loss_weights,
+                    )
+                    normalized_loss = loss_sum / step_loss_weight
                 if not bool(torch.isfinite(normalized_loss)):
                     raise FloatingPointError(
                         f"non-finite training loss at step {completed_step + 1}"
@@ -460,7 +484,7 @@ def train(
             tokens_seen += step_valid_targets
             valid_tokens_since_log += step_valid_targets
             model_tokens_since_log += step_model_tokens
-            latest_train_loss = accumulated_nll / step_valid_targets
+            latest_train_loss = accumulated_nll / step_loss_weight
             reached_target = (
                 settings.max_tokens is not None
                 and tokens_seen >= settings.max_tokens
@@ -754,8 +778,11 @@ def _checkpoint_metrics(
 
 
 def _loss_sum_and_count(
-    logits: torch.Tensor, targets: torch.Tensor
-) -> tuple[torch.Tensor, int]:
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    loss_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, int, float]:
     if logits.ndim != 3:
         raise ValueError("logits must have shape [batch, sequence, vocabulary]")
     if targets.shape != logits.shape[:2]:
@@ -763,12 +790,30 @@ def _loss_sum_and_count(
     valid_targets = int(targets.ne(-100).sum().item())
     if valid_targets == 0:
         raise ValueError("batch contains no valid next-token targets")
-    loss_sum = F.cross_entropy(
+    if loss_weights is None:
+        loss_sum = F.cross_entropy(
+            logits.reshape(-1, logits.shape[-1]),
+            targets.reshape(-1),
+            reduction="sum",
+        )
+        return loss_sum, valid_targets, float(valid_targets)
+    if loss_weights.shape != targets.shape:
+        raise ValueError("loss_weights must match target dimensions")
+    if bool((loss_weights < 0).any()):
+        raise ValueError("loss_weights cannot be negative")
+    per_target_loss = F.cross_entropy(
         logits.reshape(-1, logits.shape[-1]),
         targets.reshape(-1),
-        reduction="sum",
-    )
-    return loss_sum, valid_targets
+        reduction="none",
+    ).reshape_as(targets)
+    effective_weights = loss_weights.to(
+        device=per_target_loss.device,
+        dtype=per_target_loss.dtype,
+    ) * targets.ne(-100)
+    weight_sum = float(effective_weights.sum().detach().item())
+    if weight_sum <= 0:
+        raise ValueError("batch loss weights must include positive supervised weight")
+    return (per_target_loss * effective_weights).sum(), valid_targets, weight_sum
 
 
 def _trim_targets(targets: torch.Tensor, remaining: int) -> torch.Tensor:
