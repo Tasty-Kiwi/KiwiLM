@@ -98,6 +98,7 @@ def test_cli_sft_defaults_and_requires_checkpoint() -> None:
     assert sft.precision == "auto"
     assert report.data_dir == Path("data/tinystories-instruct-50k")
     assert report.suite == Path("eval/instruction-adherence-prompts.json")
+    assert report.output_dir == Path("examples/comparisons/sft-adherence")
     assert report.cache == "off"
 
     with pytest.raises(SystemExit):
@@ -228,6 +229,9 @@ def test_cli_selects_model_b_and_comparison_defaults() -> None:
     assert training.attention_heads == 8
     assert training.attention_feedforward_dim == 1024
     assert comparison.suite == Path("eval/story-consistency-prompts.json")
+    assert comparison.output_dir == Path(
+        "examples/comparisons/model-a-vs-model-b"
+    )
 
 
 def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:

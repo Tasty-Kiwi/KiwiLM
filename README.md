@@ -416,7 +416,7 @@ uv run kiwilm sft-report \
     runs/model-y-instruct/best.pt \
   --labels "Model X best" "Model X latest" "Model Y" \
   --suite eval/instruction-adherence-prompts.json \
-  --output-dir runs/comparisons/sft-adherence \
+  --output-dir examples/comparisons/sft-adherence \
   --device cuda
 ```
 

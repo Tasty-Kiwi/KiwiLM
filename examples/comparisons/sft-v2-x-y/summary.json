@@ -1,0 +1,83 @@
+{
+  "aggregates": [
+    {
+      "adherence_score": 0.5659722222222222,
+      "cases": 6,
+      "entity_coverage": 0.6,
+      "feature_coverage": 1.0,
+      "model_label": "Model X v2 best",
+      "profile_id": "greedy",
+      "repeated_4gram_fraction": 0.12469894741258218,
+      "repeated_sentence_fraction": 0.09231411862990808,
+      "required_word_coverage": 0.38888888888888884,
+      "summary_term_coverage": 0.2916666666666667
+    },
+    {
+      "adherence_score": 0.579861111111111,
+      "cases": 6,
+      "entity_coverage": 0.6,
+      "feature_coverage": 1.0,
+      "model_label": "Model X v2 latest",
+      "profile_id": "greedy",
+      "repeated_4gram_fraction": 0.12546807528845164,
+      "repeated_sentence_fraction": 0.09231411862990808,
+      "required_word_coverage": 0.4444444444444444,
+      "summary_term_coverage": 0.2916666666666667
+    },
+    {
+      "adherence_score": 0.5960648148148148,
+      "cases": 6,
+      "entity_coverage": 0.5,
+      "feature_coverage": 0.8333333333333334,
+      "model_label": "Model Y v2",
+      "profile_id": "greedy",
+      "repeated_4gram_fraction": 0.15030021081091602,
+      "repeated_sentence_fraction": 0.0956151691445809,
+      "required_word_coverage": 0.5555555555555555,
+      "summary_term_coverage": 0.4583333333333333
+    },
+    {
+      "adherence_score": 0.5462962962962963,
+      "cases": 6,
+      "entity_coverage": 0.4,
+      "feature_coverage": 0.8333333333333334,
+      "model_label": "Model X v2 best",
+      "profile_id": "focused",
+      "repeated_4gram_fraction": 0.07608035896078326,
+      "repeated_sentence_fraction": 0.012345679012345678,
+      "required_word_coverage": 0.5,
+      "summary_term_coverage": 0.4166666666666667
+    },
+    {
+      "adherence_score": 0.6296296296296297,
+      "cases": 6,
+      "entity_coverage": 0.4,
+      "feature_coverage": 1.0,
+      "model_label": "Model X v2 latest",
+      "profile_id": "focused",
+      "repeated_4gram_fraction": 0.039738154326342465,
+      "repeated_sentence_fraction": 0.012345679012345678,
+      "required_word_coverage": 0.5,
+      "summary_term_coverage": 0.5833333333333334
+    },
+    {
+      "adherence_score": 0.6516203703703703,
+      "cases": 6,
+      "entity_coverage": 0.5,
+      "feature_coverage": 1.0,
+      "model_label": "Model Y v2",
+      "profile_id": "focused",
+      "repeated_4gram_fraction": 0.049500197851856186,
+      "repeated_sentence_fraction": 0.011111111111111112,
+      "required_word_coverage": 0.5555555555555555,
+      "summary_term_coverage": 0.5
+    }
+  ],
+  "cache": "off",
+  "data_fingerprint": "8d6add172227798878af44aa1eeb03308f5100ed8a8c5c437a6045ccc54db791",
+  "device": "cuda",
+  "generation_count": 36,
+  "report_path": "D:\\KiwiLM\\runs\\comparisons\\sft-v2-x-y\\report.md",
+  "results_path": "D:\\KiwiLM\\runs\\comparisons\\sft-v2-x-y\\results.jsonl",
+  "suite_version": 1
+}

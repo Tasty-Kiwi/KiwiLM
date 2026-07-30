@@ -339,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("runs/comparisons/model-a-vs-model-b"),
+        default=Path("examples/comparisons/model-a-vs-model-b"),
     )
     compare_parser.add_argument("--label-a")
     compare_parser.add_argument("--label-b")
@@ -375,7 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
     sft_report_parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("runs/comparisons/sft-adherence"),
+        default=Path("examples/comparisons/sft-adherence"),
     )
     sft_report_parser.add_argument("--device", default="auto")
     sft_report_parser.add_argument(
