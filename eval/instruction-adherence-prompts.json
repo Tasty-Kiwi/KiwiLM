@@ -1,0 +1,97 @@
+{
+  "suite_version": 1,
+  "max_new_tokens": 200,
+  "sampling_profiles": [
+    {
+      "id": "greedy",
+      "temperature": 0.0,
+      "top_k": 0,
+      "seed": 42
+    },
+    {
+      "id": "focused",
+      "temperature": 0.4,
+      "top_k": 20,
+      "seed": 42
+    }
+  ],
+  "prompts": [
+    {
+      "id": "friends_before_dark",
+      "prompt": "Features: Dialogue\nWords: oak, gloomy, kind\nSummary: Two friends help each other get home before dark.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["oak", "gloomy", "kind"],
+      "summary_terms": [
+        ["friend", "friends"],
+        ["help", "helps", "helped", "helping"],
+        ["home"],
+        ["dark", "darkness", "sunset", "night"]
+      ]
+    },
+    {
+      "id": "named_lantern_crossing",
+      "prompt": "Features: Dialogue\nWords: lantern, bridge, careful\nSummary: Mia helps Noah carry a lantern across a bridge before sunset.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["lantern", "bridge", "careful"],
+      "entities": ["Mia", "Noah"],
+      "summary_terms": [
+        ["help", "helps", "helped", "helping"],
+        ["carry", "carries", "carried"],
+        ["bridge"],
+        ["sunset", "dark", "night"]
+      ]
+    },
+    {
+      "id": "lost_kite",
+      "prompt": "Features: Dialogue\nWords: kite, windy, return\nSummary: Lily and Ben find a lost kite and return it to its worried owner.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["kite", "windy", "return"],
+      "entities": ["Lily", "Ben"],
+      "summary_terms": [
+        ["find", "finds", "found"],
+        ["lost"],
+        ["return", "returns", "returned", "give", "gave"],
+        ["owner"]
+      ]
+    },
+    {
+      "id": "puppy_in_rain",
+      "prompt": "Features: Dialogue\nWords: puppy, umbrella, muddy\nSummary: Emma and Jack rescue a puppy during the rain and bring it somewhere safe.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["puppy", "umbrella", "muddy"],
+      "entities": ["Emma", "Jack"],
+      "summary_terms": [
+        ["rescue", "rescues", "rescued", "save", "saved"],
+        ["rain", "raining", "storm"],
+        ["safe", "safety"],
+        ["bring", "brings", "brought", "home"]
+      ]
+    },
+    {
+      "id": "broken_robot",
+      "prompt": "Features: Dialogue\nWords: robot, broken, patient\nSummary: Ava patiently helps Leo repair his broken toy robot.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["robot", "broken", "patient"],
+      "entities": ["Ava", "Leo"],
+      "summary_terms": [
+        ["help", "helps", "helped", "helping"],
+        ["repair", "repairs", "repaired", "fix", "fixed"],
+        ["toy"],
+        ["robot"]
+      ]
+    },
+    {
+      "id": "garden_surprise",
+      "prompt": "Features: Dialogue\nWords: garden, seed, enormous\nSummary: Sophie and Max plant a seed that grows into an enormous flower.\nStory:\n",
+      "features": ["Dialogue"],
+      "words": ["garden", "seed", "enormous"],
+      "entities": ["Sophie", "Max"],
+      "summary_terms": [
+        ["plant", "plants", "planted"],
+        ["grow", "grows", "grew"],
+        ["flower"],
+        ["enormous", "huge", "giant"]
+      ]
+    }
+  ]
+}

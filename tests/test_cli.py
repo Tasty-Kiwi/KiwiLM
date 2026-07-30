@@ -65,6 +65,13 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
 def test_cli_sft_defaults_and_requires_checkpoint() -> None:
     parser = build_parser()
     sft = parser.parse_args(["sft", "--init-from", "runs/model-x-750k/best.pt"])
+    report = parser.parse_args(
+        [
+            "sft-report",
+            "--checkpoints",
+            "runs/model-x-instruct/latest.pt",
+        ]
+    )
 
     assert sft.data_dir == Path("data/tinystories-instruct-50k")
     assert sft.init_from == Path("runs/model-x-750k/best.pt")
@@ -74,6 +81,9 @@ def test_cli_sft_defaults_and_requires_checkpoint() -> None:
     assert sft.batch_size == 8
     assert sft.grad_accum_steps == 4
     assert sft.precision == "auto"
+    assert report.data_dir == Path("data/tinystories-instruct-50k")
+    assert report.suite == Path("eval/instruction-adherence-prompts.json")
+    assert report.cache == "off"
 
     with pytest.raises(SystemExit):
         parser.parse_args(["sft"])

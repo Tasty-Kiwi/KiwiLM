@@ -47,6 +47,7 @@ from kiwilm.sft import (
     load_prepared_data,
     prepare_tinystories_instruct,
 )
+from kiwilm.sft_report import generate_sft_adherence_report
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
 
 _load_trained_model = load_trained_model
@@ -338,6 +339,39 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--device", default="auto")
     compare_parser.add_argument("--seed", type=int, default=42)
     compare_parser.set_defaults(handler=_compare_command)
+
+    sft_report_parser = subparsers.add_parser(
+        "sft-report",
+        help="generate and score a fixed instruction-adherence suite",
+    )
+    _add_data_argument(
+        sft_report_parser,
+        default=Path("data/tinystories-instruct-50k"),
+    )
+    sft_report_parser.add_argument(
+        "--checkpoints",
+        type=Path,
+        nargs="+",
+        required=True,
+    )
+    sft_report_parser.add_argument("--labels", nargs="+")
+    sft_report_parser.add_argument(
+        "--suite",
+        type=Path,
+        default=Path("eval/instruction-adherence-prompts.json"),
+    )
+    sft_report_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("runs/comparisons/sft-adherence"),
+    )
+    sft_report_parser.add_argument("--device", default="auto")
+    sft_report_parser.add_argument(
+        "--cache",
+        choices=("auto", "off"),
+        default="off",
+    )
+    sft_report_parser.set_defaults(handler=_sft_report_command)
     return parser
 
 
@@ -692,6 +726,22 @@ def _compare_command(args: argparse.Namespace) -> int:
         output_dir=args.output_dir,
         device=choose_device(args.device),
         labels=labels,
+    )
+    _print_json(summary)
+    return 0
+
+
+def _sft_report_command(args: argparse.Namespace) -> int:
+    data = PreparedSFTData(args.data_dir)
+    device = choose_device(args.device)
+    summary = generate_sft_adherence_report(
+        args.checkpoints,
+        data=data,
+        suite_path=args.suite,
+        output_dir=args.output_dir,
+        device=device,
+        labels=args.labels,
+        cache=args.cache,
     )
     _print_json(summary)
     return 0

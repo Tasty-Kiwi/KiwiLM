@@ -223,7 +223,16 @@ def evaluate(
             seed=seed,
         )
         if batch_mode == "story"
-        else None
+        else (
+            SFTBatchSampler(
+                data,
+                split,  # type: ignore[arg-type]
+                context_length=context_length,
+                seed=seed,
+            )
+            if batch_mode == "sft"
+            else None
+        )
     )
     try:
         for _ in range(num_batches):

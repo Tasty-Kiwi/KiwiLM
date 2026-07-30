@@ -21,7 +21,7 @@ from kiwilm.sft import (
     parse_tinystories_instruct_record,
     prepare_instruct_from_records,
 )
-from kiwilm.training import TrainConfig, train
+from kiwilm.training import TrainConfig, evaluate, train
 
 TEST_VOCAB_SIZE = 300
 
@@ -247,6 +247,54 @@ def test_sft_sampler_covers_an_epoch_once_and_resumes_exactly(
     resumed.load_state_dict(state)
 
     assert torch.equal(resumed.next_indices(len(chunks) + 2), expected)
+
+
+def test_sft_evaluation_uses_the_same_seeded_chunks_every_time(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    _tokenizer_source(source)
+    _prepare_sft(tmp_path / "sft", source)
+    data = PreparedSFTData(tmp_path / "sft")
+    config = ModelXConfig(
+        vocab_size=data.tokenizer.vocab_size,
+        context_length=16,
+        d_model=16,
+        dropout=0.0,
+        kernel_size=3,
+        cnn_dilations=(1, 2),
+        num_heads=2,
+        swiglu_dim=24,
+    )
+    model = build_model(config)
+    first_generator = torch.Generator().manual_seed(1)
+    second_generator = torch.Generator().manual_seed(999)
+    torch.rand(20, generator=first_generator)
+
+    first = evaluate(
+        model,
+        data,
+        batch_size=2,
+        context_length=16,
+        num_batches=3,
+        device="cpu",
+        generator=first_generator,
+        batch_mode="sft",
+        seed=43,
+    )
+    second = evaluate(
+        model,
+        data,
+        batch_size=2,
+        context_length=16,
+        num_batches=3,
+        device="cpu",
+        generator=second_generator,
+        batch_mode="sft",
+        seed=43,
+    )
+
+    assert first == second
 
 
 def test_weight_only_sft_warm_start_and_exact_token_budget(tmp_path: Path) -> None:

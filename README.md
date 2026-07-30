@@ -369,6 +369,11 @@ uv run kiwilm evaluate \
   --device cuda
 ```
 
+SFT validation uses a fresh deterministic epoch-shuffled chunk order derived
+from `--seed` on every call. Training evaluations and standalone evaluations
+therefore cover the same targets for a fixed seed, batch size, and batch count;
+checkpoint selection no longer benefits from a lucky changing sample.
+
 Generate from the same conditional format:
 
 ```bash
@@ -382,6 +387,28 @@ uv run kiwilm generate \
   --cache auto \
   --stream
 ```
+
+Generate a scored adherence comparison:
+
+```bash
+uv run kiwilm sft-report \
+  --data-dir data/tinystories-instruct-50k \
+  --checkpoints \
+    runs/model-x-instruct-3epoch/best.pt \
+    runs/model-x-instruct-3epoch/latest.pt \
+    runs/model-y-instruct/best.pt \
+  --labels "Model X best" "Model X latest" "Model Y" \
+  --suite eval/instruction-adherence-prompts.json \
+  --output-dir runs/comparisons/sft-adherence \
+  --device cuda
+```
+
+The report uses six fixed prompts with greedy and focused decoding. It writes
+`results.jsonl`, `summary.json`, and `report.md`, measuring exact required-word
+coverage, summary-term coverage, dialogue compliance, named-entity retention,
+and repeated sentence/four-token fractions. These are deterministic lexical
+checks rather than semantic-judge scores, so the generated stories remain
+available in the report for qualitative review.
 
 ## Evaluate and generate
 
@@ -429,6 +456,7 @@ src/kiwilm/
     legacy/            Models A-G, Mamba, and GPT baseline
   data.py              TinyStories preparation and batching
   sft.py               instruction parsing and response-only SFT batches
+  sft_report.py        scored instruction-adherence generation reports
   training.py          packed/story-safe token-counted training
   generation.py        cached and streaming autoregressive generation
 scripts/
