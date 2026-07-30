@@ -2,8 +2,10 @@
 
 KiwiLM is a small PyTorch research project for comparing causal language-model
 architectures on
-[TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories). The
-current work compares two parameter-matched finalists with an experimental
+[TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories), with
+controlled continued pretraining on
+[SimpleStories](https://huggingface.co/datasets/SimpleStories/SimpleStories).
+The current work compares two parameter-matched finalists with an experimental
 parallel-fusion wildcard:
 
 | Model | Architecture | Parameters |
@@ -111,8 +113,9 @@ enabled with `--precision fp16`.
 ## Dataset profiles
 
 The smoke and 750k datasets are separate prepared datasets with different
-tokenizers and fingerprints. A checkpoint must always be evaluated and
-generated with the dataset that prepared its tokenizer.
+tokenizers and fingerprints. By default, a checkpoint can only be evaluated
+or generated with its own prepared dataset. Cross-dataset evaluation is
+available through an explicit evaluation-only opt-in described below.
 
 The verified prepared artifacts resolve to this TinyStories revision:
 
@@ -291,6 +294,95 @@ Story batching never crosses story boundaries. Padding targets use `-100` and
 do not count toward the token budget, loss denominator, or valid-token
 throughput. With `--eval-mode both`, story-safe validation selects the best
 checkpoint and packed validation is reported as a secondary metric.
+
+## SimpleStories continued pretraining
+
+Continued pretraining (CPT) is the controlled bridge between TinyStories
+pretraining and instruction fine-tuning. The initial experiment uses 250,000
+SimpleStories training examples, 10,000 held-out test examples, and exactly
+50,000,000 next-token targets. It reuses the 750k TinyStories tokenizer
+byte-for-byte, so the embedding and tied LM-head rows retain their meaning.
+
+Preparation pins the SimpleStories dataset to
+`e63b8adc3b1a1bdc7cac5b500d150b71346b0628`. Its upstream `test` split is
+stored as KiwiLM's `validation` split:
+
+```bash
+uv run kiwilm prepare-simplestories \
+  --output-dir data/simplestories-250k \
+  --tokenizer-from data/tinystories-750k \
+  --train-limit 250000 \
+  --validation-limit 10000
+```
+
+Continue Model Y from its best 750k checkpoint:
+
+```bash
+uv run kiwilm cpt \
+  --data-dir data/simplestories-250k \
+  --init-from runs/model-y-750k/best.pt \
+  --output-dir runs/model-y-simplestories-cpt \
+  --device cuda \
+  --precision fp16 \
+  --max-tokens 50000000 \
+  --warmup-tokens 1000000 \
+  --max-steps 6000 \
+  --batch-size 64 \
+  --eval-interval 500 \
+  --eval-batches 50 \
+  --checkpoint-interval 500 \
+  --log-interval 10 \
+  --seed 42
+```
+
+For the matched Model X run, change the source checkpoint and output directory
+to `runs/model-x-750k/best.pt` and
+`runs/model-x-simplestories-cpt`. `--init-from` loads only model weights;
+optimizer, schedule, sampler, token count, and AMP scaler start fresh.
+Before training, CPT verifies that the frozen-tokenizer provenance names the
+source checkpoint's exact prepared-data fingerprint; matching vocabulary size
+alone is not accepted.
+Use `--resume runs/model-y-simplestories-cpt/latest.pt` to resume an interrupted
+CPT run exactly. `--init-from` and `--resume` are mutually exclusive.
+
+Evaluate the CPT checkpoint on SimpleStories normally:
+
+```bash
+uv run kiwilm evaluate \
+  --data-dir data/simplestories-250k \
+  --checkpoint runs/model-y-simplestories-cpt/best.pt \
+  --device cuda \
+  --precision fp16 \
+  --batch-mode story \
+  --batch-size 64 \
+  --batches 500
+```
+
+To measure retention on the original TinyStories validation data, explicitly
+allow the expected dataset-fingerprint mismatch:
+
+```bash
+uv run kiwilm evaluate \
+  --data-dir data/tinystories-750k \
+  --checkpoint runs/model-y-simplestories-cpt/best.pt \
+  --device cuda \
+  --precision fp16 \
+  --batch-mode story \
+  --batch-size 64 \
+  --batches 500 \
+  --allow-data-mismatch
+```
+
+The output records both fingerprints and `data_mismatch: true`. The CLI still
+checks that the prepared tokenizer vocabulary size matches the checkpoint.
+This flag only relaxes evaluation; generation and comparison retain strict
+dataset matching. For a clean before/after retention comparison, evaluate the
+original 750k checkpoint with the same batch mode, count, and seed.
+
+Once CPT is selected, initialize SFT v2 from the CPT `best.pt` instead of the
+original 750k checkpoint. Do not resume a TinyStories training checkpoint
+against SimpleStories: `cpt --init-from` is the intentional weight-only
+dataset transition.
 
 ## Supervised instruction fine-tuning
 

@@ -15,10 +15,10 @@ from kiwilm.models import build_model
 def load_trained_model(
     checkpoint_path: str | Path,
     *,
-    data_fingerprint: str,
+    data_fingerprint: str | None,
     device: torch.device,
 ) -> tuple[nn.Module, ModelConfig]:
-    """Rebuild an architecture from its checkpoint and validate its dataset."""
+    """Rebuild a checkpoint, optionally validating its prepared dataset."""
 
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):

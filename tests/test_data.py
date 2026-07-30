@@ -8,10 +8,12 @@ import torch
 
 import kiwilm.data as data_module
 from kiwilm.data import (
+    DEFAULT_SIMPLESTORIES_DATASET_REVISION,
     PreparedTokenData,
     StoryBatchSampler,
     export_tokenizer_bundle,
     prepare_from_stories,
+    prepare_simplestories,
     prepare_tinystories,
 )
 from kiwilm.tokenizer import ByteBPETokenizer
@@ -250,6 +252,68 @@ def test_tinystories_loader_is_streaming_capped_and_train_only(
     assert [call["split"] for call in calls] == ["train", "train", "validation"]
     assert all(call["streaming"] is True for call in calls)
     assert all(call["revision"] == "resolved-sha" for call in calls)
+
+
+def test_simplestories_uses_test_as_validation_and_frozen_tokenizer(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    output_dir = tmp_path / "simplestories"
+    source_metadata = _prepare_test_data(source_dir)
+    rows = {
+        "train": [{"story": "first"}, {"story": "second"}, {"story": "unused"}],
+        "test": [{"story": "validation"}, {"story": "unused"}],
+    }
+    calls: list[dict] = []
+
+    def fake_load_dataset(name: str, **kwargs):
+        calls.append({"name": name, **kwargs})
+        return iter(rows[kwargs["split"]])
+
+    metadata = prepare_simplestories(
+        output_dir,
+        tokenizer_from=source_dir,
+        resolved_revision=DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+        train_limit=2,
+        validation_limit=1,
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        show_progress=False,
+        load_dataset_fn=fake_load_dataset,
+    )
+
+    source_tokenizer = source_dir / source_metadata["tokenizer"]["file"]
+    target_tokenizer = output_dir / metadata["tokenizer"]["file"]
+    assert target_tokenizer.read_bytes() == source_tokenizer.read_bytes()
+    assert metadata["dataset"] == {
+        "name": "SimpleStories/SimpleStories",
+        "requested_revision": DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+        "resolved_revision": DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+    }
+    assert metadata["config"]["text_field"] == "story"
+    assert metadata["splits"]["train"]["stories"] == 2
+    assert metadata["splits"]["validation"]["stories"] == 1
+    assert [call["split"] for call in calls] == ["train", "test"]
+    assert all(call["streaming"] is True for call in calls)
+    assert metadata["tokenizer"]["reused_from"] == {
+        "dataset_fingerprint": source_metadata["fingerprint"],
+        "tokenizer_sha256": source_metadata["tokenizer"]["sha256"],
+    }
+
+
+def test_simplestories_injected_loader_requires_resolved_revision(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source"
+    _prepare_test_data(source_dir)
+
+    with pytest.raises(ValueError, match="resolved_revision is required"):
+        prepare_simplestories(
+            tmp_path / "target",
+            tokenizer_from=source_dir,
+            revision="main",
+            load_dataset_fn=lambda *_args, **_kwargs: (),
+        )
 
 
 def test_frozen_tokenizer_reuses_exact_bytes_ids_and_stable_provenance(

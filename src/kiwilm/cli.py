@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +29,16 @@ from kiwilm.config import (
 from kiwilm.data import (
     DEFAULT_DATASET_NAME,
     DEFAULT_DATASET_REVISION,
+    DEFAULT_SIMPLESTORIES_DATASET_NAME,
+    DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+    DEFAULT_SIMPLESTORIES_TRAIN_LIMIT,
+    DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT,
     DEFAULT_TRAIN_LIMIT,
     DEFAULT_VALIDATION_LIMIT,
     DEFAULT_VOCAB_SIZE,
     PreparedTokenData,
     export_tokenizer_bundle,
+    prepare_simplestories,
     prepare_tinystories,
 )
 from kiwilm.generation import generate, generate_stream
@@ -87,6 +92,51 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--force", action="store_true")
     prepare_parser.add_argument("--quiet", action="store_true")
     prepare_parser.set_defaults(handler=_prepare_command)
+
+    prepare_simplestories_parser = subparsers.add_parser(
+        "prepare-simplestories",
+        help="prepare SimpleStories using a frozen KiwiLM tokenizer",
+    )
+    prepare_simplestories_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("data/simplestories-250k"),
+    )
+    prepare_simplestories_parser.add_argument(
+        "--tokenizer-from",
+        type=Path,
+        required=True,
+    )
+    prepare_simplestories_parser.add_argument(
+        "--dataset-name",
+        default=DEFAULT_SIMPLESTORIES_DATASET_NAME,
+    )
+    prepare_simplestories_parser.add_argument(
+        "--revision",
+        default=DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+    )
+    prepare_simplestories_parser.add_argument("--text-field", default="story")
+    prepare_simplestories_parser.add_argument(
+        "--train-limit",
+        type=int,
+        default=DEFAULT_SIMPLESTORIES_TRAIN_LIMIT,
+    )
+    prepare_simplestories_parser.add_argument(
+        "--validation-limit",
+        type=int,
+        default=DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT,
+    )
+    prepare_simplestories_parser.add_argument(
+        "--vocab-size",
+        type=int,
+        default=DEFAULT_VOCAB_SIZE,
+    )
+    prepare_simplestories_parser.add_argument("--min-frequency", type=int, default=2)
+    prepare_simplestories_parser.add_argument("--force", action="store_true")
+    prepare_simplestories_parser.add_argument("--quiet", action="store_true")
+    prepare_simplestories_parser.set_defaults(
+        handler=_prepare_simplestories_command
+    )
 
     prepare_instruct_parser = subparsers.add_parser(
         "prepare-instruct",
@@ -223,6 +273,43 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.set_defaults(handler=_train_command)
 
+    cpt_parser = subparsers.add_parser(
+        "cpt",
+        help="continue pretraining a checkpoint on prepared story data",
+    )
+    _add_data_argument(
+        cpt_parser,
+        default=Path("data/simplestories-250k"),
+    )
+    cpt_initialization = cpt_parser.add_mutually_exclusive_group(required=True)
+    cpt_initialization.add_argument("--init-from", type=Path)
+    cpt_initialization.add_argument("--resume", type=Path)
+    cpt_parser.add_argument("--output-dir", type=Path)
+    cpt_parser.add_argument("--device", default="auto")
+    cpt_parser.add_argument("--max-tokens", type=int, default=50_000_000)
+    cpt_parser.add_argument("--warmup-tokens", type=int, default=1_000_000)
+    cpt_parser.add_argument("--max-steps", type=int, default=6_000)
+    cpt_parser.add_argument("--batch-size", type=int, default=64)
+    cpt_parser.add_argument("--grad-accum-steps", type=int, default=1)
+    cpt_parser.add_argument("--learning-rate", type=float, default=3e-5)
+    cpt_parser.add_argument("--min-learning-rate", type=float, default=3e-6)
+    cpt_parser.add_argument(
+        "--precision",
+        choices=("fp32", "fp16", "bf16", "auto"),
+        default="auto",
+    )
+    cpt_parser.add_argument("--weight-decay", type=float, default=0.1)
+    cpt_parser.add_argument("--beta2", type=float, default=0.95)
+    cpt_parser.add_argument("--grad-clip", type=float, default=1.0)
+    cpt_parser.add_argument("--eval-interval", type=int, default=500)
+    cpt_parser.add_argument("--eval-batches", type=int, default=50)
+    cpt_parser.add_argument("--checkpoint-interval", type=int, default=500)
+    cpt_parser.add_argument("--log-interval", type=int, default=10)
+    cpt_parser.add_argument("--sample-prompt", default="Once upon a time")
+    cpt_parser.add_argument("--sample-tokens", type=int, default=160)
+    cpt_parser.add_argument("--seed", type=int, default=42)
+    cpt_parser.set_defaults(handler=_cpt_command)
+
     sft_parser = subparsers.add_parser(
         "sft",
         help="supervised fine-tune a checkpoint on prepared instruction data",
@@ -285,6 +372,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--precision",
         choices=("fp32", "fp16", "bf16", "auto"),
         default="fp32",
+    )
+    evaluate_parser.add_argument(
+        "--allow-data-mismatch",
+        action="store_true",
+        help=(
+            "explicitly evaluate on another prepared dataset; tokenizer vocabulary "
+            "size must still match"
+        ),
     )
     evaluate_parser.set_defaults(handler=_evaluate_command)
 
@@ -420,6 +515,32 @@ def _prepare_command(args: argparse.Namespace) -> int:
             "fingerprint": metadata["fingerprint"],
             "dataset": metadata["dataset"],
             "vocab_size": metadata["tokenizer"]["vocab_size"],
+            "splits": metadata["splits"],
+        }
+    )
+    return 0
+
+
+def _prepare_simplestories_command(args: argparse.Namespace) -> int:
+    metadata = prepare_simplestories(
+        args.output_dir,
+        tokenizer_from=args.tokenizer_from,
+        dataset_name=args.dataset_name,
+        revision=args.revision,
+        text_field=args.text_field,
+        train_limit=args.train_limit,
+        validation_limit=args.validation_limit,
+        vocab_size=args.vocab_size,
+        min_frequency=args.min_frequency,
+        show_progress=not args.quiet,
+        force=args.force,
+    )
+    _print_json(
+        {
+            "output_dir": str(args.output_dir.resolve()),
+            "fingerprint": metadata["fingerprint"],
+            "dataset": metadata["dataset"],
+            "tokenizer": metadata["tokenizer"],
             "splits": metadata["splits"],
         }
     )
@@ -640,14 +761,83 @@ def _sft_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cpt_command(args: argparse.Namespace) -> int:
+    data = PreparedTokenData(args.data_dir, seed=args.seed)
+    source_checkpoint = args.init_from or args.resume
+    model_config = _checkpoint_model_config(source_checkpoint)
+    if model_config.vocab_size != data.tokenizer.vocab_size:
+        raise ValueError(
+            "CPT tokenizer vocabulary does not match the source checkpoint"
+        )
+    if args.init_from is not None:
+        tokenizer_metadata = data.metadata.get("tokenizer")
+        reused_from = (
+            tokenizer_metadata.get("reused_from")
+            if isinstance(tokenizer_metadata, Mapping)
+            else None
+        )
+        source_fingerprint = _checkpoint_data_fingerprint(args.init_from)
+        if (
+            not isinstance(reused_from, Mapping)
+            or reused_from.get("dataset_fingerprint") != source_fingerprint
+        ):
+            raise ValueError(
+                "CPT data must reuse the tokenizer from the source checkpoint's "
+                "prepared dataset"
+            )
+    output_dir = args.output_dir or Path(
+        f"runs/{model_config.architecture.replace('_', '-')}-simplestories-cpt"
+    )
+    settings = TrainConfig(
+        max_steps=args.max_steps,
+        batch_size=args.batch_size,
+        grad_accum_steps=args.grad_accum_steps,
+        lr=args.learning_rate,
+        min_lr=args.min_learning_rate,
+        warmup_steps=0,
+        max_tokens=args.max_tokens,
+        warmup_tokens=args.warmup_tokens,
+        batch_mode="story",
+        eval_mode="both",
+        precision=args.precision,
+        weight_decay=args.weight_decay,
+        beta2=args.beta2,
+        grad_clip=args.grad_clip,
+        eval_interval=args.eval_interval,
+        eval_batches=args.eval_batches,
+        checkpoint_interval=args.checkpoint_interval,
+        log_interval=args.log_interval,
+        sample_prompt=args.sample_prompt,
+        sample_tokens=args.sample_tokens,
+        seed=args.seed,
+    )
+    summary = train(
+        model_config,
+        data,
+        output_dir,
+        settings,
+        device=args.device,
+        resume_from=args.resume,
+        init_from=args.init_from,
+    )
+    _print_json(summary)
+    return 0
+
+
 def _evaluate_command(args: argparse.Namespace) -> int:
     data = load_prepared_data(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
+    checkpoint_data_fingerprint = _checkpoint_data_fingerprint(args.checkpoint)
+    data_mismatch = checkpoint_data_fingerprint != data.fingerprint
     model, config = load_trained_model(
         args.checkpoint,
-        data_fingerprint=data.fingerprint,
+        data_fingerprint=None if args.allow_data_mismatch else data.fingerprint,
         device=device,
     )
+    if config.vocab_size != data.tokenizer.vocab_size:
+        raise ValueError(
+            "evaluation tokenizer vocabulary does not match the checkpoint"
+        )
     generator = torch.Generator(device="cpu").manual_seed(args.seed)
     metrics = evaluate(
         model,
@@ -664,7 +854,9 @@ def _evaluate_command(args: argparse.Namespace) -> int:
     _print_json(
         {
             "checkpoint": str(args.checkpoint.resolve()),
+            "checkpoint_data_fingerprint": checkpoint_data_fingerprint,
             "data_fingerprint": data.fingerprint,
+            "data_mismatch": data_mismatch,
             "device": str(device),
             **metrics,
         }
@@ -775,6 +967,16 @@ def _checkpoint_model_config(path: Path) -> ModelConfig:
     if not isinstance(serialized, dict):
         raise ValueError("checkpoint does not contain a model configuration")
     return ModelConfig.from_dict(serialized)
+
+
+def _checkpoint_data_fingerprint(path: Path) -> str:
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict):
+        raise ValueError("checkpoint must contain a mapping")
+    fingerprint = payload.get("data_fingerprint")
+    if not isinstance(fingerprint, str):
+        raise ValueError("checkpoint does not contain a data fingerprint")
+    return fingerprint
 
 
 def _print_json(value: Any) -> None:

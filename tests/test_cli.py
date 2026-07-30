@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -19,12 +20,20 @@ from kiwilm.config import (
     ModelZParallelConfig,
     TransformerConfig,
 )
+from kiwilm.data import prepare_from_stories
 from kiwilm.models import build_model
 
 
 def test_cli_defaults_select_fast_smoke_profile() -> None:
     parser = build_parser()
     prepare = parser.parse_args(["prepare"])
+    prepare_simplestories = parser.parse_args(
+        [
+            "prepare-simplestories",
+            "--tokenizer-from",
+            "data/tinystories-750k",
+        ]
+    )
     prepare_instruct = parser.parse_args(
         ["prepare-instruct", "--tokenizer-from", "data/tinystories-750k"]
     )
@@ -34,6 +43,11 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     assert prepare.validation_limit == 2_000
     assert prepare.vocab_size == 8_192
     assert prepare.tokenizer_from is None
+    assert prepare_simplestories.output_dir == Path("data/simplestories-250k")
+    assert prepare_simplestories.train_limit == 250_000
+    assert prepare_simplestories.validation_limit == 10_000
+    assert prepare_simplestories.text_field == "story"
+    assert prepare_simplestories.tokenizer_from == Path("data/tinystories-750k")
     assert prepare_instruct.train_limit == 50_000
     assert prepare_instruct.validation_limit == 5_000
     assert prepare_instruct.tokenizer_from == Path("data/tinystories-750k")
@@ -103,6 +117,89 @@ def test_cli_sft_defaults_and_requires_checkpoint() -> None:
 
     with pytest.raises(SystemExit):
         parser.parse_args(["sft"])
+
+
+def test_cli_cpt_defaults_and_requires_checkpoint() -> None:
+    parser = build_parser()
+    cpt = parser.parse_args(["cpt", "--init-from", "runs/model-y-750k/best.pt"])
+
+    assert cpt.data_dir == Path("data/simplestories-250k")
+    assert cpt.init_from == Path("runs/model-y-750k/best.pt")
+    assert cpt.resume is None
+    assert cpt.max_tokens == 50_000_000
+    assert cpt.warmup_tokens == 1_000_000
+    assert cpt.max_steps == 6_000
+    assert cpt.batch_size == 64
+    assert cpt.learning_rate == 3e-5
+    assert cpt.min_learning_rate == 3e-6
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["cpt"])
+
+
+def test_cpt_cli_uses_checkpoint_architecture_and_weight_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    model_config = ModelYConfig(
+        vocab_size=64,
+        context_length=8,
+        d_model=16,
+        dropout=0.0,
+        num_heads=2,
+        swiglu_dim=32,
+    )
+
+    class DummyTokenizer:
+        vocab_size = 64
+
+    class DummyData:
+        def __init__(self) -> None:
+            self.tokenizer = DummyTokenizer()
+            self.metadata = {
+                "tokenizer": {
+                    "reused_from": {
+                        "dataset_fingerprint": "a" * 64,
+                        "tokenizer_sha256": "b" * 64,
+                    }
+                }
+            }
+
+    def fake_train(
+        received_config: object,
+        _data: object,
+        output_dir: Path,
+        settings: object,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        captured["model_config"] = received_config
+        captured["output_dir"] = output_dir
+        captured["settings"] = settings
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
+    monkeypatch.setattr(cli, "_checkpoint_model_config", lambda _path: model_config)
+    monkeypatch.setattr(cli, "_checkpoint_data_fingerprint", lambda _path: "a" * 64)
+    monkeypatch.setattr(cli, "train", fake_train)
+    args = build_parser().parse_args(
+        ["cpt", "--init-from", "runs/model-y-750k/best.pt"]
+    )
+
+    assert args.handler(args) == 0
+    assert captured["model_config"] == model_config
+    assert captured["output_dir"] == Path("runs/model-y-simplestories-cpt")
+    assert captured["init_from"] == Path("runs/model-y-750k/best.pt")
+    assert captured["resume_from"] is None
+    settings = captured["settings"]
+    assert settings.batch_mode == "story"
+    assert settings.eval_mode == "both"
+    assert settings.max_tokens == 50_000_000
+    assert settings.warmup_tokens == 1_000_000
+
+    monkeypatch.setattr(cli, "_checkpoint_data_fingerprint", lambda _path: "c" * 64)
+    with pytest.raises(ValueError, match="must reuse the tokenizer"):
+        args.handler(args)
 
 
 def test_sft_cli_uses_checkpoint_architecture_and_weight_initialization(
@@ -315,6 +412,72 @@ def test_cli_loads_checkpoint_and_rejects_other_data(tmp_path: Path) -> None:
             data_fingerprint="b" * 64,
             device=torch.device("cpu"),
         )
+
+
+def test_evaluate_requires_explicit_cross_dataset_opt_in(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_dir = tmp_path / "source"
+    target_dir = tmp_path / "target"
+    source = prepare_from_stories(
+        source_dir,
+        ["A source training story."],
+        ["A source validation story long enough for evaluation."],
+        vocab_size=300,
+        min_frequency=1,
+    )
+    target = prepare_from_stories(
+        target_dir,
+        ["A different training story."],
+        ["A different validation story long enough for evaluation."],
+        vocab_size=300,
+        min_frequency=1,
+        tokenizer_from=source_dir,
+    )
+    config = GatedCNNConfig(
+        vocab_size=source["tokenizer"]["vocab_size"],
+        context_length=8,
+        d_model=8,
+        dropout=0.0,
+        num_layers=1,
+        dilations=(1,),
+    )
+    checkpoint = save_checkpoint(
+        tmp_path / "model.pt",
+        model=build_model(config),
+        step=1,
+        model_config=config,
+        data_fingerprint=source["fingerprint"],
+    )
+    base_args = [
+        "evaluate",
+        "--data-dir",
+        str(target_dir),
+        "--checkpoint",
+        str(checkpoint),
+        "--device",
+        "cpu",
+        "--batch-mode",
+        "story",
+        "--batch-size",
+        "1",
+        "--batches",
+        "1",
+    ]
+
+    with pytest.raises(CheckpointCompatibilityError, match="fingerprint"):
+        build_parser().parse_args(base_args).handler(
+            build_parser().parse_args(base_args)
+        )
+
+    args = build_parser().parse_args([*base_args, "--allow-data-mismatch"])
+    assert args.handler(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["checkpoint_data_fingerprint"] == source["fingerprint"]
+    assert result["data_fingerprint"] == target["fingerprint"]
+    assert result["data_mismatch"] is True
+    assert result["valid_targets"] > 0
 
 
 def test_cli_loads_model_b_checkpoint(tmp_path: Path) -> None:

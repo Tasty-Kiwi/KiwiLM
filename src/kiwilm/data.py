@@ -25,6 +25,12 @@ DEFAULT_DATASET_NAME = "roneneldan/TinyStories"
 DEFAULT_DATASET_REVISION = "main"
 DEFAULT_TRAIN_LIMIT = 25_000
 DEFAULT_VALIDATION_LIMIT = 2_000
+DEFAULT_SIMPLESTORIES_DATASET_NAME = "SimpleStories/SimpleStories"
+DEFAULT_SIMPLESTORIES_DATASET_REVISION = (
+    "e63b8adc3b1a1bdc7cac5b500d150b71346b0628"
+)
+DEFAULT_SIMPLESTORIES_TRAIN_LIMIT = 250_000
+DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT = 10_000
 DEFAULT_VOCAB_SIZE = 8_192
 METADATA_SCHEMA_VERSION = 1
 TOKENIZER_BUNDLE_SCHEMA_VERSION = 1
@@ -702,6 +708,71 @@ def prepare_tinystories(
     )
 
 
+def prepare_simplestories(
+    output_dir: str | Path,
+    *,
+    tokenizer_from: str | Path,
+    dataset_name: str = DEFAULT_SIMPLESTORIES_DATASET_NAME,
+    revision: str | None = DEFAULT_SIMPLESTORIES_DATASET_REVISION,
+    resolved_revision: str | None = None,
+    text_field: str = "story",
+    train_limit: int = DEFAULT_SIMPLESTORIES_TRAIN_LIMIT,
+    validation_limit: int = DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT,
+    vocab_size: int = DEFAULT_VOCAB_SIZE,
+    min_frequency: int = 2,
+    show_progress: bool = True,
+    force: bool = False,
+    load_dataset_fn: Callable[..., Iterable[Story]] | None = None,
+) -> dict[str, Any]:
+    """Prepare SimpleStories with a validated, frozen KiwiLM tokenizer."""
+
+    destination = Path(output_dir)
+    _validate_output_target(destination, force)
+    using_default_loader = load_dataset_fn is None
+    if load_dataset_fn is None:
+        try:
+            from datasets import load_dataset
+        except ImportError as error:  # pragma: no cover - environment dependent
+            raise RuntimeError(
+                "SimpleStories preparation requires the `datasets` package"
+            ) from error
+        load_dataset_fn = load_dataset
+
+    if resolved_revision is None:
+        if not using_default_loader:
+            raise ValueError(
+                "resolved_revision is required when injecting a dataset loader"
+            )
+        resolved_revision = _resolve_revision(dataset_name, revision)
+
+    def load_split(split: str) -> Iterable[Story]:
+        assert load_dataset_fn is not None
+        return load_dataset_fn(
+            dataset_name,
+            split=split,
+            streaming=True,
+            revision=resolved_revision,
+        )
+
+    return _prepare(
+        destination,
+        train_factory=lambda: load_split("train"),
+        validation_factory=lambda: load_split("test"),
+        dataset_name=dataset_name,
+        requested_revision=revision,
+        resolved_revision=resolved_revision,
+        text_field=text_field,
+        train_limit=train_limit,
+        validation_limit=validation_limit,
+        vocab_size=vocab_size,
+        min_frequency=min_frequency,
+        show_progress=show_progress,
+        force=force,
+        streaming=True,
+        tokenizer_from=tokenizer_from,
+    )
+
+
 def _require_mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"prepared metadata field {name!r} must be an object")
@@ -1103,6 +1174,10 @@ def _positive_batch_size(value: int) -> None:
 __all__ = [
     "DEFAULT_DATASET_NAME",
     "DEFAULT_DATASET_REVISION",
+    "DEFAULT_SIMPLESTORIES_DATASET_NAME",
+    "DEFAULT_SIMPLESTORIES_DATASET_REVISION",
+    "DEFAULT_SIMPLESTORIES_TRAIN_LIMIT",
+    "DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT",
     "DEFAULT_TRAIN_LIMIT",
     "DEFAULT_VALIDATION_LIMIT",
     "DEFAULT_VOCAB_SIZE",
@@ -1110,5 +1185,6 @@ __all__ = [
     "StoryBatchSampler",
     "metadata_fingerprint",
     "prepare_from_stories",
+    "prepare_simplestories",
     "prepare_tinystories",
 ]
