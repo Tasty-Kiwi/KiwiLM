@@ -3,9 +3,8 @@ title: KiwiLM Playground
 emoji: 🥝
 colorFrom: green
 colorTo: yellow
-sdk: gradio
-app_file: app.py
-python_version: "3.11"
+sdk: static
+app_file: index.html
 pinned: false
 license: mit
 models:
@@ -15,7 +14,7 @@ models:
 
 # KiwiLM Playground
 
-Interactive, streaming inference for the final KiwiLM models:
+Browser-native, streaming inference for the final KiwiLM models:
 
 - **Model X** — hybrid gated-convolution and attention architecture, selected
   for throughput.
@@ -29,5 +28,11 @@ These are approximately 5.4M-parameter educational research models with a
 and produce inconsistent stories. Do not use them for factual, safety-critical,
 production, or child-facing applications.
 
-The Space mounts the private model repositories read-only at `/models/x` and
-`/models/y`. It does not require a runtime Hugging Face access token.
+The Space runs entirely in the visitor's browser using ONNX Runtime Web. Model
+files are downloaded lazily from this private Space; prompts and generations
+are not sent to an inference server. WebAssembly is used as the portable
+baseline, with browser support determining available acceleration.
+
+The deployed ONNX files are generated from the published Safetensors bundles
+with `scripts/export_onnx.py`. They are release artifacts and are intentionally
+excluded from the main Git repository.
