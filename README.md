@@ -24,6 +24,38 @@ Models A–G, the portable Mamba experiment, and the original GPT-style baseline
 remain available in the
 [legacy models package](src/kiwilm/models/legacy/README.md).
 
+## Final results
+
+The experiment concludes with Model Y as the quality architecture and Model X
+as the throughput-oriented alternative. On 500 seeded story-validation
+batches, the matched 750k-pretraining checkpoints score:
+
+| Architecture | Parameters | TinyStories loss | TinyStories perplexity | Result |
+| --- | ---: | ---: | ---: | --- |
+| Model X | 5,387,520 | 1.8695 | 6.4849 | Faster hybrid finalist |
+| Model Y | 5,372,160 | **1.8468** | **6.3392** | Quality winner |
+
+The two final released Model Y checkpoints expose a deliberate specialization
+tradeoff:
+
+| Checkpoint | SFT v2 PPL | TinyStories PPL | SimpleStories PPL | Recommended use |
+| --- | ---: | ---: | ---: | --- |
+| Direct SFT v2 | **5.7595** | **6.6368** | 37.5875 | In-domain loss and greedy decoding |
+| SimpleStories CPT -> SFT v2 | 6.3614 | 7.5989 | **16.9978** | Focused sampling and broader stories |
+
+| Checkpoint | Profile | Adherence | Required words | Summary | Repeat-4 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct SFT v2 | greedy | **59.6%** | **55.6%** | **45.8%** | 15.0% |
+| CPT -> SFT v2 | greedy | 52.7% | 50.0% | 41.7% | **12.0%** |
+| Direct SFT v2 | focused | 65.2% | 55.6% | 50.0% | 5.0% |
+| CPT -> SFT v2 | focused | **69.0%** | **66.7%** | **54.2%** | **3.5%** |
+
+The final Model Y Safetensors bundles are published at
+[Tasty-Kiwi/KiwiLM](https://huggingface.co/Tasty-Kiwi/KiwiLM), and the
+throughput-oriented Model X release is at
+[Tasty-Kiwi/KiwiLM-X](https://huggingface.co/Tasty-Kiwi/KiwiLM-X). Full scored
+outputs remain in [`examples/comparisons`](examples/comparisons).
+
 ## Active architectures
 
 ### Model X

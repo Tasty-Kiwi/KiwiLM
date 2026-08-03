@@ -43,6 +43,10 @@ from kiwilm.data import (
 )
 from kiwilm.generation import generate, generate_stream
 from kiwilm.inference import load_trained_model
+from kiwilm.safetensors_io import (
+    export_safetensors_bundle,
+    read_safetensors_metadata,
+)
 from kiwilm.sft import (
     DEFAULT_INSTRUCT_DATASET,
     DEFAULT_INSTRUCT_REVISION,
@@ -55,6 +59,7 @@ from kiwilm.sft import (
     prepare_tinystories_instruct,
 )
 from kiwilm.sft_report import generate_sft_adherence_report
+from kiwilm.tokenizer import ByteBPETokenizer
 from kiwilm.training import TrainConfig, choose_device, evaluate, train
 
 _load_trained_model = load_trained_model
@@ -190,6 +195,21 @@ def build_parser() -> argparse.ArgumentParser:
     export_tokenizer_parser.add_argument("--output-dir", type=Path, required=True)
     export_tokenizer_parser.add_argument("--force", action="store_true")
     export_tokenizer_parser.set_defaults(handler=_export_tokenizer_command)
+
+    export_safetensors_parser = subparsers.add_parser(
+        "export-safetensors",
+        help="export an inference-only KiwiLM Safetensors bundle",
+    )
+    export_safetensors_parser.add_argument(
+        "--tokenizer-from",
+        type=Path,
+        required=True,
+        help="prepared dataset containing metadata.json and the exact tokenizer",
+    )
+    export_safetensors_parser.add_argument("--checkpoint", type=Path, required=True)
+    export_safetensors_parser.add_argument("--output-dir", type=Path, required=True)
+    export_safetensors_parser.add_argument("--variant", required=True)
+    export_safetensors_parser.set_defaults(handler=_export_safetensors_command)
 
     train_parser = subparsers.add_parser(
         "train",
@@ -575,6 +595,44 @@ def _prepare_instruct_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_safetensors_command(args: argparse.Namespace) -> int:
+    metadata_path = args.tokenizer_from / "metadata.json"
+    try:
+        prepared_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read prepared metadata at {metadata_path}") from error
+    if not isinstance(prepared_metadata, Mapping):
+        raise ValueError("prepared metadata must be an object")
+    prepared_fingerprint = prepared_metadata.get("fingerprint")
+    if not isinstance(prepared_fingerprint, str):
+        raise ValueError("prepared data does not contain a fingerprint")
+    tokenizer_metadata = prepared_metadata.get("tokenizer")
+    if not isinstance(tokenizer_metadata, Mapping):
+        raise ValueError("prepared data does not contain tokenizer metadata")
+    tokenizer_file = tokenizer_metadata.get("file")
+    tokenizer_sha256 = tokenizer_metadata.get("sha256")
+    if not isinstance(tokenizer_file, str):
+        raise ValueError("prepared data does not name its tokenizer artifact")
+    if not isinstance(tokenizer_sha256, str):
+        raise ValueError("prepared data does not contain a tokenizer checksum")
+    manifest = export_safetensors_bundle(
+        args.checkpoint,
+        args.output_dir,
+        tokenizer_path=args.tokenizer_from / tokenizer_file,
+        expected_data_fingerprint=prepared_fingerprint,
+        expected_tokenizer_sha256=tokenizer_sha256,
+        variant=args.variant,
+    )
+    _print_json(
+        {
+            "checkpoint": str(args.checkpoint.resolve()),
+            "output_dir": str(args.output_dir.resolve()),
+            **manifest,
+        }
+    )
+    return 0
+
+
 def _export_tokenizer_command(args: argparse.Namespace) -> int:
     bundle = export_tokenizer_bundle(
         args.data_dir,
@@ -865,13 +923,25 @@ def _evaluate_command(args: argparse.Namespace) -> int:
 
 
 def _generate_command(args: argparse.Namespace) -> int:
-    data = load_prepared_data(args.data_dir, seed=args.seed)
     device = choose_device(args.device)
+    bundled_tokenizer = _bundled_tokenizer_path(args.checkpoint)
+    data = (
+        None
+        if bundled_tokenizer is not None
+        else load_prepared_data(args.data_dir, seed=args.seed)
+    )
     model, config = load_trained_model(
         args.checkpoint,
-        data_fingerprint=data.fingerprint,
+        data_fingerprint=None if data is None else data.fingerprint,
         device=device,
     )
+    tokenizer = (
+        ByteBPETokenizer.load(bundled_tokenizer)
+        if bundled_tokenizer is not None
+        else data.tokenizer
+    )
+    if tokenizer.vocab_size != config.vocab_size:
+        raise ValueError("generation tokenizer vocabulary does not match the model")
     generation_options = {
         "max_new_tokens": args.max_new_tokens,
         "context_length": config.context_length,
@@ -883,13 +953,13 @@ def _generate_command(args: argparse.Namespace) -> int:
     }
     prompt = (
         data.format_prompt(args.prompt)
-        if isinstance(data, PreparedSFTData)
+        if data is not None and isinstance(data, PreparedSFTData)
         else args.prompt
     )
     if args.stream:
         for chunk in generate_stream(
             model,
-            data.tokenizer,
+            tokenizer,
             prompt,
             **generation_options,
         ):
@@ -898,7 +968,7 @@ def _generate_command(args: argparse.Namespace) -> int:
     else:
         text = generate(
             model,
-            data.tokenizer,
+            tokenizer,
             prompt,
             **generation_options,
         )
@@ -960,6 +1030,17 @@ def _sft_report_command(args: argparse.Namespace) -> int:
 
 
 def _checkpoint_model_config(path: Path) -> ModelConfig:
+    if path.is_dir() or path.suffix == ".safetensors":
+        metadata = read_safetensors_metadata(path)
+        try:
+            serialized = json.loads(metadata["model_config"])
+        except (KeyError, json.JSONDecodeError) as error:
+            raise ValueError(
+                "Safetensors metadata has an invalid model configuration"
+            ) from error
+        if not isinstance(serialized, dict):
+            raise ValueError("Safetensors model configuration must be an object")
+        return ModelConfig.from_dict(serialized)
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):
         raise ValueError("checkpoint must contain a mapping")
@@ -970,6 +1051,12 @@ def _checkpoint_model_config(path: Path) -> ModelConfig:
 
 
 def _checkpoint_data_fingerprint(path: Path) -> str:
+    if path.is_dir() or path.suffix == ".safetensors":
+        metadata = read_safetensors_metadata(path)
+        fingerprint = metadata.get("data_fingerprint")
+        if not isinstance(fingerprint, str):
+            raise ValueError("Safetensors metadata lacks a data fingerprint")
+        return fingerprint
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):
         raise ValueError("checkpoint must contain a mapping")
@@ -977,6 +1064,15 @@ def _checkpoint_data_fingerprint(path: Path) -> str:
     if not isinstance(fingerprint, str):
         raise ValueError("checkpoint does not contain a data fingerprint")
     return fingerprint
+
+
+def _bundled_tokenizer_path(checkpoint: Path) -> Path | None:
+    candidate = (
+        checkpoint / "tokenizer.json"
+        if checkpoint.is_dir()
+        else checkpoint.parent / "tokenizer.json"
+    )
+    return candidate if candidate.is_file() else None
 
 
 def _print_json(value: Any) -> None:

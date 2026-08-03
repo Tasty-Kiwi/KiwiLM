@@ -77,6 +77,23 @@ def test_cli_defaults_select_fast_smoke_profile() -> None:
     )
     assert exported.data_dir == Path("data/source")
     assert exported.output_dir == Path("data/bundle")
+    exported_weights = parser.parse_args(
+        [
+            "export-safetensors",
+            "--tokenizer-from",
+            "data/sft",
+            "--checkpoint",
+            "runs/model-y/best.pt",
+            "--output-dir",
+            "dist/model-y",
+            "--variant",
+            "direct-sft-v2",
+        ]
+    )
+    assert exported_weights.tokenizer_from == Path("data/sft")
+    assert exported_weights.checkpoint == Path("runs/model-y/best.pt")
+    assert exported_weights.output_dir == Path("dist/model-y")
+    assert exported_weights.variant == "direct-sft-v2"
     assert training.max_steps == 2_000
     assert training.batch_size == 32
     assert training.context_length == 256
@@ -277,9 +294,12 @@ def test_generate_applies_prepared_sft_prompt_format(
 ) -> None:
     captured: dict[str, str] = {}
 
+    class DummyTokenizer:
+        vocab_size = 64
+
     class DummySFTData:
         fingerprint = "a" * 64
-        tokenizer = object()
+        tokenizer = DummyTokenizer()
 
         @staticmethod
         def format_prompt(prompt: str) -> str:
@@ -291,8 +311,8 @@ def test_generate_applies_prepared_sft_prompt_format(
         cli,
         "load_trained_model",
         lambda *_args, **_kwargs: (
-            torch.nn.Identity(),
-            type("Config", (), {"context_length": 8})(),
+                torch.nn.Identity(),
+                type("Config", (), {"context_length": 8, "vocab_size": 64})(),
         ),
     )
 
