@@ -5,20 +5,21 @@ architectures on
 [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories), with
 controlled continued pretraining on
 [SimpleStories](https://huggingface.co/datasets/SimpleStories/SimpleStories).
-The current work compares two parameter-matched finalists with an experimental
-parallel-fusion wildcard:
+The current work keeps two parameter-matched finalists, an experimental
+parallel-fusion wildcard, and an attention-only retrieval candidate:
 
 | Model | Architecture | Parameters |
 | --- | --- | ---: |
 | X | 2 gated CNN mixers, 2 attention mixers, 4 SwiGLU FFNs | 5,387,520 |
 | Y | 4 attention mixers, 4 SwiGLU FFNs | 5,372,160 |
 | Z-P | 2 parallel CNN/attention mixers, 2 wide SwiGLU FFNs | 5,387,008 |
+| KiwiLM-SAN | 16 QK-normalized GQA mixers, no FFNs | 5,260,560 |
 
-All three use 256-wide embeddings, pre-RMSNorm residual paths, RoPE causal
-self-attention, bias-free SwiGLU projections, a final RMSNorm, and tied
-token/LM-head weights. They share the tokenizer, prepared-data format,
-token-counted trainer, evaluation, checkpoint, streaming-generation, and
-KV-cache implementations.
+The models share 256-wide embeddings, RoPE causal attention, tied token/LM-head
+weights, the tokenizer and prepared-data format, token-counted training,
+evaluation, checkpoints, streaming generation, and exact sliding-window KV
+caches. KiwiLM-SAN deliberately removes every learned token-wise FFN and
+reallocates the parameter budget into attention depth.
 
 Models A–G, the portable Mamba experiment, and the original GPT-style baseline
 remain available in the
@@ -129,6 +130,35 @@ crop-and-prefill rollover behavior as Model X.
 
 ![KiwiLM Model Z-P architecture](docs/model-z-parallel.svg)
 
+### KiwiLM-SAN
+
+KiwiLM-SAN is the attention-only retrieval candidate derived from
+[A Controlled Study of Attention-Only Transformers](https://arxiv.org/abs/2607.18363):
+
+```text
+Embedding x sqrt(256)
+  -> 16 x [
+       zero-centered RMSNorm
+       -> 8-query / 4-KV-head causal GQA with QK norm and RoPE
+       -> post-attention zero-centered RMSNorm
+       -> sigmoid-gated residual
+     ]
+  -> final zero-centered RMSNorm -> tied LM head
+```
+
+Its 16 layers reclaim the parameters removed with the FFNs while remaining
+close to Models X and Y at 5,260,560 parameters. QK normalization and the
+post-attention sandwich norm follow the paper's stability and quality
+ablations. This first experiment tests plain TinyStories pretraining and
+context retrieval only; Hadamard mixers, engram memory, hyper-connections,
+continued pretraining, and instruction tuning are intentionally excluded.
+
+The architecture identifier is `kiwilm_san`. Its cache stores four KV heads per
+layer and expands them only for eight-head query attention, retaining the same
+256-token crop-and-prefill rollover behavior as the other active models.
+
+![KiwiLM-SAN architecture](docs/kiwilm-san.svg)
+
 ## Setup
 
 KiwiLM uses [uv](https://docs.astral.sh/uv/) for dependency management:
@@ -209,6 +239,47 @@ The runner refuses to overwrite a non-empty output directory. In addition to
 matched loss, throughput, and cached/uncached generation measurements, it
 records each Z-P block's CNN and attention output RMS, norm ratio, cosine
 similarity, and merged-update-to-residual RMS.
+
+The KiwiLM-SAN smoke runner trains only SAN and evaluates it beside the saved
+Model X and Model Y smoke checkpoints:
+
+```bash
+uv run python scripts/run_kiwilm_san_smoke_benchmark.py \
+  --device mps
+```
+
+It uses the same 2,000 packed FP32 steps, 256-token context, seed, optimizer,
+and 16,384,000-target budget. Post-training evaluation reruns all three models
+on the current device, but only SAN's live training throughput is reported as
+comparable. The runner also writes a deterministic counterfactual retrieval
+report at needle distances of 32, 64, 128, and 192 tokens:
+
+```text
+runs/benchmarks/kiwilm-san-smoke/
+  kiwilm-san/
+  comparison/report.md
+  comparison/results.jsonl
+  retrieval/report.md
+  retrieval/results.jsonl
+  retrieval/suite.json
+  summary.json
+```
+
+By default it reads the X/Y baselines from
+`runs/benchmarks/model-xyz-smoke/model-x/best.pt` and
+`runs/benchmarks/model-xyz-smoke/model-y/best.pt`. Both paths are configurable,
+and the runner rejects checkpoints with a mismatched architecture, tokenizer,
+context length, or prepared-data fingerprint.
+
+The retrieval suite is also reusable independently of training:
+
+```bash
+uv run python scripts/evaluate_context_retrieval.py \
+  --data-dir data/tinystories \
+  --checkpoint runs/benchmarks/kiwilm-san-smoke/kiwilm-san/best.pt \
+  --label KiwiLM-SAN \
+  --device mps
+```
 
 For a 4 GB Windows CUDA GPU, retain the same effective batch and exact target
 count with FP16 microbatches:
@@ -594,6 +665,7 @@ src/kiwilm/
     model_x.py         active hybrid
     model_y.py         active modern Transformer
     model_z_parallel.py experimental fixed parallel fusion
+    kiwilm_san.py      attention-only GQA retrieval candidate
     legacy/            Models A-G, Mamba, and GPT baseline
   data.py              TinyStories preparation and batching
   sft.py               instruction parsing and response-only SFT batches
@@ -602,6 +674,7 @@ src/kiwilm/
   generation.py        cached and streaming autoregressive generation
 scripts/
   run_model_xyz_smoke_benchmark.py
+  run_kiwilm_san_smoke_benchmark.py
 eval/
   story-consistency-prompts.json
 ```

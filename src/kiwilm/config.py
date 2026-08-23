@@ -82,6 +82,8 @@ class ModelConfig:
                 return cast(Self, ModelXConfig.from_dict(data))
             if architecture == "model_z_parallel":
                 return cast(Self, ModelZParallelConfig.from_dict(data))
+            if architecture == "kiwilm_san":
+                return cast(Self, KiwiLMSANConfig.from_dict(data))
         return cls(**data)
 
 
@@ -320,6 +322,46 @@ class ModelYConfig(ModelConfig):
             or self.rms_norm_eps <= 0
         ):
             raise ValueError("rms_norm_eps must be finite and positive")
+
+
+@dataclass(frozen=True, slots=True)
+class KiwiLMSANConfig(ModelConfig):
+    """Configuration for the attention-only KiwiLM-SAN experiment."""
+
+    architecture: str = "kiwilm_san"
+    num_layers: int = 16
+    num_query_heads: int = 8
+    num_kv_heads: int = 4
+    rms_norm_eps: float = 1e-6
+    rope_base: float = 10_000.0
+
+    def __post_init__(self) -> None:
+        super(KiwiLMSANConfig, self).__post_init__()
+        if self.architecture != "kiwilm_san":
+            raise ValueError("KiwiLMSANConfig architecture must be 'kiwilm_san'")
+        _require_positive_int("num_layers", self.num_layers)
+        _require_positive_int("num_query_heads", self.num_query_heads)
+        _require_positive_int("num_kv_heads", self.num_kv_heads)
+        if self.d_model % self.num_query_heads != 0:
+            raise ValueError("d_model must be divisible by num_query_heads")
+        if self.num_query_heads % self.num_kv_heads != 0:
+            raise ValueError("num_query_heads must be divisible by num_kv_heads")
+        if (self.d_model // self.num_query_heads) % 2 != 0:
+            raise ValueError("attention head dimension must be even for RoPE")
+        if (
+            isinstance(self.rms_norm_eps, bool)
+            or not isinstance(self.rms_norm_eps, (int, float))
+            or not math.isfinite(self.rms_norm_eps)
+            or self.rms_norm_eps <= 0
+        ):
+            raise ValueError("rms_norm_eps must be finite and positive")
+        if (
+            isinstance(self.rope_base, bool)
+            or not isinstance(self.rope_base, (int, float))
+            or not math.isfinite(self.rope_base)
+            or self.rope_base <= 0
+        ):
+            raise ValueError("rope_base must be finite and positive")
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,6 +3,13 @@
 from kiwilm.models.attention import CausalSelfAttention
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.components import CausalConv1d, GatedCNNBlock
+from kiwilm.models.kiwilm_san import (
+    GroupedQueryAttention,
+    KiwiLMSANBlock,
+    KiwiLMSANCache,
+    KiwiLMSANLM,
+    ZeroCenteredRMSNorm,
+)
 from kiwilm.models.legacy import (
     CNNAttentionCache,
     CNNAttentionLM,
@@ -55,6 +62,10 @@ __all__ = [
     "CausalSelfAttention",
     "GatedCNNBlock",
     "GatedCNNLM",
+    "GroupedQueryAttention",
+    "KiwiLMSANBlock",
+    "KiwiLMSANCache",
+    "KiwiLMSANLM",
     "MambaBlock",
     "ModelXCache",
     "ModelXLM",
@@ -72,6 +83,7 @@ __all__ = [
     "TransformerAttentionBlock",
     "TransformerCache",
     "TransformerLM",
+    "ZeroCenteredRMSNorm",
     "build_model",
     "register_model",
 ]

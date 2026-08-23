@@ -20,6 +20,7 @@ from kiwilm.config import (
     CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
+    KiwiLMSANConfig,
     ModelConfig,
     ModelXConfig,
     ModelYConfig,
@@ -230,6 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
             "model_x",
             "model_y",
             "model_z_parallel",
+            "kiwilm_san",
         ),
         default="gated_cnn",
     )
@@ -252,6 +254,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1280,
     )
+    train_parser.add_argument("--san-layers", type=int, default=16)
+    train_parser.add_argument("--san-kv-heads", type=int, default=4)
+    train_parser.add_argument("--san-rms-norm-eps", type=float, default=1e-6)
+    train_parser.add_argument("--san-rope-base", type=float, default=10_000.0)
     train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
     train_parser.add_argument("--mamba-state-dim", type=int, default=16)
     train_parser.add_argument("--mamba-conv-kernel", type=int, default=4)
@@ -733,6 +739,16 @@ def _train_command(args: argparse.Namespace) -> int:
             swiglu_dim=args.model_z_swiglu_dim,
         )
         default_output_dir = Path("runs/model-z-parallel")
+    elif args.architecture == "kiwilm_san":
+        model_config = KiwiLMSANConfig(
+            **shared_config,
+            num_layers=args.san_layers,
+            num_query_heads=args.attention_heads,
+            num_kv_heads=args.san_kv_heads,
+            rms_norm_eps=args.san_rms_norm_eps,
+            rope_base=args.san_rope_base,
+        )
+        default_output_dir = Path("runs/kiwilm-san")
     else:
         model_config = GatedCNNConfig(**shared_config)
         default_output_dir = Path("runs/model-a")
