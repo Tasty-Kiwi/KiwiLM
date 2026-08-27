@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from kiwilm.colab_artifacts import reassemble_colab_artifacts
+from kiwilm.colab_artifacts import create_colab_artifacts, reassemble_colab_artifacts
 
 
 def build_artifacts(tmp_path: Path) -> tuple[Path, Path]:
@@ -87,3 +87,32 @@ def test_rejects_corrupt_colab_artifact_part(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="part size mismatch"):
         reassemble_colab_artifacts(manifest_path, output_dir)
+
+
+def test_creates_and_reassembles_chunked_artifacts(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    remote = tmp_path / "remote"
+    local = tmp_path / "local"
+    source.mkdir()
+    local.mkdir()
+    (source / "latest.pt").write_bytes(b"checkpoint" * 100)
+    (source / "summary.json").write_text('{"ok": true}\n', encoding="utf-8")
+
+    remote_manifest = create_colab_artifacts(
+        {
+            "latest.pt": source / "latest.pt",
+            "summary.json": source / "summary.json",
+        },
+        remote,
+        chunk_size=97,
+    )
+    manifest = json.loads(remote_manifest.read_text(encoding="utf-8"))
+    local_manifest = local / remote_manifest.name
+    local_manifest.write_bytes(remote_manifest.read_bytes())
+    for part in manifest["parts"]:
+        (local / part["name"]).write_bytes((remote / part["name"]).read_bytes())
+
+    extracted = reassemble_colab_artifacts(local_manifest, local)
+
+    assert {path.name for path in extracted} == {"latest.pt", "summary.json"}
+    assert (local / "latest.pt").read_bytes() == b"checkpoint" * 100

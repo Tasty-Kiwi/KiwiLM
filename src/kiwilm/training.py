@@ -27,6 +27,7 @@ from kiwilm.config import ModelConfig
 from kiwilm.data import PreparedTokenData, StoryBatchSampler
 from kiwilm.generation import generate as generate_text
 from kiwilm.models import build_model
+from kiwilm.optim import MuonWithAuxAdamW, split_muon_parameters
 from kiwilm.sft import SFT_FORMAT_V2, SFTBatchSampler
 
 
@@ -47,6 +48,8 @@ class TrainConfig:
     precision: Literal["fp32", "fp16", "bf16", "auto"] = "fp32"
     weight_decay: float = 0.1
     beta2: float = 0.95
+    optimizer: Literal["adamw", "muon"] = "adamw"
+    muon_lr: float = 0.02
     grad_clip: float = 1.0
     eval_interval: int = 200
     eval_batches: int = 20
@@ -90,6 +93,10 @@ class TrainConfig:
             raise ValueError("weight_decay must be finite and non-negative")
         if not math.isfinite(self.beta2) or not 0 < self.beta2 < 1:
             raise ValueError("beta2 must be finite and in (0, 1)")
+        if self.optimizer not in {"adamw", "muon"}:
+            raise ValueError("optimizer must be 'adamw' or 'muon'")
+        if not math.isfinite(self.muon_lr) or self.muon_lr <= 0:
+            raise ValueError("muon_lr must be finite and positive")
         if not math.isfinite(self.grad_clip) or self.grad_clip < 0:
             raise ValueError("grad_clip must be finite and non-negative")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
@@ -120,6 +127,14 @@ def choose_device(requested: str | torch.device = "auto") -> torch.device:
     return device
 
 
+def _accelerator_memory_bytes(device: torch.device) -> int | None:
+    if device.type == "cuda":
+        return int(torch.cuda.max_memory_allocated(device))
+    if device.type == "mps" and hasattr(torch.mps, "current_allocated_memory"):
+        return int(torch.mps.current_allocated_memory())
+    return None
+
+
 def seed_everything(seed: int) -> None:
     """Seed Python and all available PyTorch device generators."""
 
@@ -147,9 +162,7 @@ def learning_rate_at_step(step: int, config: TrainConfig) -> float:
         return config.lr * (step + 1) / effective_warmup_steps
     if config.max_steps <= effective_warmup_steps:
         return config.lr
-    decay_progress = (step - effective_warmup_steps) / (
-        config.max_steps - effective_warmup_steps
-    )
+    decay_progress = (step - effective_warmup_steps) / (config.max_steps - effective_warmup_steps)
     decay_progress = min(max(decay_progress, 0.0), 1.0)
     coefficient = 0.5 * (1.0 + math.cos(math.pi * decay_progress))
     return config.min_lr + coefficient * (config.lr - config.min_lr)
@@ -206,9 +219,7 @@ def evaluate(
     _positive_int("batch_size", batch_size)
     _positive_int("context_length", context_length)
     _positive_int("num_batches", num_batches)
-    resolved_device = (
-        _model_device(model) if device is None else torch.device(device)
-    )
+    resolved_device = _model_device(model) if device is None else torch.device(device)
     model.to(resolved_device)
     was_training = model.training
     model.eval()
@@ -246,9 +257,7 @@ def evaluate(
                     generator=generator,
                 )
             else:
-                inputs, targets = sampler.get_batch(
-                    batch_size=batch_size, device=resolved_device
-                )
+                inputs, targets = sampler.get_batch(batch_size=batch_size, device=resolved_device)
             with _autocast_context(resolved_device, resolved_precision):
                 logits = model(inputs)
                 loss_sum, valid_targets, _ = _loss_sum_and_count(logits, targets)
@@ -298,18 +307,32 @@ def train(
     network = build_model(model_config) if model is None else model
     network.to(resolved_device)
     network.train()
+    if resolved_device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(resolved_device)
+    peak_accelerator_memory = _accelerator_memory_bytes(resolved_device)
     parameter_count = sum(parameter.numel() for parameter in network.parameters())
     if log_fn is not None:
         log_fn(
             f"model={model_config.architecture} "
             f"parameters={parameter_count:,} device={resolved_device}"
         )
-    optimizer = torch.optim.AdamW(
-        network.parameters(),
-        lr=settings.lr,
-        betas=(0.9, settings.beta2),
-        weight_decay=settings.weight_decay,
-    )
+    if settings.optimizer == "muon":
+        muon_parameters, adamw_parameters = split_muon_parameters(network)
+        optimizer: torch.optim.Optimizer = MuonWithAuxAdamW(
+            muon_parameters,
+            adamw_parameters,
+            muon_lr=settings.muon_lr,
+            adamw_lr=settings.lr,
+            weight_decay=settings.weight_decay,
+            beta2=settings.beta2,
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            network.parameters(),
+            lr=settings.lr,
+            betas=(0.9, settings.beta2),
+            weight_decay=settings.weight_decay,
+        )
     train_generator = torch.Generator(device="cpu")
     train_generator.manual_seed(settings.seed)
     eval_generator = torch.Generator(device="cpu")
@@ -374,9 +397,7 @@ def train(
         saved_initialization = training_state.get("initialization")
         if isinstance(saved_initialization, Mapping):
             initialization = dict(saved_initialization)
-        best_validation_loss = float(
-            checkpoint_metrics.get("best_validation_loss", math.inf)
-        )
+        best_validation_loss = float(checkpoint_metrics.get("best_validation_loss", math.inf))
         best_validation_perplexity = float(
             checkpoint_metrics.get("best_validation_perplexity", math.inf)
         )
@@ -394,9 +415,7 @@ def train(
             settings.max_tokens is None or tokens_seen < settings.max_tokens
         ):
             step_index = completed_step
-            microbatches: list[
-                tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
-            ] = []
+            microbatches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]] = []
             step_valid_targets = 0
             step_model_tokens = 0
             step_loss_weight = 0.0
@@ -415,11 +434,9 @@ def train(
                     isinstance(batch_sampler, SFTBatchSampler)
                     and batch_sampler.data.sft_format == SFT_FORMAT_V2
                 ):
-                    inputs, targets, loss_weights = (
-                        batch_sampler.get_training_batch(
-                            batch_size=settings.batch_size,
-                            device=resolved_device,
-                        )
+                    inputs, targets, loss_weights = batch_sampler.get_training_batch(
+                        batch_size=settings.batch_size,
+                        device=resolved_device,
                     )
                 else:
                     inputs, targets = batch_sampler.get_batch(
@@ -454,7 +471,9 @@ def train(
                 else learning_rate_at_step(step_index, settings)
             )
             for parameter_group in optimizer.param_groups:
-                parameter_group["lr"] = current_lr
+                parameter_group["lr"] = current_lr * float(
+                    parameter_group.get("lr_multiplier", 1.0)
+                )
 
             optimizer.zero_grad(set_to_none=True)
             accumulated_nll = 0.0
@@ -475,29 +494,24 @@ def train(
 
             if settings.grad_clip:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    network.parameters(), settings.grad_clip
-                )
+                torch.nn.utils.clip_grad_norm_(network.parameters(), settings.grad_clip)
             scaler.step(optimizer)
             scaler.update()
+            observed_memory = _accelerator_memory_bytes(resolved_device)
+            if observed_memory is not None:
+                peak_accelerator_memory = max(peak_accelerator_memory or 0, observed_memory)
             completed_step += 1
             tokens_seen += step_valid_targets
             valid_tokens_since_log += step_valid_targets
             model_tokens_since_log += step_model_tokens
             latest_train_loss = accumulated_nll / step_loss_weight
-            reached_target = (
-                settings.max_tokens is not None
-                and tokens_seen >= settings.max_tokens
-            )
+            reached_target = settings.max_tokens is not None and tokens_seen >= settings.max_tokens
             final_step = reached_target or completed_step == settings.max_steps
 
             should_log = (
                 completed_step == 1
                 or final_step
-                or (
-                    settings.log_interval > 0
-                    and completed_step % settings.log_interval == 0
-                )
+                or (settings.log_interval > 0 and completed_step % settings.log_interval == 0)
             )
             if should_log:
                 now = time.perf_counter()
@@ -509,12 +523,16 @@ def train(
                     "step": completed_step,
                     "train_loss": latest_train_loss,
                     "learning_rate": current_lr,
+                    "muon_learning_rate": (
+                        current_lr * settings.muon_lr / settings.lr
+                        if settings.optimizer == "muon"
+                        else None
+                    ),
                     "tokens_seen": tokens_seen,
                     "valid_tokens_per_second": valid_tokens_per_second,
                     "model_tokens_per_second": model_tokens_per_second,
-                    "padding_fraction": (
-                        1.0 - valid_tokens_since_log / model_tokens_since_log
-                    ),
+                    "padding_fraction": (1.0 - valid_tokens_since_log / model_tokens_since_log),
+                    "accelerator_memory_bytes": observed_memory,
                 }
                 _write_metric(metric_stream, train_metrics)
                 if log_fn is not None:
@@ -528,12 +546,8 @@ def train(
                 valid_tokens_since_log = 0
                 model_tokens_since_log = 0
 
-            should_evaluate = (
-                final_step
-                or (
-                    settings.eval_interval > 0
-                    and completed_step % settings.eval_interval == 0
-                )
+            should_evaluate = final_step or (
+                settings.eval_interval > 0 and completed_step % settings.eval_interval == 0
             )
             if should_evaluate:
                 evaluation_started = time.perf_counter()
@@ -553,10 +567,7 @@ def train(
                         f"ppl={latest_validation['perplexity']:.2f}"
                     )
                 last_log_time += time.perf_counter() - evaluation_started
-                if (
-                    latest_validation["validation_loss"]
-                    < best_validation_loss
-                ):
+                if latest_validation["validation_loss"] < best_validation_loss:
                     best_validation_loss = latest_validation["validation_loss"]
                     best_validation_perplexity = latest_validation["perplexity"]
                     save_checkpoint(
@@ -582,12 +593,9 @@ def train(
                         ),
                     )
 
-            should_checkpoint = (
-                final_step
-                or (
-                    settings.checkpoint_interval > 0
-                    and completed_step % settings.checkpoint_interval == 0
-                )
+            should_checkpoint = final_step or (
+                settings.checkpoint_interval > 0
+                and completed_step % settings.checkpoint_interval == 0
             )
             if should_checkpoint:
                 save_checkpoint(
@@ -679,9 +687,7 @@ def train(
             best_validation_loss if math.isfinite(best_validation_loss) else None
         ),
         "best_validation_perplexity": (
-            best_validation_perplexity
-            if math.isfinite(best_validation_perplexity)
-            else None
+            best_validation_perplexity if math.isfinite(best_validation_perplexity) else None
         ),
         "checkpoint_paths": {
             "latest": resolved_latest_path,
@@ -692,9 +698,11 @@ def train(
         "metrics_path": str(metrics_path.resolve()),
         "device": str(resolved_device),
         "parameter_count": parameter_count,
+        "peak_accelerator_memory_bytes": peak_accelerator_memory,
         "tokens_seen": tokens_seen,
         "tokens_per_parameter": tokens_seen / parameter_count,
         "precision": resolved_precision,
+        "optimizer": settings.optimizer,
         "batch_mode": settings.batch_mode,
         "eval_mode": settings.eval_mode,
         "stop_reason": stop_reason,
@@ -737,16 +745,13 @@ def _validate_resume_settings(
     )
     if incompatible:
         raise CheckpointCompatibilityError(
-            "resume training configuration differs for locked fields: "
-            + ", ".join(incompatible)
+            "resume training configuration differs for locked fields: " + ", ".join(incompatible)
         )
     completed_step = payload.get("step")
     if not isinstance(completed_step, int) or completed_step < 0:
         raise ValueError("resume checkpoint has an invalid training step")
     if completed_step > settings.max_steps:
-        raise CheckpointCompatibilityError(
-            "resume checkpoint step exceeds the requested max_steps"
-        )
+        raise CheckpointCompatibilityError("resume checkpoint step exceeds the requested max_steps")
 
 
 def _checkpoint_metrics(
@@ -757,12 +762,8 @@ def _checkpoint_metrics(
 ) -> dict[str, Any]:
     result = {
         "train_loss": train_loss,
-        "validation_loss": (
-            validation.get("validation_loss") if validation is not None else None
-        ),
-        "validation_perplexity": (
-            validation.get("perplexity") if validation is not None else None
-        ),
+        "validation_loss": (validation.get("validation_loss") if validation is not None else None),
+        "validation_perplexity": (validation.get("perplexity") if validation is not None else None),
         "best_validation_loss": best_loss,
         "best_validation_perplexity": best_perplexity,
     }
@@ -870,11 +871,7 @@ def _evaluate_modes(
     device: torch.device,
     generator: torch.Generator,
 ) -> dict[str, float]:
-    modes = (
-        ("packed", "story")
-        if settings.eval_mode == "both"
-        else (settings.eval_mode,)
-    )
+    modes = ("packed", "story") if settings.eval_mode == "both" else (settings.eval_mode,)
     measured: dict[str, dict[str, float]] = {}
     for mode in modes:
         measured[mode] = evaluate(
@@ -916,13 +913,9 @@ def _truncate_metrics_after(metrics_path: Path, completed_step: int) -> None:
         try:
             record = json.loads(line)
         except json.JSONDecodeError as error:
-            raise ValueError(
-                f"invalid metrics JSON at {metrics_path}:{line_number}"
-            ) from error
+            raise ValueError(f"invalid metrics JSON at {metrics_path}:{line_number}") from error
         if not isinstance(record, Mapping) or not isinstance(record.get("step"), int):
-            raise ValueError(
-                f"invalid metrics record at {metrics_path}:{line_number}"
-            )
+            raise ValueError(f"invalid metrics record at {metrics_path}:{line_number}")
         if record["step"] <= completed_step:
             retained.append(json.dumps(dict(record), sort_keys=True))
 

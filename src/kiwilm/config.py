@@ -84,6 +84,10 @@ class ModelConfig:
                 return cast(Self, ModelZParallelConfig.from_dict(data))
             if architecture == "kiwilm_san":
                 return cast(Self, KiwiLMSANConfig.from_dict(data))
+            if architecture == "kiwilm2":
+                return cast(Self, KiwiLM2Config.from_dict(data))
+            if architecture == "kiwilm2_slim":
+                return cast(Self, KiwiLM2SlimConfig.from_dict(data))
         return cls(**data)
 
 
@@ -162,9 +166,7 @@ class CNNFFNAttentionConfig(CNNAttentionConfig):
     def __post_init__(self) -> None:
         ModelConfig.__post_init__(self)
         if self.architecture != "cnn_attention_ffn":
-            raise ValueError(
-                "CNNFFNAttentionConfig architecture must be 'cnn_attention_ffn'"
-            )
+            raise ValueError("CNNFFNAttentionConfig architecture must be 'cnn_attention_ffn'")
         _validate_cnn_attention_fields(self)
 
 
@@ -177,9 +179,7 @@ class CNNDualAttentionConfig(CNNAttentionConfig):
     def __post_init__(self) -> None:
         ModelConfig.__post_init__(self)
         if self.architecture != "cnn_dual_attention":
-            raise ValueError(
-                "CNNDualAttentionConfig architecture must be 'cnn_dual_attention'"
-            )
+            raise ValueError("CNNDualAttentionConfig architecture must be 'cnn_dual_attention'")
         _validate_cnn_attention_fields(self)
 
     @classmethod
@@ -202,10 +202,7 @@ class CNNAttentionMambaConfig(CNNAttentionConfig):
     def __post_init__(self) -> None:
         ModelConfig.__post_init__(self)
         if self.architecture != "cnn_attention_mamba":
-            raise ValueError(
-                "CNNAttentionMambaConfig architecture must be "
-                "'cnn_attention_mamba'"
-            )
+            raise ValueError("CNNAttentionMambaConfig architecture must be 'cnn_attention_mamba'")
         _validate_cnn_attention_fields(self)
         _require_positive_int("mamba_inner_dim", self.mamba_inner_dim)
         _require_positive_int("mamba_state_dim", self.mamba_state_dim)
@@ -233,8 +230,7 @@ class CNNInterleavedAttentionConfig(ModelConfig):
         super(CNNInterleavedAttentionConfig, self).__post_init__()
         if self.architecture != "cnn_interleaved_attention":
             raise ValueError(
-                "CNNInterleavedAttentionConfig architecture must be "
-                "'cnn_interleaved_attention'"
+                "CNNInterleavedAttentionConfig architecture must be 'cnn_interleaved_attention'"
             )
         _validate_interleaved_attention_fields(self)
 
@@ -364,6 +360,106 @@ class KiwiLMSANConfig(ModelConfig):
             raise ValueError("rope_base must be finite and positive")
 
 
+KIWILM2_MIXER_SCHEDULE = (
+    "gqa",
+    "conv",
+    "conv",
+    "gqa",
+    "conv",
+    "conv",
+    "gqa",
+    "conv",
+    "conv",
+    "gqa",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class KiwiLM2Config(ModelConfig):
+    """Frozen KiwiLM 2 backbone with SwiGLU feed-forward blocks."""
+
+    architecture: str = "kiwilm2"
+    vocab_size: int = 32_000
+    context_length: int = 512
+    d_model: int = 512
+    dropout: float = 0.0
+    mixer_schedule: tuple[str, ...] = KIWILM2_MIXER_SCHEDULE
+    conv_kernel_sizes: tuple[int, ...] = (31, 63, 31, 63, 31, 63)
+    num_query_heads: int = 8
+    num_kv_heads: int = 2
+    swiglu_dim: int = 1_536
+    bigram_buckets: int = 16_384
+    trigram_buckets: int = 16_384
+    rms_norm_eps: float = 1e-6
+    rope_base: float = 10_000.0
+
+    def __post_init__(self) -> None:
+        super(KiwiLM2Config, self).__post_init__()
+        if self.architecture != "kiwilm2":
+            raise ValueError("KiwiLM2Config architecture must be 'kiwilm2'")
+        self._validate_kiwilm2_fields()
+
+    def _validate_kiwilm2_fields(self) -> None:
+        if not isinstance(self.mixer_schedule, tuple):
+            object.__setattr__(self, "mixer_schedule", tuple(self.mixer_schedule))
+        if self.mixer_schedule != KIWILM2_MIXER_SCHEDULE:
+            raise ValueError("mixer_schedule must match the frozen KiwiLM 2 schedule")
+        if not isinstance(self.conv_kernel_sizes, tuple):
+            object.__setattr__(self, "conv_kernel_sizes", tuple(self.conv_kernel_sizes))
+        if len(self.conv_kernel_sizes) != self.mixer_schedule.count("conv"):
+            raise ValueError("conv_kernel_sizes must contain one entry per conv block")
+        for kernel_size in self.conv_kernel_sizes:
+            _require_positive_int("each conv kernel size", kernel_size)
+            if kernel_size % 2 == 0:
+                raise ValueError("each conv kernel size must be odd")
+        _require_positive_int("num_query_heads", self.num_query_heads)
+        _require_positive_int("num_kv_heads", self.num_kv_heads)
+        _require_positive_int("swiglu_dim", self.swiglu_dim)
+        _require_positive_int("bigram_buckets", self.bigram_buckets)
+        _require_positive_int("trigram_buckets", self.trigram_buckets)
+        if self.d_model % self.num_query_heads != 0:
+            raise ValueError("d_model must be divisible by num_query_heads")
+        if self.num_query_heads % self.num_kv_heads != 0:
+            raise ValueError("num_query_heads must be divisible by num_kv_heads")
+        if (self.d_model // self.num_query_heads) % 2:
+            raise ValueError("attention head dimension must be even for RoPE")
+        for name in ("rms_norm_eps", "rope_base"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        data = dict(values)
+        for name in ("mixer_schedule", "conv_kernel_sizes"):
+            if name in data:
+                raw = data[name]
+                if isinstance(raw, (str, bytes)):
+                    raise ValueError(f"{name} must be a sequence")
+                data[name] = tuple(raw)  # type: ignore[arg-type]
+        return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class KiwiLM2SlimConfig(KiwiLM2Config):
+    """KiwiLM 2 backbone with structured width-preserving Hadamard MLPs."""
+
+    architecture: str = "kiwilm2_slim"
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "kiwilm2_slim":
+            raise ValueError("KiwiLM2SlimConfig architecture must be 'kiwilm2_slim'")
+        self._validate_kiwilm2_fields()
+        if self.d_model & (self.d_model - 1):
+            raise ValueError("Hadamard MLP requires d_model to be a power of two")
+
+
 @dataclass(frozen=True, slots=True)
 class ModelXConfig(ModelConfig):
     """Configuration for the alternating local/global Model X hybrid."""
@@ -413,9 +509,7 @@ class ModelZParallelConfig(ModelConfig):
     def __post_init__(self) -> None:
         super(ModelZParallelConfig, self).__post_init__()
         if self.architecture != "model_z_parallel":
-            raise ValueError(
-                "ModelZParallelConfig architecture must be 'model_z_parallel'"
-            )
+            raise ValueError("ModelZParallelConfig architecture must be 'model_z_parallel'")
         _require_positive_int("kernel_size", self.kernel_size)
         _require_positive_int("num_heads", self.num_heads)
         _require_positive_int("swiglu_dim", self.swiglu_dim)
@@ -458,13 +552,9 @@ def _validate_dilations(
             values = tuple(values)
             object.__setattr__(config, name, values)
         except TypeError as error:
-            raise ValueError(
-                f"{name} must be a sequence of positive integers"
-            ) from error
+            raise ValueError(f"{name} must be a sequence of positive integers") from error
     if len(values) != expected_length:
-        raise ValueError(
-            f"{name} must contain exactly {expected_length} entries"
-        )
+        raise ValueError(f"{name} must contain exactly {expected_length} entries")
     for dilation in values:
         _require_positive_int(f"each {name}", dilation)
 
@@ -479,15 +569,11 @@ def _normalize_dilation_data(
             continue
         raw_dilations = data[name]
         if isinstance(raw_dilations, (str, bytes)):
-            raise ValueError(
-                f"{name} must be a sequence of positive integers"
-            )
+            raise ValueError(f"{name} must be a sequence of positive integers")
         try:
             data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
         except TypeError as error:
-            raise ValueError(
-                f"{name} must be a sequence of positive integers"
-            ) from error
+            raise ValueError(f"{name} must be a sequence of positive integers") from error
     return data
 
 
@@ -504,9 +590,7 @@ def _normalize_cnn_attention_data(
         try:
             data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
         except TypeError as error:
-            raise ValueError(
-                f"{name} must be a sequence of positive integers"
-            ) from error
+            raise ValueError(f"{name} must be a sequence of positive integers") from error
     return data
 
 
@@ -521,9 +605,7 @@ def _validate_cnn_attention_fields(config: CNNAttentionConfig) -> None:
                 values = tuple(values)
                 object.__setattr__(config, name, values)
             except TypeError as error:
-                raise ValueError(
-                    f"{name} must be a sequence of positive integers"
-                ) from error
+                raise ValueError(f"{name} must be a sequence of positive integers") from error
         if len(values) != 3:
             raise ValueError(f"{name} must contain exactly 3 entries")
         for dilation in values:

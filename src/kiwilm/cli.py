@@ -20,6 +20,8 @@ from kiwilm.config import (
     CNNFFNAttentionConfig,
     CNNInterleavedAttentionConfig,
     GatedCNNConfig,
+    KiwiLM2Config,
+    KiwiLM2SlimConfig,
     KiwiLMSANConfig,
     ModelConfig,
     ModelXConfig,
@@ -34,16 +36,22 @@ from kiwilm.data import (
     DEFAULT_SIMPLESTORIES_DATASET_REVISION,
     DEFAULT_SIMPLESTORIES_TRAIN_LIMIT,
     DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT,
+    DEFAULT_SMOLLM_DATASET_NAME,
+    DEFAULT_SMOLLM_DATASET_REVISION,
+    DEFAULT_SMOLLM_VOCAB_SIZE,
     DEFAULT_TRAIN_LIMIT,
     DEFAULT_VALIDATION_LIMIT,
     DEFAULT_VOCAB_SIZE,
     PreparedTokenData,
     export_tokenizer_bundle,
     prepare_simplestories,
+    prepare_smollm_corpus,
     prepare_tinystories,
 )
 from kiwilm.generation import generate, generate_stream
 from kiwilm.inference import load_trained_model
+from kiwilm.model_profile import profile_kiwilm2
+from kiwilm.models import build_model
 from kiwilm.safetensors_io import (
     export_safetensors_bundle,
     read_safetensors_metadata,
@@ -99,6 +107,33 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--quiet", action="store_true")
     prepare_parser.set_defaults(handler=_prepare_command)
 
+    prepare_smollm_parser = subparsers.add_parser(
+        "prepare-smollm",
+        help="prepare exact-token FineWeb-Edu + Cosmopedia KiwiLM 2 subsets",
+    )
+    prepare_smollm_parser.add_argument(
+        "--profile",
+        choices=("smoke", "architecture", "final-500m", "final-1b"),
+        default="smoke",
+    )
+    prepare_smollm_parser.add_argument("--output-dir", type=Path)
+    prepare_smollm_parser.add_argument("--dataset-name", default=DEFAULT_SMOLLM_DATASET_NAME)
+    prepare_smollm_parser.add_argument("--revision", default=DEFAULT_SMOLLM_DATASET_REVISION)
+    prepare_smollm_parser.add_argument("--train-tokens", type=int)
+    prepare_smollm_parser.add_argument("--validation-tokens", type=int, default=2_000_000)
+    prepare_smollm_parser.add_argument("--tokenizer-train-documents", type=int, default=100_000)
+    prepare_smollm_parser.add_argument(
+        "--validation-documents-per-source", type=int, default=10_000
+    )
+    prepare_smollm_parser.add_argument("--vocab-size", type=int, default=DEFAULT_SMOLLM_VOCAB_SIZE)
+    prepare_smollm_parser.add_argument("--min-frequency", type=int, default=2)
+    prepare_smollm_parser.add_argument("--fineweb-probability", type=float, default=0.7)
+    prepare_smollm_parser.add_argument("--seed", type=int, default=42)
+    prepare_smollm_parser.add_argument("--tokenizer-from", type=Path)
+    prepare_smollm_parser.add_argument("--force", action="store_true")
+    prepare_smollm_parser.add_argument("--quiet", action="store_true")
+    prepare_smollm_parser.set_defaults(handler=_prepare_smollm_command)
+
     prepare_simplestories_parser = subparsers.add_parser(
         "prepare-simplestories",
         help="prepare SimpleStories using a frozen KiwiLM tokenizer",
@@ -140,9 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_simplestories_parser.add_argument("--min-frequency", type=int, default=2)
     prepare_simplestories_parser.add_argument("--force", action="store_true")
     prepare_simplestories_parser.add_argument("--quiet", action="store_true")
-    prepare_simplestories_parser.set_defaults(
-        handler=_prepare_simplestories_command
-    )
+    prepare_simplestories_parser.set_defaults(handler=_prepare_simplestories_command)
 
     prepare_instruct_parser = subparsers.add_parser(
         "prepare-instruct",
@@ -232,6 +265,8 @@ def build_parser() -> argparse.ArgumentParser:
             "model_y",
             "model_z_parallel",
             "kiwilm_san",
+            "kiwilm2",
+            "kiwilm2_slim",
         ),
         default="gated_cnn",
     )
@@ -258,6 +293,13 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--san-kv-heads", type=int, default=4)
     train_parser.add_argument("--san-rms-norm-eps", type=float, default=1e-6)
     train_parser.add_argument("--san-rope-base", type=float, default=10_000.0)
+    train_parser.add_argument("--kiwilm2-context-length", type=int, default=512)
+    train_parser.add_argument("--kiwilm2-d-model", type=int, default=512)
+    train_parser.add_argument("--kiwilm2-dropout", type=float, default=0.0)
+    train_parser.add_argument("--kiwilm2-kv-heads", type=int, default=2)
+    train_parser.add_argument("--kiwilm2-swiglu-dim", type=int, default=1_536)
+    train_parser.add_argument("--kiwilm2-bigram-buckets", type=int, default=16_384)
+    train_parser.add_argument("--kiwilm2-trigram-buckets", type=int, default=16_384)
     train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
     train_parser.add_argument("--mamba-state-dim", type=int, default=16)
     train_parser.add_argument("--mamba-conv-kernel", type=int, default=4)
@@ -271,12 +313,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--warmup-steps", type=int, default=100)
     train_parser.add_argument("--max-tokens", type=int)
     train_parser.add_argument("--warmup-tokens", type=int)
-    train_parser.add_argument(
-        "--batch-mode", choices=("packed", "story"), default="packed"
-    )
-    train_parser.add_argument(
-        "--eval-mode", choices=("packed", "story", "both"), default="packed"
-    )
+    train_parser.add_argument("--batch-mode", choices=("packed", "story"), default="packed")
+    train_parser.add_argument("--eval-mode", choices=("packed", "story", "both"), default="packed")
     train_parser.add_argument(
         "--precision",
         choices=("fp32", "fp16", "bf16", "auto"),
@@ -284,6 +322,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train_parser.add_argument("--weight-decay", type=float, default=0.1)
     train_parser.add_argument("--beta2", type=float, default=0.95)
+    train_parser.add_argument("--optimizer", choices=("adamw", "muon"), default="adamw")
+    train_parser.add_argument("--muon-learning-rate", type=float, default=0.02)
     train_parser.add_argument("--grad-clip", type=float, default=1.0)
     train_parser.add_argument("--eval-interval", type=int, default=200)
     train_parser.add_argument("--eval-batches", type=int, default=20)
@@ -298,6 +338,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.set_defaults(handler=_train_command)
+
+    profile_parser = subparsers.add_parser(
+        "profile-kiwilm2", help="report KiwiLM 2 parameters, KV cache, and FLOPs"
+    )
+    profile_parser.add_argument(
+        "--architecture", choices=("kiwilm2", "kiwilm2_slim"), default="kiwilm2"
+    )
+    profile_parser.add_argument("--vocab-size", type=int, default=32_000)
+    profile_parser.add_argument("--sequence-length", type=int, default=512)
+    profile_parser.add_argument("--kv-heads", type=int, default=2)
+    profile_parser.add_argument("--swiglu-dim", type=int, default=1_536)
+    profile_parser.add_argument("--ngram-buckets", type=int, default=16_384)
+    profile_parser.add_argument("--cache-dtype-bytes", type=int, default=2)
+    profile_parser.set_defaults(handler=_profile_kiwilm2_command)
 
     cpt_parser = subparsers.add_parser(
         "cpt",
@@ -547,6 +601,69 @@ def _prepare_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prepare_smollm_command(args: argparse.Namespace) -> int:
+    profile_tokens = {
+        "smoke": 50_000_000,
+        "architecture": 250_000_000,
+        "final-500m": 500_000_000,
+        "final-1b": 1_000_000_000,
+    }
+    train_tokens = args.train_tokens or profile_tokens[args.profile]
+    output_dir = args.output_dir or Path(f"data/smollm-{args.profile}")
+    if args.profile != "smoke" and args.tokenizer_from is None:
+        raise ValueError(
+            "non-smoke profiles require --tokenizer-from so every run shares "
+            "the frozen 32K tokenizer"
+        )
+    metadata = prepare_smollm_corpus(
+        output_dir,
+        dataset_name=args.dataset_name,
+        revision=args.revision,
+        train_tokens=train_tokens,
+        validation_tokens=args.validation_tokens,
+        tokenizer_train_documents=args.tokenizer_train_documents,
+        validation_documents_per_source=args.validation_documents_per_source,
+        vocab_size=args.vocab_size,
+        min_frequency=args.min_frequency,
+        fineweb_probability=args.fineweb_probability,
+        seed=args.seed,
+        show_progress=not args.quiet,
+        force=args.force,
+        tokenizer_from=args.tokenizer_from,
+    )
+    _print_json(
+        {
+            "profile": args.profile,
+            "output_dir": str(output_dir.resolve()),
+            "fingerprint": metadata["fingerprint"],
+            "dataset": metadata["dataset"],
+            "tokenizer": metadata["tokenizer"],
+            "splits": metadata["splits"],
+        }
+    )
+    return 0
+
+
+def _profile_kiwilm2_command(args: argparse.Namespace) -> int:
+    config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
+    config = config_type(
+        vocab_size=args.vocab_size,
+        num_kv_heads=args.kv_heads,
+        swiglu_dim=args.swiglu_dim,
+        bigram_buckets=args.ngram_buckets,
+        trigram_buckets=args.ngram_buckets,
+    )
+    model = build_model(config)
+    _print_json(
+        profile_kiwilm2(
+            model,
+            sequence_length=args.sequence_length,
+            cache_dtype_bytes=args.cache_dtype_bytes,
+        )
+    )
+    return 0
+
+
 def _prepare_simplestories_command(args: argparse.Namespace) -> int:
     metadata = prepare_simplestories(
         args.output_dir,
@@ -658,6 +775,8 @@ def _export_tokenizer_command(args: argparse.Namespace) -> int:
 
 def _train_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
+    if args.optimizer == "muon" and args.architecture != "kiwilm2":
+        raise ValueError("the KiwiLM 2.0 Muon experiment is restricted to kiwilm2")
     shared_config = {
         "vocab_size": data.tokenizer.vocab_size,
         "context_length": args.context_length,
@@ -665,7 +784,22 @@ def _train_command(args: argparse.Namespace) -> int:
         "dropout": args.dropout,
         "tie_embeddings": not args.untie_embeddings,
     }
-    if args.architecture == "cnn_attention":
+    if args.architecture in {"kiwilm2", "kiwilm2_slim"}:
+        config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
+        model_config = config_type(
+            vocab_size=data.tokenizer.vocab_size,
+            context_length=args.kiwilm2_context_length,
+            d_model=args.kiwilm2_d_model,
+            dropout=args.kiwilm2_dropout,
+            tie_embeddings=not args.untie_embeddings,
+            num_query_heads=args.attention_heads,
+            num_kv_heads=args.kiwilm2_kv_heads,
+            swiglu_dim=args.kiwilm2_swiglu_dim,
+            bigram_buckets=args.kiwilm2_bigram_buckets,
+            trigram_buckets=args.kiwilm2_trigram_buckets,
+        )
+        default_output_dir = Path(f"runs/{args.architecture.replace('_', '-')}")
+    elif args.architecture == "cnn_attention":
         model_config = CNNAttentionConfig(
             **shared_config,
             num_heads=args.attention_heads,
@@ -767,6 +901,8 @@ def _train_command(args: argparse.Namespace) -> int:
         precision=args.precision,
         weight_decay=args.weight_decay,
         beta2=args.beta2,
+        optimizer=args.optimizer,
+        muon_lr=args.muon_learning_rate,
         grad_clip=args.grad_clip,
         eval_interval=args.eval_interval,
         eval_batches=args.eval_batches,
@@ -793,12 +929,8 @@ def _sft_command(args: argparse.Namespace) -> int:
     source_checkpoint = args.init_from or args.resume
     model_config = _checkpoint_model_config(source_checkpoint)
     if model_config.vocab_size != data.tokenizer.vocab_size:
-        raise ValueError(
-            "SFT tokenizer vocabulary does not match the source checkpoint"
-        )
-    output_dir = args.output_dir or Path(
-        f"runs/{model_config.architecture.replace('_', '-')}-sft"
-    )
+        raise ValueError("SFT tokenizer vocabulary does not match the source checkpoint")
+    output_dir = args.output_dir or Path(f"runs/{model_config.architecture.replace('_', '-')}-sft")
     settings = TrainConfig(
         max_steps=args.max_steps,
         batch_size=args.batch_size,
@@ -840,9 +972,7 @@ def _cpt_command(args: argparse.Namespace) -> int:
     source_checkpoint = args.init_from or args.resume
     model_config = _checkpoint_model_config(source_checkpoint)
     if model_config.vocab_size != data.tokenizer.vocab_size:
-        raise ValueError(
-            "CPT tokenizer vocabulary does not match the source checkpoint"
-        )
+        raise ValueError("CPT tokenizer vocabulary does not match the source checkpoint")
     if args.init_from is not None:
         tokenizer_metadata = data.metadata.get("tokenizer")
         reused_from = (
@@ -856,8 +986,7 @@ def _cpt_command(args: argparse.Namespace) -> int:
             or reused_from.get("dataset_fingerprint") != source_fingerprint
         ):
             raise ValueError(
-                "CPT data must reuse the tokenizer from the source checkpoint's "
-                "prepared dataset"
+                "CPT data must reuse the tokenizer from the source checkpoint's prepared dataset"
             )
     output_dir = args.output_dir or Path(
         f"runs/{model_config.architecture.replace('_', '-')}-simplestories-cpt"
@@ -909,9 +1038,7 @@ def _evaluate_command(args: argparse.Namespace) -> int:
         device=device,
     )
     if config.vocab_size != data.tokenizer.vocab_size:
-        raise ValueError(
-            "evaluation tokenizer vocabulary does not match the checkpoint"
-        )
+        raise ValueError("evaluation tokenizer vocabulary does not match the checkpoint")
     generator = torch.Generator(device="cpu").manual_seed(args.seed)
     metrics = evaluate(
         model,
@@ -942,9 +1069,7 @@ def _generate_command(args: argparse.Namespace) -> int:
     device = choose_device(args.device)
     bundled_tokenizer = _bundled_tokenizer_path(args.checkpoint)
     data = (
-        None
-        if bundled_tokenizer is not None
-        else load_prepared_data(args.data_dir, seed=args.seed)
+        None if bundled_tokenizer is not None else load_prepared_data(args.data_dir, seed=args.seed)
     )
     model, config = load_trained_model(
         args.checkpoint,
@@ -1002,8 +1127,7 @@ def _compare_command(args: argparse.Namespace) -> int:
             or args.label_b is not None
         ):
             raise ValueError(
-                "use either --checkpoints/--labels or the "
-                "--checkpoint-a/--checkpoint-b form"
+                "use either --checkpoints/--labels or the --checkpoint-a/--checkpoint-b form"
             )
         checkpoints = args.checkpoints
         labels = args.labels
@@ -1051,9 +1175,7 @@ def _checkpoint_model_config(path: Path) -> ModelConfig:
         try:
             serialized = json.loads(metadata["model_config"])
         except (KeyError, json.JSONDecodeError) as error:
-            raise ValueError(
-                "Safetensors metadata has an invalid model configuration"
-            ) from error
+            raise ValueError("Safetensors metadata has an invalid model configuration") from error
         if not isinstance(serialized, dict):
             raise ValueError("Safetensors model configuration must be an object")
         return ModelConfig.from_dict(serialized)

@@ -1,5 +1,10 @@
 # KiwiLM
 
+> **KiwiLM 2 is now implemented.** The fixed 512-wide GQA/XXL-convolution
+> backbone, hashed bigram/trigram memory, SwiGLU and structured Hadamard
+> variants, exact-token SmolLM-Corpus preparation, AdamW/Muon controls, and
+> phase runner are documented in [the KiwiLM 2 runbook](docs/kiwilm2.md).
+
 KiwiLM is a small PyTorch research project for comparing causal language-model
 architectures on
 [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories), with

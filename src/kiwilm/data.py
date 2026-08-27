@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import json
 import os
+import random
 import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
@@ -26,12 +27,15 @@ DEFAULT_DATASET_REVISION = "main"
 DEFAULT_TRAIN_LIMIT = 25_000
 DEFAULT_VALIDATION_LIMIT = 2_000
 DEFAULT_SIMPLESTORIES_DATASET_NAME = "SimpleStories/SimpleStories"
-DEFAULT_SIMPLESTORIES_DATASET_REVISION = (
-    "e63b8adc3b1a1bdc7cac5b500d150b71346b0628"
-)
+DEFAULT_SIMPLESTORIES_DATASET_REVISION = "e63b8adc3b1a1bdc7cac5b500d150b71346b0628"
 DEFAULT_SIMPLESTORIES_TRAIN_LIMIT = 250_000
 DEFAULT_SIMPLESTORIES_VALIDATION_LIMIT = 10_000
 DEFAULT_VOCAB_SIZE = 8_192
+DEFAULT_SMOLLM_DATASET_NAME = "HuggingFaceTB/smollm-corpus"
+DEFAULT_SMOLLM_DATASET_REVISION = "main"
+DEFAULT_SMOLLM_FINEWEB_CONFIG = "fineweb-edu-dedup"
+DEFAULT_SMOLLM_COSMOPEDIA_CONFIG = "cosmopedia-v2"
+DEFAULT_SMOLLM_VOCAB_SIZE = 32_000
 METADATA_SCHEMA_VERSION = 1
 TOKENIZER_BUNDLE_SCHEMA_VERSION = 1
 TOKENIZER_BUNDLE_FILE = "tokenizer-bundle.json"
@@ -127,9 +131,7 @@ def _referenced_artifacts(metadata_path: Path) -> set[Path]:
         names = [
             tokenizer.get("file"),
             _require_mapping(splits.get("train"), "splits.train").get("file"),
-            _require_mapping(
-                splits.get("validation"), "splits.validation"
-            ).get("file"),
+            _require_mapping(splits.get("validation"), "splits.validation").get("file"),
         ]
     except (OSError, json.JSONDecodeError, ValueError, AttributeError, TypeError):
         return set()
@@ -153,8 +155,7 @@ def _validate_output_target(output_dir: Path, force: bool) -> None:
     metadata_path = output_dir / "metadata.json"
     if metadata_path.exists() and not force:
         raise FileExistsError(
-            "prepared data already exists "
-            f"({metadata_path.name}); pass force=True to replace it"
+            f"prepared data already exists ({metadata_path.name}); pass force=True to replace it"
         )
 
 
@@ -162,10 +163,7 @@ def _story_text(story: Story, *, text_field: str) -> str:
     if isinstance(story, str):
         return story
     if not isinstance(story, Mapping):
-        raise TypeError(
-            "stories must be strings or mappings, "
-            f"found {type(story).__name__}"
-        )
+        raise TypeError(f"stories must be strings or mappings, found {type(story).__name__}")
     if text_field not in story:
         raise ValueError(f"story row is missing text field {text_field!r}")
     text = story[text_field]
@@ -193,6 +191,7 @@ def _write_packed_split(
     *,
     split: str,
     show_progress: bool,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     if show_progress:
         from tqdm.auto import tqdm
@@ -209,20 +208,29 @@ def _write_packed_split(
     with path.open("wb") as stream:
         for text in texts:
             token_ids = tokenizer.encode(text, add_bos=True, add_eos=True)
-            if any(
-                token_id < 0 or token_id > MAX_UINT16_VOCAB_SIZE
-                for token_id in token_ids
-            ):
+            if max_tokens is not None:
+                remaining = max_tokens - token_count
+                if remaining <= 0:
+                    break
+                token_ids = token_ids[:remaining]
+            if any(token_id < 0 or token_id > MAX_UINT16_VOCAB_SIZE for token_id in token_ids):
                 raise ValueError("tokenizer emitted an ID outside the uint16 range")
             encoded = np.asarray(token_ids, dtype="<u2").tobytes()
             stream.write(encoded)
             digest.update(encoded)
             story_count += 1
             token_count += len(token_ids)
+            if max_tokens is not None and token_count == max_tokens:
+                break
         stream.flush()
         os.fsync(stream.fileno())
     if story_count == 0:
         raise ValueError("each prepared split must contain at least one story")
+    if max_tokens is not None and token_count != max_tokens:
+        raise ValueError(
+            f"{split} source ended at {token_count} tokens before the requested "
+            f"exact budget of {max_tokens}"
+        )
     return {
         "file": path.name.removeprefix(".").split(".", maxsplit=1)[0],
         "stories": story_count,
@@ -249,9 +257,23 @@ def _prepare(
     force: bool,
     streaming: bool,
     tokenizer_from: str | Path | None,
+    tokenizer_train_limit: int | None = None,
+    train_token_limit: int | None = None,
+    validation_token_limit: int | None = None,
+    extra_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _validate_limit("train_limit", train_limit)
     _validate_limit("validation_limit", validation_limit)
+    if tokenizer_train_limit is not None:
+        _validate_limit("tokenizer_train_limit", tokenizer_train_limit)
+    for name, value in (
+        ("train_token_limit", train_token_limit),
+        ("validation_token_limit", validation_token_limit),
+    ):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        ):
+            raise ValueError(f"{name} must be a positive integer")
     _validate_output_target(output_dir, force)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -263,7 +285,7 @@ def _prepare(
         tokenizer = ByteBPETokenizer.train(
             _limited_texts(
                 train_factory(),
-                limit=train_limit,
+                limit=(tokenizer_train_limit if tokenizer_train_limit is not None else train_limit),
                 text_field=text_field,
             ),
             vocab_size=vocab_size,
@@ -300,6 +322,7 @@ def _prepare(
             tokenizer,
             split="train",
             show_progress=show_progress,
+            max_tokens=train_token_limit,
         )
         validation_details = _write_packed_split(
             temporary_paths["validation"],
@@ -311,12 +334,12 @@ def _prepare(
             tokenizer,
             split="validation",
             show_progress=show_progress,
+            max_tokens=validation_token_limit,
         )
         artifact_destinations = {
             "tokenizer": output_dir / f"tokenizer-{tokenizer_sha256}.json",
             "train": output_dir / f"train-{train_details['sha256']}.bin",
-            "validation": output_dir
-            / f"validation-{validation_details['sha256']}.bin",
+            "validation": output_dir / f"validation-{validation_details['sha256']}.bin",
         }
         train_details["file"] = artifact_destinations["train"].name
         validation_details["file"] = artifact_destinations["validation"].name
@@ -365,6 +388,14 @@ def _prepare(
                 "streaming": streaming,
             },
         }
+        if tokenizer_train_limit is not None:
+            metadata["config"]["tokenizer_train_limit"] = tokenizer_train_limit
+        if train_token_limit is not None:
+            metadata["config"]["train_token_limit"] = train_token_limit
+        if validation_token_limit is not None:
+            metadata["config"]["validation_token_limit"] = validation_token_limit
+        if extra_config:
+            metadata["config"].update(extra_config)
         metadata["fingerprint"] = metadata_fingerprint(metadata)
         _write_json(temporary_paths["metadata"], metadata)
 
@@ -449,8 +480,7 @@ def export_tokenizer_bundle(
     manifest_path = destination / TOKENIZER_BUNDLE_FILE
     if manifest_path.exists() and not force:
         raise FileExistsError(
-            f"tokenizer bundle already exists ({manifest_path.name}); "
-            "pass force=True to replace it"
+            f"tokenizer bundle already exists ({manifest_path.name}); pass force=True to replace it"
         )
     destination.mkdir(parents=True, exist_ok=True)
     details = _require_mapping(source.metadata.get("tokenizer"), "tokenizer")
@@ -505,10 +535,7 @@ def _load_tokenizer_bundle(
     if bundle.get("schema_version") != TOKENIZER_BUNDLE_SCHEMA_VERSION:
         raise ValueError("unsupported tokenizer bundle schema version")
     fingerprint = bundle.get("fingerprint")
-    if (
-        not isinstance(fingerprint, str)
-        or fingerprint != tokenizer_bundle_fingerprint(bundle)
-    ):
+    if not isinstance(fingerprint, str) or fingerprint != tokenizer_bundle_fingerprint(bundle):
         raise ValueError("tokenizer bundle fingerprint mismatch")
     source_fingerprint = bundle.get("source_dataset_fingerprint")
     if not isinstance(source_fingerprint, str) or len(source_fingerprint) != 64:
@@ -637,9 +664,7 @@ def _resolve_revision(
         ) from error
     resolved = getattr(info, "sha", None)
     if not isinstance(resolved, str) or not resolved:
-        raise RuntimeError(
-            f"dataset service did not return a revision SHA for {dataset_name!r}"
-        )
+        raise RuntimeError(f"dataset service did not return a revision SHA for {dataset_name!r}")
     return resolved
 
 
@@ -668,16 +693,12 @@ def prepare_tinystories(
         try:
             from datasets import load_dataset
         except ImportError as error:  # pragma: no cover - environment dependent
-            raise RuntimeError(
-                "TinyStories preparation requires the `datasets` package"
-            ) from error
+            raise RuntimeError("TinyStories preparation requires the `datasets` package") from error
         load_dataset_fn = load_dataset
 
     if resolved_revision is None:
         if not using_default_loader:
-            raise ValueError(
-                "resolved_revision is required when injecting a dataset loader"
-            )
+            raise ValueError("resolved_revision is required when injecting a dataset loader")
         resolved_revision = _resolve_revision(dataset_name, revision)
 
     def load_split(split: SplitName) -> Iterable[Story]:
@@ -705,6 +726,138 @@ def prepare_tinystories(
         force=force,
         streaming=True,
         tokenizer_from=tokenizer_from,
+    )
+
+
+def _interleave_sources(
+    first: Iterable[Story],
+    second: Iterable[Story],
+    *,
+    first_probability: float,
+    seed: int,
+) -> Iterable[Story]:
+    """Deterministically interleave two streams without materializing them."""
+
+    if not 0.0 < first_probability < 1.0:
+        raise ValueError("first_probability must be in (0, 1)")
+    generators = [iter(first), iter(second)]
+    active = [True, True]
+    rng = random.Random(seed)
+    while any(active):
+        selected = 0 if rng.random() < first_probability else 1
+        if not active[selected]:
+            selected = 1 - selected
+        try:
+            yield next(generators[selected])
+        except StopIteration:
+            active[selected] = False
+
+
+def prepare_smollm_corpus(
+    output_dir: str | Path,
+    *,
+    dataset_name: str = DEFAULT_SMOLLM_DATASET_NAME,
+    revision: str | None = DEFAULT_SMOLLM_DATASET_REVISION,
+    resolved_revision: str | None = None,
+    train_tokens: int = 50_000_000,
+    validation_tokens: int = 2_000_000,
+    tokenizer_train_documents: int = 100_000,
+    validation_documents_per_source: int = 10_000,
+    vocab_size: int = DEFAULT_SMOLLM_VOCAB_SIZE,
+    min_frequency: int = 2,
+    fineweb_probability: float = 0.7,
+    seed: int = 42,
+    show_progress: bool = True,
+    force: bool = False,
+    load_dataset_fn: Callable[..., Iterable[Story]] | None = None,
+    tokenizer_from: str | Path | None = None,
+) -> dict[str, Any]:
+    """Prepare an exact-token FineWeb-Edu/Cosmopedia SmolLM subset.
+
+    The first fixed number of documents from each immutable source stream forms
+    validation; training skips those documents. Both streams are then mixed by a
+    seeded Bernoulli schedule. Python-Edu is deliberately absent from the recipe.
+    """
+
+    destination = Path(output_dir)
+    _validate_output_target(destination, force)
+    _validate_limit("tokenizer_train_documents", tokenizer_train_documents)
+    _validate_limit("validation_documents_per_source", validation_documents_per_source)
+    if tokenizer_train_documents == 0:
+        raise ValueError("tokenizer_train_documents must be positive")
+    if validation_documents_per_source == 0:
+        raise ValueError("validation_documents_per_source must be positive")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    using_default_loader = load_dataset_fn is None
+    if load_dataset_fn is None:
+        try:
+            from datasets import load_dataset
+        except ImportError as error:  # pragma: no cover - environment dependent
+            raise RuntimeError(
+                "SmolLM-Corpus preparation requires the `datasets` package"
+            ) from error
+        load_dataset_fn = load_dataset
+    if resolved_revision is None:
+        if not using_default_loader:
+            raise ValueError("resolved_revision is required when injecting a dataset loader")
+        resolved_revision = _resolve_revision(dataset_name, revision)
+
+    def load_source(config_name: str) -> Iterable[Story]:
+        assert load_dataset_fn is not None
+        return load_dataset_fn(
+            dataset_name,
+            config_name,
+            split="train",
+            streaming=True,
+            revision=resolved_revision,
+        )
+
+    def mixed(*, validation: bool) -> Iterable[Story]:
+        fineweb = load_source(DEFAULT_SMOLLM_FINEWEB_CONFIG)
+        cosmopedia = load_source(DEFAULT_SMOLLM_COSMOPEDIA_CONFIG)
+        if validation:
+            fineweb = itertools.islice(fineweb, validation_documents_per_source)
+            cosmopedia = itertools.islice(cosmopedia, validation_documents_per_source)
+        else:
+            fineweb = itertools.islice(fineweb, validation_documents_per_source, None)
+            cosmopedia = itertools.islice(cosmopedia, validation_documents_per_source, None)
+        return _interleave_sources(
+            fineweb,
+            cosmopedia,
+            first_probability=fineweb_probability,
+            seed=seed + (1 if validation else 0),
+        )
+
+    return _prepare(
+        destination,
+        train_factory=lambda: mixed(validation=False),
+        validation_factory=lambda: mixed(validation=True),
+        dataset_name=dataset_name,
+        requested_revision=revision,
+        resolved_revision=resolved_revision,
+        text_field="text",
+        train_limit=0,
+        validation_limit=0,
+        vocab_size=vocab_size,
+        min_frequency=min_frequency,
+        show_progress=show_progress,
+        force=force,
+        streaming=True,
+        tokenizer_from=tokenizer_from,
+        tokenizer_train_limit=tokenizer_train_documents,
+        train_token_limit=train_tokens,
+        validation_token_limit=validation_tokens,
+        extra_config={
+            "source_configs": [
+                DEFAULT_SMOLLM_FINEWEB_CONFIG,
+                DEFAULT_SMOLLM_COSMOPEDIA_CONFIG,
+            ],
+            "fineweb_probability": fineweb_probability,
+            "seed": seed,
+            "validation_documents_per_source": validation_documents_per_source,
+            "python_edu_included": False,
+        },
     )
 
 
@@ -740,9 +893,7 @@ def prepare_simplestories(
 
     if resolved_revision is None:
         if not using_default_loader:
-            raise ValueError(
-                "resolved_revision is required when injecting a dataset loader"
-            )
+            raise ValueError("resolved_revision is required when injecting a dataset loader")
         resolved_revision = _resolve_revision(dataset_name, revision)
 
     def load_split(split: str) -> Iterable[Story]:
@@ -831,9 +982,7 @@ class PreparedTokenData:
         if not isinstance(tokenizer_file, str):
             raise ValueError("prepared tokenizer file must be a string")
         tokenizer_path = self.data_dir / tokenizer_file
-        if verify_integrity and _sha256_file(tokenizer_path) != tokenizer_details.get(
-            "sha256"
-        ):
+        if verify_integrity and _sha256_file(tokenizer_path) != tokenizer_details.get("sha256"):
             raise ValueError("prepared tokenizer checksum mismatch")
         self.tokenizer = ByteBPETokenizer.load(tokenizer_path)
         if self.tokenizer.vocab_size != tokenizer_details.get("vocab_size"):
@@ -848,11 +997,7 @@ class PreparedTokenData:
             byte_count = details.get("bytes")
             if not isinstance(file_name, str):
                 raise ValueError(f"prepared {split} filename must be a string")
-            if (
-                isinstance(token_count, bool)
-                or not isinstance(token_count, int)
-                or token_count < 1
-            ):
+            if isinstance(token_count, bool) or not isinstance(token_count, int) or token_count < 1:
                 raise ValueError(f"prepared {split} token count is invalid")
             if byte_count != token_count * np.dtype("<u2").itemsize:
                 raise ValueError(f"prepared {split} byte count is inconsistent")
@@ -978,9 +1123,7 @@ class PreparedTokenData:
         for start, end in self.story_offsets(split):
             target_count = int(end - start - 1)
             for offset in range(0, target_count, context_length):
-                chunks.append(
-                    (int(start + offset), min(context_length, target_count - offset))
-                )
+                chunks.append((int(start + offset), min(context_length, target_count - offset)))
         if not chunks:
             raise ValueError(f"{split} contains no next-token story targets")
         result = np.asarray(chunks, dtype=np.int64)
