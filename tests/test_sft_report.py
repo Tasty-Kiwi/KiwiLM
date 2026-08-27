@@ -103,7 +103,7 @@ def test_sft_report_writes_scored_machine_and_human_outputs(
         suite_path=suite_path,
         output_dir=tmp_path / "report",
         device=torch.device("cpu"),
-        labels=["Model X latest"],
+        labels=["KiwiLM 2 latest"],
     )
 
     assert summary["generation_count"] == 1
@@ -111,7 +111,7 @@ def test_sft_report_writes_scored_machine_and_human_outputs(
     assert Path(summary["results_path"]).is_file()
     assert Path(summary["summary_path"]).is_file()
     report = Path(summary["report_path"]).read_text(encoding="utf-8")
-    assert "Model X latest" in report
+    assert "KiwiLM 2 latest" in report
     assert "Aggregate scores" in report
     assert "100.0%" in report
     assert load_sft_adherence_suite(suite_path)["suite_version"] == 1

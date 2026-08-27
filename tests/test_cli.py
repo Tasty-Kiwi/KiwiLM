@@ -51,7 +51,7 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
     assert slim.trigram_buckets == 4_096
 
     with pytest.raises(SystemExit):
-        parser.parse_args(["train", "--architecture", "model_x"])
+        parser.parse_args(["train", "--architecture", "historical_model"])
     with pytest.raises(SystemExit):
         parser.parse_args(["train", "--kiwilm2-context-length", "256"])
 
@@ -172,4 +172,4 @@ def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_legacy_checkpoint_config_has_actionable_error() -> None:
     with pytest.raises(ValueError, match="legacy branch"):
-        ModelConfig.from_dict({"architecture": "model_y"})
+        ModelConfig.from_dict({"architecture": "historical_model"})

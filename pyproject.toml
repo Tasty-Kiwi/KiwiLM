@@ -1,7 +1,7 @@
 [project]
 name = "kiwilm"
 version = "0.1.0"
-description = "Modular toy language models trained on TinyStories"
+description = "KiwiLM 2 hybrid language-model research toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

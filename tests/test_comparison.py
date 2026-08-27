@@ -104,8 +104,8 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         suite_path=suite,
         output_dir=tmp_path / "comparison",
         device=torch.device("cpu"),
-        label_a="Model A",
-        label_b="Model B",
+        label_a="KiwiLM 2 Dense",
+        label_b="KiwiLM 2 Slim",
     )
 
     rows = [
@@ -118,7 +118,7 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         "kiwilm2",
         "kiwilm2_slim",
     ]
-    assert "| Model A | Model B |" in report
+    assert "| KiwiLM 2 Dense | KiwiLM 2 Slim |" in report
     assert "opening / greedy" in report
 
     n_way_summary = compare_checkpoints(
@@ -127,7 +127,7 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         suite_path=suite,
         output_dir=tmp_path / "n-way-comparison",
         device=torch.device("cpu"),
-        labels=["Model A", "Model B", "Model C"],
+        labels=["Dense A", "Slim", "Dense B"],
     )
     n_way_rows = [
         json.loads(line)
@@ -143,4 +143,4 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         "kiwilm2_slim",
         "kiwilm2",
     ]
-    assert "| Model A | Model B | Model C |" in n_way_report
+    assert "| Dense A | Slim | Dense B |" in n_way_report

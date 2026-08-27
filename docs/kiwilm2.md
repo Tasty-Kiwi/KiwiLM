@@ -1,5 +1,10 @@
 # KiwiLM 2 experiment runbook
 
+Historical KiwiLM architectures, checkpoints, launchers, and reports live on
+the `legacy` branch. The `master` branch supports only `kiwilm2` and
+`kiwilm2_slim` while retaining the generic preparation, CPT, SFT, evaluation,
+comparison, retrieval, and export workflows.
+
 KiwiLM 2 is a controlled architecture experiment, not a continuation of the
 earlier 5M-parameter TinyStories ranking. Both variants use this frozen stack:
 
