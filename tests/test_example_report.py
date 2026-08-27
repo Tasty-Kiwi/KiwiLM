@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.config import GatedCNNConfig
+from kiwilm.config import KiwiLM2Config
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.example_report import generate_example_report
 from kiwilm.models import build_model
@@ -26,13 +26,16 @@ def test_generate_example_report_writes_every_prompt_profile_pair(
         min_frequency=1,
     )
     data = PreparedTokenData(data_dir, seed=7)
-    config = GatedCNNConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=8,
         d_model=8,
         dropout=0.0,
-        num_layers=1,
-        dilations=(1,),
+        num_query_heads=1,
+        num_kv_heads=1,
+        swiglu_dim=16,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     checkpoint = save_checkpoint(
         tmp_path / "model.pt",

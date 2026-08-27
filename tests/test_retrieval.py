@@ -189,7 +189,7 @@ def test_retrieval_artifacts_are_machine_and_human_readable(tmp_path: Path) -> N
         ContextCopyModel(tokenizer.vocab_size, candidate_ids),
         suite,
         label="Tiny SAN",
-        architecture="kiwilm_san",
+        architecture="kiwilm2",
         checkpoint="best.pt",
         device=torch.device("cpu"),
     )

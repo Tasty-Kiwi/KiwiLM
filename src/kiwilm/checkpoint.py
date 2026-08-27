@@ -49,11 +49,6 @@ def load_model_weights(
     if resolved_expected_config is not None:
         expected = config_to_dict(resolved_expected_config)
         actual = _normalise(payload.get("model_config", {}))
-        if (
-            isinstance(actual, dict)
-            and actual.get("architecture") == "modern_transformer"
-        ):
-            actual = {**actual, "architecture": "model_y"}
         if actual != expected:
             raise CheckpointCompatibilityError(
                 "checkpoint model configuration does not match the requested model"
@@ -221,11 +216,6 @@ def load_checkpoint(
     if resolved_expected_config is not None:
         expected = config_to_dict(resolved_expected_config)
         actual = _normalise(payload.get("model_config", {}))
-        if (
-            isinstance(actual, dict)
-            and actual.get("architecture") == "modern_transformer"
-        ):
-            actual = {**actual, "architecture": "model_y"}
         if actual != expected:
             raise CheckpointCompatibilityError(
                 "checkpoint model configuration does not match the requested model"

@@ -13,21 +13,9 @@ import torch
 from kiwilm import __version__
 from kiwilm.comparison import compare_checkpoints
 from kiwilm.config import (
-    CNNAttentionConfig,
-    CNNAttentionMambaConfig,
-    CNNDeepInterleavedAttentionConfig,
-    CNNDualAttentionConfig,
-    CNNFFNAttentionConfig,
-    CNNInterleavedAttentionConfig,
-    GatedCNNConfig,
     KiwiLM2Config,
     KiwiLM2SlimConfig,
-    KiwiLMSANConfig,
     ModelConfig,
-    ModelXConfig,
-    ModelYConfig,
-    ModelZParallelConfig,
-    TransformerConfig,
 )
 from kiwilm.data import (
     DEFAULT_DATASET_NAME,
@@ -77,7 +65,7 @@ _load_trained_model = load_trained_model
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kiwilm",
-        description="Train modular toy causal language models on TinyStories.",
+        description="Prepare, train, and evaluate KiwiLM 2 hybrid language models.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -252,58 +240,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_data_argument(train_parser)
     train_parser.add_argument(
         "--architecture",
-        choices=(
-            "gated_cnn",
-            "cnn_attention",
-            "cnn_attention_ffn",
-            "cnn_dual_attention",
-            "cnn_attention_mamba",
-            "cnn_interleaved_attention",
-            "cnn_deep_interleaved_attention",
-            "transformer",
-            "model_x",
-            "model_y",
-            "model_z_parallel",
-            "kiwilm_san",
-            "kiwilm2",
-            "kiwilm2_slim",
-        ),
-        default="gated_cnn",
+        choices=("kiwilm2", "kiwilm2_slim"),
+        default="kiwilm2",
     )
     train_parser.add_argument("--output-dir", type=Path)
     train_parser.add_argument("--resume", type=Path)
     train_parser.add_argument("--device", default="auto")
-    train_parser.add_argument("--context-length", type=int, default=256)
-    train_parser.add_argument("--d-model", type=int, default=256)
-    train_parser.add_argument("--dropout", type=float, default=0.1)
-    train_parser.add_argument("--attention-heads", type=int, default=8)
-    train_parser.add_argument("--attention-feedforward-dim", type=int, default=1024)
-    train_parser.add_argument("--swiglu-dim", type=int, default=640)
-    train_parser.add_argument(
-        "--model-y-swiglu-dim",
-        type=int,
-        default=720,
-    )
-    train_parser.add_argument(
-        "--model-z-swiglu-dim",
-        type=int,
-        default=1280,
-    )
-    train_parser.add_argument("--san-layers", type=int, default=16)
-    train_parser.add_argument("--san-kv-heads", type=int, default=4)
-    train_parser.add_argument("--san-rms-norm-eps", type=float, default=1e-6)
-    train_parser.add_argument("--san-rope-base", type=float, default=10_000.0)
-    train_parser.add_argument("--kiwilm2-context-length", type=int, default=512)
-    train_parser.add_argument("--kiwilm2-d-model", type=int, default=512)
-    train_parser.add_argument("--kiwilm2-dropout", type=float, default=0.0)
-    train_parser.add_argument("--kiwilm2-kv-heads", type=int, default=2)
-    train_parser.add_argument("--kiwilm2-swiglu-dim", type=int, default=1_536)
-    train_parser.add_argument("--kiwilm2-bigram-buckets", type=int, default=16_384)
-    train_parser.add_argument("--kiwilm2-trigram-buckets", type=int, default=16_384)
-    train_parser.add_argument("--mamba-inner-dim", type=int, default=896)
-    train_parser.add_argument("--mamba-state-dim", type=int, default=16)
-    train_parser.add_argument("--mamba-conv-kernel", type=int, default=4)
-    train_parser.add_argument("--mamba-dt-rank", type=int, default=16)
+    train_parser.add_argument("--context-length", type=int, default=512)
+    train_parser.add_argument("--d-model", type=int, default=512)
+    train_parser.add_argument("--dropout", type=float, default=0.0)
+    train_parser.add_argument("--query-heads", type=int, default=8)
+    train_parser.add_argument("--kv-heads", type=int, default=2)
+    train_parser.add_argument("--swiglu-dim", type=int, default=1_536)
+    train_parser.add_argument("--bigram-buckets", type=int, default=16_384)
+    train_parser.add_argument("--trigram-buckets", type=int, default=16_384)
     train_parser.add_argument("--untie-embeddings", action="store_true")
     train_parser.add_argument("--max-steps", type=int, default=2_000)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -777,115 +727,20 @@ def _train_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
     if args.optimizer == "muon" and args.architecture != "kiwilm2":
         raise ValueError("the KiwiLM 2.0 Muon experiment is restricted to kiwilm2")
-    shared_config = {
-        "vocab_size": data.tokenizer.vocab_size,
-        "context_length": args.context_length,
-        "d_model": args.d_model,
-        "dropout": args.dropout,
-        "tie_embeddings": not args.untie_embeddings,
-    }
-    if args.architecture in {"kiwilm2", "kiwilm2_slim"}:
-        config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
-        model_config = config_type(
-            vocab_size=data.tokenizer.vocab_size,
-            context_length=args.kiwilm2_context_length,
-            d_model=args.kiwilm2_d_model,
-            dropout=args.kiwilm2_dropout,
-            tie_embeddings=not args.untie_embeddings,
-            num_query_heads=args.attention_heads,
-            num_kv_heads=args.kiwilm2_kv_heads,
-            swiglu_dim=args.kiwilm2_swiglu_dim,
-            bigram_buckets=args.kiwilm2_bigram_buckets,
-            trigram_buckets=args.kiwilm2_trigram_buckets,
-        )
-        default_output_dir = Path(f"runs/{args.architecture.replace('_', '-')}")
-    elif args.architecture == "cnn_attention":
-        model_config = CNNAttentionConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/model-b")
-    elif args.architecture == "cnn_attention_ffn":
-        model_config = CNNFFNAttentionConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/model-g")
-    elif args.architecture == "cnn_dual_attention":
-        model_config = CNNDualAttentionConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/model-c")
-    elif args.architecture == "cnn_attention_mamba":
-        model_config = CNNAttentionMambaConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-            mamba_inner_dim=args.mamba_inner_dim,
-            mamba_state_dim=args.mamba_state_dim,
-            mamba_conv_kernel=args.mamba_conv_kernel,
-            mamba_dt_rank=args.mamba_dt_rank,
-        )
-        default_output_dir = Path("runs/model-d")
-    elif args.architecture == "cnn_interleaved_attention":
-        model_config = CNNInterleavedAttentionConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/model-e")
-    elif args.architecture == "cnn_deep_interleaved_attention":
-        model_config = CNNDeepInterleavedAttentionConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/model-f")
-    elif args.architecture == "transformer":
-        model_config = TransformerConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            feedforward_dim=args.attention_feedforward_dim,
-        )
-        default_output_dir = Path("runs/transformer")
-    elif args.architecture == "model_y":
-        model_config = ModelYConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            swiglu_dim=args.model_y_swiglu_dim,
-        )
-        default_output_dir = Path("runs/model-y")
-    elif args.architecture == "model_x":
-        model_config = ModelXConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            swiglu_dim=args.swiglu_dim,
-        )
-        default_output_dir = Path("runs/model-x")
-    elif args.architecture == "model_z_parallel":
-        model_config = ModelZParallelConfig(
-            **shared_config,
-            num_heads=args.attention_heads,
-            swiglu_dim=args.model_z_swiglu_dim,
-        )
-        default_output_dir = Path("runs/model-z-parallel")
-    elif args.architecture == "kiwilm_san":
-        model_config = KiwiLMSANConfig(
-            **shared_config,
-            num_layers=args.san_layers,
-            num_query_heads=args.attention_heads,
-            num_kv_heads=args.san_kv_heads,
-            rms_norm_eps=args.san_rms_norm_eps,
-            rope_base=args.san_rope_base,
-        )
-        default_output_dir = Path("runs/kiwilm-san")
-    else:
-        model_config = GatedCNNConfig(**shared_config)
-        default_output_dir = Path("runs/model-a")
+    config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
+    model_config = config_type(
+        vocab_size=data.tokenizer.vocab_size,
+        context_length=args.context_length,
+        d_model=args.d_model,
+        dropout=args.dropout,
+        tie_embeddings=not args.untie_embeddings,
+        num_query_heads=args.query_heads,
+        num_kv_heads=args.kv_heads,
+        swiglu_dim=args.swiglu_dim,
+        bigram_buckets=args.bigram_buckets,
+        trigram_buckets=args.trigram_buckets,
+    )
+    default_output_dir = Path(f"runs/{args.architecture.replace('_', '-')}")
     output_dir = args.output_dir or default_output_dir
     train_config = TrainConfig(
         max_steps=args.max_steps,

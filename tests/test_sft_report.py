@@ -82,7 +82,7 @@ def test_sft_report_writes_scored_machine_and_human_outputs(
         tokenizer=object(),
         format_prompt=lambda prompt: prompt,
     )
-    config = SimpleNamespace(architecture="model_x", context_length=32)
+    config = SimpleNamespace(architecture="kiwilm2", context_length=32)
     monkeypatch.setattr(
         sft_report,
         "load_trained_model",

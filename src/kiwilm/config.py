@@ -1,4 +1,4 @@
-"""Configuration objects shared by KiwiLM model variants."""
+"""Configuration objects for the KiwiLM 2 model family."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ def _require_positive_int(name: str, value: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
-    """Settings shared by every causal language-model architecture."""
+    """Settings shared by the active KiwiLM 2 variants."""
 
-    architecture: str = "gated_cnn"
-    vocab_size: int = 8192
-    context_length: int = 256
-    d_model: int = 256
-    dropout: float = 0.1
+    architecture: str = "kiwilm2"
+    vocab_size: int = 32_000
+    context_length: int = 512
+    d_model: int = 512
+    dropout: float = 0.0
     tie_embeddings: bool = True
 
     def __post_init__(self) -> None:
@@ -51,313 +51,20 @@ class ModelConfig:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct a config, dispatching the built-in architecture when possible."""
+        """Reconstruct one of the two active KiwiLM 2 configurations."""
 
         data = dict(values)
-        if cls is ModelConfig:
-            architecture = data.get("architecture", "gated_cnn")
-            if architecture == "gated_cnn":
-                return cast(Self, GatedCNNConfig.from_dict(data))
-            if architecture == "cnn_attention":
-                return cast(Self, CNNAttentionConfig.from_dict(data))
-            if architecture == "cnn_attention_ffn":
-                return cast(Self, CNNFFNAttentionConfig.from_dict(data))
-            if architecture == "cnn_dual_attention":
-                return cast(Self, CNNDualAttentionConfig.from_dict(data))
-            if architecture == "cnn_attention_mamba":
-                return cast(Self, CNNAttentionMambaConfig.from_dict(data))
-            if architecture == "cnn_interleaved_attention":
-                return cast(Self, CNNInterleavedAttentionConfig.from_dict(data))
-            if architecture == "cnn_deep_interleaved_attention":
-                return cast(
-                    Self,
-                    CNNDeepInterleavedAttentionConfig.from_dict(data),
-                )
-            if architecture == "transformer":
-                return cast(Self, TransformerConfig.from_dict(data))
-            if architecture in {"model_y", "modern_transformer"}:
-                data["architecture"] = "model_y"
-                return cast(Self, ModelYConfig.from_dict(data))
-            if architecture == "model_x":
-                return cast(Self, ModelXConfig.from_dict(data))
-            if architecture == "model_z_parallel":
-                return cast(Self, ModelZParallelConfig.from_dict(data))
-            if architecture == "kiwilm_san":
-                return cast(Self, KiwiLMSANConfig.from_dict(data))
-            if architecture == "kiwilm2":
-                return cast(Self, KiwiLM2Config.from_dict(data))
-            if architecture == "kiwilm2_slim":
-                return cast(Self, KiwiLM2SlimConfig.from_dict(data))
-        return cls(**data)
-
-
-@dataclass(frozen=True, slots=True)
-class GatedCNNConfig(ModelConfig):
-    """Configuration for the causal gated-convolution baseline."""
-
-    architecture: str = "gated_cnn"
-    num_layers: int = 8
-    kernel_size: int = 3
-    dilations: tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64, 128)
-
-    def __post_init__(self) -> None:
-        super(GatedCNNConfig, self).__post_init__()
-        if self.architecture != "gated_cnn":
-            raise ValueError("GatedCNNConfig architecture must be 'gated_cnn'")
-        _require_positive_int("num_layers", self.num_layers)
-        _require_positive_int("kernel_size", self.kernel_size)
-
-        if not isinstance(self.dilations, tuple):
-            try:
-                object.__setattr__(self, "dilations", tuple(self.dilations))
-            except TypeError as error:
-                raise ValueError("dilations must be a sequence of positive integers") from error
-        if len(self.dilations) != self.num_layers:
-            raise ValueError("dilations must contain exactly num_layers entries")
-        for dilation in self.dilations:
-            _require_positive_int("each dilation", dilation)
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct a gated-CNN config from a plain mapping."""
-
-        data = dict(values)
-        if "dilations" in data:
-            raw_dilations = data["dilations"]
-            if isinstance(raw_dilations, (str, bytes)):
-                raise ValueError("dilations must be a sequence of positive integers")
-            try:
-                data["dilations"] = tuple(raw_dilations)  # type: ignore[arg-type]
-            except TypeError as error:
-                raise ValueError("dilations must be a sequence of positive integers") from error
-        return cls(**data)
-
-
-@dataclass(frozen=True, slots=True)
-class CNNAttentionConfig(ModelConfig):
-    """Configuration for the CNN-attention-CNN comparison model."""
-
-    architecture: str = "cnn_attention"
-    kernel_size: int = 3
-    pre_attention_dilations: tuple[int, ...] = (1, 2, 4)
-    post_attention_dilations: tuple[int, ...] = (8, 16, 32)
-    num_heads: int = 8
-    feedforward_dim: int = 1024
-
-    def __post_init__(self) -> None:
-        super(CNNAttentionConfig, self).__post_init__()
-        if self.architecture != "cnn_attention":
-            raise ValueError("CNNAttentionConfig architecture must be 'cnn_attention'")
-        _validate_cnn_attention_fields(self)
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct a CNN-attention config from a plain mapping."""
-
-        return cls(**_normalize_cnn_attention_data(values))
-
-
-@dataclass(frozen=True, slots=True)
-class CNNFFNAttentionConfig(CNNAttentionConfig):
-    """Configuration for Model G with an FFN after every gated CNN."""
-
-    architecture: str = "cnn_attention_ffn"
-
-    def __post_init__(self) -> None:
-        ModelConfig.__post_init__(self)
-        if self.architecture != "cnn_attention_ffn":
-            raise ValueError("CNNFFNAttentionConfig architecture must be 'cnn_attention_ffn'")
-        _validate_cnn_attention_fields(self)
-
-
-@dataclass(frozen=True, slots=True)
-class CNNDualAttentionConfig(CNNAttentionConfig):
-    """Configuration for Model C with a second attention block."""
-
-    architecture: str = "cnn_dual_attention"
-
-    def __post_init__(self) -> None:
-        ModelConfig.__post_init__(self)
-        if self.architecture != "cnn_dual_attention":
-            raise ValueError("CNNDualAttentionConfig architecture must be 'cnn_dual_attention'")
-        _validate_cnn_attention_fields(self)
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct a dual-attention config from a plain mapping."""
-
-        return cls(**_normalize_cnn_attention_data(values))
-
-
-@dataclass(frozen=True, slots=True)
-class CNNAttentionMambaConfig(CNNAttentionConfig):
-    """Configuration for Model D with a final selective state-space block."""
-
-    architecture: str = "cnn_attention_mamba"
-    mamba_inner_dim: int = 896
-    mamba_state_dim: int = 16
-    mamba_conv_kernel: int = 4
-    mamba_dt_rank: int = 16
-
-    def __post_init__(self) -> None:
-        ModelConfig.__post_init__(self)
-        if self.architecture != "cnn_attention_mamba":
-            raise ValueError("CNNAttentionMambaConfig architecture must be 'cnn_attention_mamba'")
-        _validate_cnn_attention_fields(self)
-        _require_positive_int("mamba_inner_dim", self.mamba_inner_dim)
-        _require_positive_int("mamba_state_dim", self.mamba_state_dim)
-        _require_positive_int("mamba_conv_kernel", self.mamba_conv_kernel)
-        _require_positive_int("mamba_dt_rank", self.mamba_dt_rank)
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct an attention-Mamba config from a plain mapping."""
-
-        return cls(**_normalize_cnn_attention_data(values))
-
-
-@dataclass(frozen=True, slots=True)
-class CNNInterleavedAttentionConfig(ModelConfig):
-    """Configuration for Model E with attention between pairs of CNN blocks."""
-
-    architecture: str = "cnn_interleaved_attention"
-    kernel_size: int = 3
-    dilations: tuple[int, ...] = (1, 2, 4, 8, 16, 32)
-    num_heads: int = 8
-    feedforward_dim: int = 1024
-
-    def __post_init__(self) -> None:
-        super(CNNInterleavedAttentionConfig, self).__post_init__()
-        if self.architecture != "cnn_interleaved_attention":
-            raise ValueError(
-                "CNNInterleavedAttentionConfig architecture must be 'cnn_interleaved_attention'"
-            )
-        _validate_interleaved_attention_fields(self)
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct an interleaved-attention config from a mapping."""
-
-        return cls(**_normalize_dilation_data(values, ("dilations",)))
-
-
-@dataclass(frozen=True, slots=True)
-class CNNDeepInterleavedAttentionConfig(CNNInterleavedAttentionConfig):
-    """Configuration for Model F's final CNN-attention refinement stage."""
-
-    architecture: str = "cnn_deep_interleaved_attention"
-    refinement_dilations: tuple[int, ...] = (1, 2, 4)
-
-    def __post_init__(self) -> None:
-        ModelConfig.__post_init__(self)
-        if self.architecture != "cnn_deep_interleaved_attention":
-            raise ValueError(
-                "CNNDeepInterleavedAttentionConfig architecture must be "
-                "'cnn_deep_interleaved_attention'"
-            )
-        _validate_interleaved_attention_fields(self)
-        _validate_dilations(
-            self,
-            "refinement_dilations",
-            expected_length=3,
+        if cls is not ModelConfig:
+            return cls(**data)
+        architecture = data.get("architecture", "kiwilm2")
+        if architecture == "kiwilm2":
+            return cast(Self, KiwiLM2Config.from_dict(data))
+        if architecture == "kiwilm2_slim":
+            return cast(Self, KiwiLM2SlimConfig.from_dict(data))
+        raise ValueError(
+            f"unsupported model architecture {architecture!r} on master; "
+            "check out the legacy branch to load historical KiwiLM checkpoints"
         )
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct a deep interleaved-attention config from a mapping."""
-
-        return cls(
-            **_normalize_dilation_data(
-                values,
-                ("dilations", "refinement_dilations"),
-            )
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class TransformerConfig(ModelConfig):
-    """Configuration for the controlled decoder-only Transformer baseline."""
-
-    architecture: str = "transformer"
-    num_layers: int = 4
-    num_heads: int = 8
-    feedforward_dim: int = 1024
-
-    def __post_init__(self) -> None:
-        super(TransformerConfig, self).__post_init__()
-        if self.architecture != "transformer":
-            raise ValueError("TransformerConfig architecture must be 'transformer'")
-        _require_positive_int("num_layers", self.num_layers)
-        _require_positive_int("num_heads", self.num_heads)
-        _require_positive_int("feedforward_dim", self.feedforward_dim)
-        _validate_attention_dimensions(self)
-
-
-@dataclass(frozen=True, slots=True)
-class ModelYConfig(ModelConfig):
-    """Configuration for the RMSNorm/SwiGLU Transformer, Model Y."""
-
-    architecture: str = "model_y"
-    num_layers: int = 4
-    num_heads: int = 8
-    swiglu_dim: int = 720
-    rms_norm_eps: float = 1e-5
-
-    def __post_init__(self) -> None:
-        super(ModelYConfig, self).__post_init__()
-        if self.architecture != "model_y":
-            raise ValueError("ModelYConfig architecture must be 'model_y'")
-        _require_positive_int("num_layers", self.num_layers)
-        _require_positive_int("num_heads", self.num_heads)
-        _require_positive_int("swiglu_dim", self.swiglu_dim)
-        _validate_attention_dimensions(self)
-        if (
-            isinstance(self.rms_norm_eps, bool)
-            or not isinstance(self.rms_norm_eps, (int, float))
-            or not math.isfinite(self.rms_norm_eps)
-            or self.rms_norm_eps <= 0
-        ):
-            raise ValueError("rms_norm_eps must be finite and positive")
-
-
-@dataclass(frozen=True, slots=True)
-class KiwiLMSANConfig(ModelConfig):
-    """Configuration for the attention-only KiwiLM-SAN experiment."""
-
-    architecture: str = "kiwilm_san"
-    num_layers: int = 16
-    num_query_heads: int = 8
-    num_kv_heads: int = 4
-    rms_norm_eps: float = 1e-6
-    rope_base: float = 10_000.0
-
-    def __post_init__(self) -> None:
-        super(KiwiLMSANConfig, self).__post_init__()
-        if self.architecture != "kiwilm_san":
-            raise ValueError("KiwiLMSANConfig architecture must be 'kiwilm_san'")
-        _require_positive_int("num_layers", self.num_layers)
-        _require_positive_int("num_query_heads", self.num_query_heads)
-        _require_positive_int("num_kv_heads", self.num_kv_heads)
-        if self.d_model % self.num_query_heads != 0:
-            raise ValueError("d_model must be divisible by num_query_heads")
-        if self.num_query_heads % self.num_kv_heads != 0:
-            raise ValueError("num_query_heads must be divisible by num_kv_heads")
-        if (self.d_model // self.num_query_heads) % 2 != 0:
-            raise ValueError("attention head dimension must be even for RoPE")
-        if (
-            isinstance(self.rms_norm_eps, bool)
-            or not isinstance(self.rms_norm_eps, (int, float))
-            or not math.isfinite(self.rms_norm_eps)
-            or self.rms_norm_eps <= 0
-        ):
-            raise ValueError("rms_norm_eps must be finite and positive")
-        if (
-            isinstance(self.rope_base, bool)
-            or not isinstance(self.rope_base, (int, float))
-            or not math.isfinite(self.rope_base)
-            or self.rope_base <= 0
-        ):
-            raise ValueError("rope_base must be finite and positive")
 
 
 KIWILM2_MIXER_SCHEDULE = (
@@ -379,10 +86,6 @@ class KiwiLM2Config(ModelConfig):
     """Frozen KiwiLM 2 backbone with SwiGLU feed-forward blocks."""
 
     architecture: str = "kiwilm2"
-    vocab_size: int = 32_000
-    context_length: int = 512
-    d_model: int = 512
-    dropout: float = 0.0
     mixer_schedule: tuple[str, ...] = KIWILM2_MIXER_SCHEDULE
     conv_kernel_sizes: tuple[int, ...] = (31, 63, 31, 63, 31, 63)
     num_query_heads: int = 8
@@ -460,170 +163,9 @@ class KiwiLM2SlimConfig(KiwiLM2Config):
             raise ValueError("Hadamard MLP requires d_model to be a power of two")
 
 
-@dataclass(frozen=True, slots=True)
-class ModelXConfig(ModelConfig):
-    """Configuration for the alternating local/global Model X hybrid."""
-
-    architecture: str = "model_x"
-    kernel_size: int = 3
-    cnn_dilations: tuple[int, ...] = (1, 2)
-    num_heads: int = 8
-    swiglu_dim: int = 640
-    rms_norm_eps: float = 1e-5
-
-    def __post_init__(self) -> None:
-        super(ModelXConfig, self).__post_init__()
-        if self.architecture != "model_x":
-            raise ValueError("ModelXConfig architecture must be 'model_x'")
-        _require_positive_int("kernel_size", self.kernel_size)
-        _require_positive_int("num_heads", self.num_heads)
-        _require_positive_int("swiglu_dim", self.swiglu_dim)
-        _validate_dilations(self, "cnn_dilations", expected_length=2)
-        _validate_attention_dimensions(self)
-        if (
-            isinstance(self.rms_norm_eps, bool)
-            or not isinstance(self.rms_norm_eps, (int, float))
-            or not math.isfinite(self.rms_norm_eps)
-            or self.rms_norm_eps <= 0
-        ):
-            raise ValueError("rms_norm_eps must be finite and positive")
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct Model X from a JSON-compatible mapping."""
-
-        return cls(**_normalize_dilation_data(values, ("cnn_dilations",)))
-
-
-@dataclass(frozen=True, slots=True)
-class ModelZParallelConfig(ModelConfig):
-    """Configuration for Model Z-P's fixed parallel local/global fusion."""
-
-    architecture: str = "model_z_parallel"
-    kernel_size: int = 3
-    cnn_dilations: tuple[int, ...] = (1, 2)
-    num_heads: int = 8
-    swiglu_dim: int = 1280
-    rms_norm_eps: float = 1e-5
-
-    def __post_init__(self) -> None:
-        super(ModelZParallelConfig, self).__post_init__()
-        if self.architecture != "model_z_parallel":
-            raise ValueError("ModelZParallelConfig architecture must be 'model_z_parallel'")
-        _require_positive_int("kernel_size", self.kernel_size)
-        _require_positive_int("num_heads", self.num_heads)
-        _require_positive_int("swiglu_dim", self.swiglu_dim)
-        _validate_dilations(self, "cnn_dilations", expected_length=2)
-        _validate_attention_dimensions(self)
-        if (
-            isinstance(self.rms_norm_eps, bool)
-            or not isinstance(self.rms_norm_eps, (int, float))
-            or not math.isfinite(self.rms_norm_eps)
-            or self.rms_norm_eps <= 0
-        ):
-            raise ValueError("rms_norm_eps must be finite and positive")
-
-    @classmethod
-    def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct Model Z-P from a JSON-compatible mapping."""
-
-        return cls(**_normalize_dilation_data(values, ("cnn_dilations",)))
-
-
-def _validate_interleaved_attention_fields(
-    config: CNNInterleavedAttentionConfig,
-) -> None:
-    _require_positive_int("kernel_size", config.kernel_size)
-    _require_positive_int("num_heads", config.num_heads)
-    _require_positive_int("feedforward_dim", config.feedforward_dim)
-    _validate_dilations(config, "dilations", expected_length=6)
-    _validate_attention_dimensions(config)
-
-
-def _validate_dilations(
-    config: ModelConfig,
-    name: str,
-    *,
-    expected_length: int,
-) -> None:
-    values = getattr(config, name)
-    if not isinstance(values, tuple):
-        try:
-            values = tuple(values)
-            object.__setattr__(config, name, values)
-        except TypeError as error:
-            raise ValueError(f"{name} must be a sequence of positive integers") from error
-    if len(values) != expected_length:
-        raise ValueError(f"{name} must contain exactly {expected_length} entries")
-    for dilation in values:
-        _require_positive_int(f"each {name}", dilation)
-
-
-def _normalize_dilation_data(
-    values: Mapping[str, object],
-    names: tuple[str, ...],
-) -> dict[str, object]:
-    data = dict(values)
-    for name in names:
-        if name not in data:
-            continue
-        raw_dilations = data[name]
-        if isinstance(raw_dilations, (str, bytes)):
-            raise ValueError(f"{name} must be a sequence of positive integers")
-        try:
-            data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
-        except TypeError as error:
-            raise ValueError(f"{name} must be a sequence of positive integers") from error
-    return data
-
-
-def _normalize_cnn_attention_data(
-    values: Mapping[str, object],
-) -> dict[str, object]:
-    data = dict(values)
-    for name in ("pre_attention_dilations", "post_attention_dilations"):
-        if name not in data:
-            continue
-        raw_dilations = data[name]
-        if isinstance(raw_dilations, (str, bytes)):
-            raise ValueError(f"{name} must be a sequence of positive integers")
-        try:
-            data[name] = tuple(raw_dilations)  # type: ignore[arg-type]
-        except TypeError as error:
-            raise ValueError(f"{name} must be a sequence of positive integers") from error
-    return data
-
-
-def _validate_cnn_attention_fields(config: CNNAttentionConfig) -> None:
-    _require_positive_int("kernel_size", config.kernel_size)
-    _require_positive_int("num_heads", config.num_heads)
-    _require_positive_int("feedforward_dim", config.feedforward_dim)
-    for name in ("pre_attention_dilations", "post_attention_dilations"):
-        values = getattr(config, name)
-        if not isinstance(values, tuple):
-            try:
-                values = tuple(values)
-                object.__setattr__(config, name, values)
-            except TypeError as error:
-                raise ValueError(f"{name} must be a sequence of positive integers") from error
-        if len(values) != 3:
-            raise ValueError(f"{name} must contain exactly 3 entries")
-        for dilation in values:
-            _require_positive_int(f"each {name} dilation", dilation)
-    _validate_attention_dimensions(config)
-
-
-def _validate_attention_dimensions(
-    config: (
-        CNNAttentionConfig
-        | CNNInterleavedAttentionConfig
-        | ModelXConfig
-        | ModelYConfig
-        | ModelZParallelConfig
-        | TransformerConfig
-    ),
-) -> None:
-    if config.d_model % config.num_heads != 0:
-        raise ValueError("d_model must be divisible by num_heads")
-    if (config.d_model // config.num_heads) % 2 != 0:
-        raise ValueError("attention head dimension must be even for RoPE")
+__all__ = [
+    "KIWILM2_MIXER_SCHEDULE",
+    "KiwiLM2Config",
+    "KiwiLM2SlimConfig",
+    "ModelConfig",
+]

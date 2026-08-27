@@ -1,8 +1,6 @@
-"""Model implementations and architecture registry."""
+"""KiwiLM 2 model implementations and architecture registry."""
 
-from kiwilm.models.attention import CausalSelfAttention
 from kiwilm.models.base import CausalLanguageModel
-from kiwilm.models.components import CausalConv1d, GatedCNNBlock
 from kiwilm.models.kiwilm2 import (
     CachedRotaryEmbedding,
     HadamardMLP,
@@ -16,97 +14,20 @@ from kiwilm.models.kiwilm2 import (
     XXLCausalGatedConv,
     fast_walsh_hadamard,
 )
-from kiwilm.models.kiwilm_san import (
-    GroupedQueryAttention,
-    KiwiLMSANBlock,
-    KiwiLMSANCache,
-    KiwiLMSANLM,
-    ZeroCenteredRMSNorm,
-)
-from kiwilm.models.legacy import (
-    CNNAttentionCache,
-    CNNAttentionLM,
-    CNNAttentionMambaLM,
-    CNNDeepInterleavedAttentionLM,
-    CNNDualAttentionLM,
-    CNNFFNAttentionLM,
-    CNNInterleavedAttentionCache,
-    CNNInterleavedAttentionLM,
-    GatedCNNLM,
-    MambaBlock,
-    ResidualFeedForwardBlock,
-    SelectiveStateSpace,
-    TransformerAttentionBlock,
-    TransformerCache,
-    TransformerLM,
-)
-from kiwilm.models.model_x import (
-    ModelXCache,
-    ModelXLM,
-    ResidualSwiGLUBlock,
-    RMSAttentionBlock,
-    RMSGatedCNNBlock,
-)
-from kiwilm.models.model_y import (
-    ModelYBlock,
-    ModelYCache,
-    ModelYLM,
-)
-from kiwilm.models.model_z_parallel import (
-    PARALLEL_BRANCH_SCALE,
-    ModelZParallelBlock,
-    ModelZParallelCache,
-    ModelZParallelLM,
-)
 from kiwilm.models.registry import build_model, register_model
 
 __all__ = [
-    "PARALLEL_BRANCH_SCALE",
-    "CNNAttentionCache",
-    "CNNAttentionLM",
-    "CNNAttentionMambaLM",
-    "CNNDeepInterleavedAttentionLM",
-    "CNNDualAttentionLM",
-    "CNNFFNAttentionLM",
-    "CNNInterleavedAttentionCache",
-    "CNNInterleavedAttentionLM",
     "CachedRotaryEmbedding",
-    "CausalConv1d",
     "CausalLanguageModel",
-    "CausalSelfAttention",
-    "GatedCNNBlock",
-    "GatedCNNLM",
-    "GroupedQueryAttention",
     "HadamardMLP",
     "KiwiLM2Block",
     "KiwiLM2Cache",
     "KiwiLM2GQA",
     "KiwiLM2LM",
-    "KiwiLMSANBlock",
-    "KiwiLMSANCache",
-    "KiwiLMSANLM",
-    "MambaBlock",
-    "ModelXCache",
-    "ModelXLM",
-    "ModelYBlock",
-    "ModelYCache",
-    "ModelYLM",
-    "ModelZParallelBlock",
-    "ModelZParallelCache",
-    "ModelZParallelLM",
     "NGramEmbedding",
-    "RMSAttentionBlock",
-    "RMSGatedCNNBlock",
     "RMSNorm",
-    "ResidualFeedForwardBlock",
-    "ResidualSwiGLUBlock",
-    "SelectiveStateSpace",
     "SwiGLU",
-    "TransformerAttentionBlock",
-    "TransformerCache",
-    "TransformerLM",
     "XXLCausalGatedConv",
-    "ZeroCenteredRMSNorm",
     "build_model",
     "fast_walsh_hadamard",
     "register_model",

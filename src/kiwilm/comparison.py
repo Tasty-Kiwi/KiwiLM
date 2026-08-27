@@ -107,7 +107,7 @@ def compare_checkpoints(
                         "case_id": prompt_case["id"],
                         "profile_id": profile["id"],
                         "model_label": label,
-                        "checkpoint": str(checkpoint.resolve()),
+                        "checkpoint": str(checkpoint),
                         "architecture": config.architecture,
                         "cache": "off",
                         "model_config": config.to_dict(),

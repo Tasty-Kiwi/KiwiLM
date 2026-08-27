@@ -1,22 +1,14 @@
-"""Offline prepare-to-generation integration coverage."""
+"""Offline KiwiLM 2 prepare-to-generation integration coverage."""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
 
-import pytest
 import torch
 
 from kiwilm.cli import _load_trained_model
-from kiwilm.config import (
-    CNNAttentionConfig,
-    CNNAttentionMambaConfig,
-    CNNDeepInterleavedAttentionConfig,
-    CNNDualAttentionConfig,
-    CNNInterleavedAttentionConfig,
-    GatedCNNConfig,
-)
+from kiwilm.config import KiwiLM2Config
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.generation import generate
 from kiwilm.training import TrainConfig, evaluate, train
@@ -38,13 +30,16 @@ def test_offline_prepare_train_reload_evaluate_and_generate(tmp_path: Path) -> N
         min_frequency=1,
     )
     data = PreparedTokenData(data_dir, seed=5)
-    config = GatedCNNConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=8,
         d_model=8,
         dropout=0.0,
-        num_layers=1,
-        dilations=(1,),
+        num_query_heads=1,
+        num_kv_heads=1,
+        swiglu_dim=16,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     summary = train(
         config,
@@ -97,121 +92,3 @@ def test_offline_prepare_train_reload_evaluate_and_generate(tmp_path: Path) -> N
     assert isinstance(summary["sample"], str)
     assert isinstance(sample, str)
     assert sample
-
-
-def test_model_b_one_step_training_smoke(tmp_path: Path) -> None:
-    data_dir = tmp_path / "data"
-    prepare_from_stories(
-        data_dir,
-        ["Once there was a small green bird.", "The bird found a friend."] * 4,
-        ["They went home before dark."] * 3,
-        vocab_size=300,
-        min_frequency=1,
-    )
-    data = PreparedTokenData(data_dir, seed=11)
-    config = CNNAttentionConfig(
-        vocab_size=data.tokenizer.vocab_size,
-        context_length=8,
-        d_model=8,
-        dropout=0.0,
-        num_heads=1,
-        feedforward_dim=16,
-    )
-    summary = train(
-        config,
-        data,
-        tmp_path / "run",
-        TrainConfig(
-            max_steps=1,
-            batch_size=2,
-            lr=1e-3,
-            min_lr=1e-3,
-            warmup_steps=0,
-            eval_interval=1,
-            eval_batches=1,
-            checkpoint_interval=1,
-            log_interval=0,
-            sample_tokens=0,
-            seed=11,
-            batch_mode="story",
-            eval_mode="both",
-        ),
-        device="cpu",
-        log_fn=None,
-    )
-
-    assert summary["step"] == 1
-    assert summary["best_checkpoint"] is not None
-    checkpoint = torch.load(summary["best_checkpoint"], weights_only=True)
-    assert checkpoint["metrics"]["story_validation_loss"] >= 0
-    assert checkpoint["metrics"]["packed_validation_loss"] >= 0
-
-
-@pytest.mark.parametrize(
-    "config_type",
-    [
-        CNNDualAttentionConfig,
-        CNNAttentionMambaConfig,
-        CNNInterleavedAttentionConfig,
-        CNNDeepInterleavedAttentionConfig,
-    ],
-)
-def test_models_c_d_and_e_one_step_training_smoke(
-    tmp_path: Path,
-    config_type: type[
-        CNNDualAttentionConfig
-        | CNNAttentionMambaConfig
-        | CNNInterleavedAttentionConfig
-        | CNNDeepInterleavedAttentionConfig
-    ],
-) -> None:
-    data_dir = tmp_path / "data"
-    prepare_from_stories(
-        data_dir,
-        ["Once there was a small green bird.", "The bird found a friend."] * 4,
-        ["They went home before dark."] * 3,
-        vocab_size=300,
-        min_frequency=1,
-    )
-    data = PreparedTokenData(data_dir, seed=19)
-    architecture_options = {
-        "vocab_size": data.tokenizer.vocab_size,
-        "context_length": 8,
-        "d_model": 8,
-        "dropout": 0.0,
-        "num_heads": 1,
-        "feedforward_dim": 16,
-    }
-    if config_type is CNNAttentionMambaConfig:
-        architecture_options.update(
-            {
-                "mamba_inner_dim": 12,
-                "mamba_state_dim": 2,
-                "mamba_conv_kernel": 2,
-                "mamba_dt_rank": 2,
-            }
-        )
-    config = config_type(**architecture_options)
-    summary = train(
-        config,
-        data,
-        tmp_path / "run",
-        TrainConfig(
-            max_steps=1,
-            batch_size=2,
-            lr=1e-3,
-            min_lr=1e-3,
-            warmup_steps=0,
-            eval_interval=1,
-            eval_batches=1,
-            checkpoint_interval=1,
-            log_interval=0,
-            sample_tokens=0,
-            seed=19,
-        ),
-        device="cpu",
-        log_fn=None,
-    )
-
-    assert summary["step"] == 1
-    assert summary["best_checkpoint"] is not None

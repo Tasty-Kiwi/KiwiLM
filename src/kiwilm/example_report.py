@@ -74,7 +74,7 @@ def generate_example_report(
     _atomic_write(destination, render_example_report(title, rows))
     return {
         "architecture": config.architecture,
-        "checkpoint": str(checkpoint.resolve()),
+        "checkpoint": str(checkpoint),
         "data_fingerprint": data.fingerprint,
         "device": str(device),
         "generation_count": len(rows),

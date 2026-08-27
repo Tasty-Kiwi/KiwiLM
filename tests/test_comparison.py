@@ -9,7 +9,7 @@ import torch
 
 from kiwilm.checkpoint import save_checkpoint
 from kiwilm.comparison import compare_checkpoints
-from kiwilm.config import CNNAttentionConfig, CNNDualAttentionConfig, GatedCNNConfig
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.models import build_model
 
@@ -32,20 +32,29 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         "d_model": 8,
         "dropout": 0.0,
     }
-    model_a_config = GatedCNNConfig(
+    model_a_config = KiwiLM2Config(
         **common,
-        num_layers=1,
-        dilations=(1,),
+        num_query_heads=1,
+        num_kv_heads=1,
+        swiglu_dim=16,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
-    model_b_config = CNNAttentionConfig(
+    model_b_config = KiwiLM2SlimConfig(
         **common,
-        num_heads=1,
-        feedforward_dim=16,
+        num_query_heads=1,
+        num_kv_heads=1,
+        swiglu_dim=16,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
-    model_c_config = CNNDualAttentionConfig(
+    model_c_config = KiwiLM2Config(
         **common,
-        num_heads=1,
-        feedforward_dim=16,
+        num_query_heads=1,
+        num_kv_heads=1,
+        swiglu_dim=24,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     checkpoint_a = save_checkpoint(
         tmp_path / "a.pt",
@@ -106,8 +115,8 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
     report = Path(summary["report_path"]).read_text(encoding="utf-8")
     assert summary["generation_count"] == 2
     assert [row["architecture"] for row in rows] == [
-        "gated_cnn",
-        "cnn_attention",
+        "kiwilm2",
+        "kiwilm2_slim",
     ]
     assert "| Model A | Model B |" in report
     assert "opening / greedy" in report
@@ -130,8 +139,8 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
 
     assert n_way_summary["generation_count"] == 3
     assert [row["architecture"] for row in n_way_rows] == [
-        "gated_cnn",
-        "cnn_attention",
-        "cnn_dual_attention",
+        "kiwilm2",
+        "kiwilm2_slim",
+        "kiwilm2",
     ]
     assert "| Model A | Model B | Model C |" in n_way_report

@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.config import ModelXConfig
+from kiwilm.config import KiwiLM2Config
 from kiwilm.data import prepare_from_stories
 from kiwilm.models import build_model
 from kiwilm.sft import (
@@ -326,15 +326,16 @@ def test_sft_evaluation_uses_the_same_seeded_chunks_every_time(
     _tokenizer_source(source)
     _prepare_sft(tmp_path / "sft", source)
     data = PreparedSFTData(tmp_path / "sft")
-    config = ModelXConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=16,
         d_model=16,
         dropout=0.0,
-        kernel_size=3,
-        cnn_dilations=(1, 2),
-        num_heads=2,
+        num_query_heads=2,
+        num_kv_heads=1,
         swiglu_dim=24,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     model = build_model(config)
     first_generator = torch.Generator().manual_seed(1)
@@ -372,15 +373,16 @@ def test_weight_only_sft_warm_start_and_exact_token_budget(tmp_path: Path) -> No
     _tokenizer_source(source)
     _prepare_sft(tmp_path / "sft", source)
     data = PreparedSFTData(tmp_path / "sft")
-    config = ModelXConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=16,
         d_model=16,
         dropout=0.0,
-        kernel_size=3,
-        cnn_dilations=(1, 2),
-        num_heads=2,
+        num_query_heads=2,
+        num_kv_heads=1,
         swiglu_dim=24,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     source_checkpoint = save_checkpoint(
         tmp_path / "source.pt",
@@ -432,15 +434,16 @@ def test_v2_weighted_sft_trains_to_an_exact_unweighted_token_budget(
     _tokenizer_source(source)
     _prepare_sft_v2(tmp_path / "sft-v2", source)
     data = PreparedSFTData(tmp_path / "sft-v2")
-    config = ModelXConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=16,
         d_model=16,
         dropout=0.0,
-        kernel_size=3,
-        cnn_dilations=(1, 2),
-        num_heads=2,
+        num_query_heads=2,
+        num_kv_heads=1,
         swiglu_dim=24,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
 
     result = train(

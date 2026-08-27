@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.config import ModelYConfig
+from kiwilm.config import KiwiLM2Config
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.models import build_model
 from kiwilm.safetensors_io import (
@@ -34,14 +34,16 @@ def test_safetensors_export_round_trip_and_manifest(tmp_path: Path) -> None:
         min_frequency=1,
     )
     data = PreparedTokenData(data_dir)
-    config = ModelYConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=8,
         d_model=16,
         dropout=0.0,
-        num_layers=2,
-        num_heads=2,
+        num_query_heads=2,
+        num_kv_heads=1,
         swiglu_dim=32,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     model = build_model(config).eval()
     checkpoint = save_checkpoint(
@@ -101,14 +103,16 @@ def test_safetensors_export_and_load_reject_incompatible_data(
         min_frequency=1,
     )
     data = PreparedTokenData(data_dir)
-    config = ModelYConfig(
+    config = KiwiLM2Config(
         vocab_size=data.tokenizer.vocab_size,
         context_length=8,
         d_model=16,
         dropout=0.0,
-        num_layers=1,
-        num_heads=2,
+        num_query_heads=2,
+        num_kv_heads=1,
         swiglu_dim=32,
+        bigram_buckets=16,
+        trigram_buckets=16,
     )
     checkpoint = save_checkpoint(
         tmp_path / "best.pt",

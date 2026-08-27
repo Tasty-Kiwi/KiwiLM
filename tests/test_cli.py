@@ -1,722 +1,175 @@
-"""CLI parser and checkpoint-loading coverage."""
+"""CLI coverage for the active KiwiLM 2 workflows."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-import torch
 
 import kiwilm.cli as cli
-from kiwilm.checkpoint import CheckpointCompatibilityError, save_checkpoint
-from kiwilm.cli import _load_trained_model, build_parser
-from kiwilm.config import (
-    CNNAttentionConfig,
-    CNNFFNAttentionConfig,
-    GatedCNNConfig,
-    ModelXConfig,
-    ModelYConfig,
-    ModelZParallelConfig,
-    TransformerConfig,
-)
-from kiwilm.data import prepare_from_stories
-from kiwilm.models import build_model
+from kiwilm.cli import build_parser
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, ModelConfig
 
 
-def test_cli_defaults_select_fast_smoke_profile() -> None:
+def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
     parser = build_parser()
-    prepare = parser.parse_args(["prepare"])
-    prepare_simplestories = parser.parse_args(
+    dense = parser.parse_args(["train"])
+    slim = parser.parse_args(
         [
-            "prepare-simplestories",
-            "--tokenizer-from",
-            "data/tinystories-750k",
-        ]
-    )
-    prepare_instruct = parser.parse_args(
-        ["prepare-instruct", "--tokenizer-from", "data/tinystories-750k"]
-    )
-    training = parser.parse_args(["train"])
-
-    assert prepare.train_limit == 25_000
-    assert prepare.validation_limit == 2_000
-    assert prepare.vocab_size == 8_192
-    assert prepare.tokenizer_from is None
-    assert prepare_simplestories.output_dir == Path("data/simplestories-250k")
-    assert prepare_simplestories.train_limit == 250_000
-    assert prepare_simplestories.validation_limit == 10_000
-    assert prepare_simplestories.text_field == "story"
-    assert prepare_simplestories.tokenizer_from == Path("data/tinystories-750k")
-    assert prepare_instruct.train_limit == 50_000
-    assert prepare_instruct.validation_limit == 5_000
-    assert prepare_instruct.tokenizer_from == Path("data/tinystories-750k")
-    assert prepare_instruct.sft_format == "v1"
-    assert prepare_instruct.required_word_weight == 3.0
-    prepare_instruct_v2 = parser.parse_args(
-        [
-            "prepare-instruct",
-            "--tokenizer-from",
-            "data/tinystories-750k",
-            "--sft-format",
-            "v2",
-            "--required-word-weight",
+            "train",
+            "--architecture",
+            "kiwilm2_slim",
+            "--context-length",
+            "256",
+            "--d-model",
+            "256",
+            "--query-heads",
+            "8",
+            "--kv-heads",
             "4",
+            "--swiglu-dim",
+            "768",
+            "--bigram-buckets",
+            "8192",
+            "--trigram-buckets",
+            "4096",
         ]
     )
-    assert prepare_instruct_v2.sft_format == "v2"
-    assert prepare_instruct_v2.required_word_weight == 4.0
-    exported = parser.parse_args(
-        [
-            "export-tokenizer",
-            "--data-dir",
-            "data/source",
-            "--output-dir",
-            "data/bundle",
-        ]
-    )
-    assert exported.data_dir == Path("data/source")
-    assert exported.output_dir == Path("data/bundle")
-    exported_weights = parser.parse_args(
-        [
-            "export-safetensors",
-            "--tokenizer-from",
-            "data/sft",
-            "--checkpoint",
-            "runs/model-y/best.pt",
-            "--output-dir",
-            "dist/model-y",
-            "--variant",
-            "direct-sft-v2",
-        ]
-    )
-    assert exported_weights.tokenizer_from == Path("data/sft")
-    assert exported_weights.checkpoint == Path("runs/model-y/best.pt")
-    assert exported_weights.output_dir == Path("dist/model-y")
-    assert exported_weights.variant == "direct-sft-v2"
-    assert training.max_steps == 2_000
-    assert training.batch_size == 32
-    assert training.context_length == 256
-    assert training.architecture == "gated_cnn"
-    assert training.output_dir is None
-    generation = parser.parse_args(
-        ["generate", "--checkpoint", "model.pt", "--prompt", "Once"]
-    )
-    assert not generation.stream
-    assert generation.cache == "auto"
-    assert training.batch_mode == "packed"
-    assert training.precision == "fp32"
+
+    assert dense.architecture == "kiwilm2"
+    assert dense.context_length == 512
+    assert dense.d_model == 512
+    assert dense.dropout == 0.0
+    assert dense.query_heads == 8
+    assert dense.kv_heads == 2
+    assert dense.swiglu_dim == 1_536
+    assert slim.architecture == "kiwilm2_slim"
+    assert slim.context_length == 256
+    assert slim.kv_heads == 4
+    assert slim.bigram_buckets == 8_192
+    assert slim.trigram_buckets == 4_096
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["train", "--architecture", "model_x"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["train", "--kiwilm2-context-length", "256"])
 
 
-def test_cli_sft_defaults_and_requires_checkpoint() -> None:
+def test_cli_keeps_generic_data_training_and_evaluation_commands() -> None:
     parser = build_parser()
-    sft = parser.parse_args(["sft", "--init-from", "runs/model-x-750k/best.pt"])
-    report = parser.parse_args(
-        [
-            "sft-report",
-            "--checkpoints",
-            "runs/model-x-instruct/latest.pt",
-        ]
+    expected = {
+        "prepare",
+        "prepare-smollm",
+        "prepare-simplestories",
+        "prepare-instruct",
+        "export-tokenizer",
+        "export-safetensors",
+        "train",
+        "profile-kiwilm2",
+        "cpt",
+        "sft",
+        "evaluate",
+        "generate",
+        "compare",
+        "sft-report",
+    }
+    subcommands = next(
+        action.choices
+        for action in parser._actions
+        if getattr(action, "choices", None) is not None
     )
+    assert set(subcommands) == expected
 
-    assert sft.data_dir == Path("data/tinystories-instruct-50k")
-    assert sft.init_from == Path("runs/model-x-750k/best.pt")
+
+def test_cli_sft_and_cpt_keep_checkpoint_initialization_contracts() -> None:
+    parser = build_parser()
+    sft = parser.parse_args(["sft", "--init-from", "runs/kiwilm2/best.pt"])
+    cpt = parser.parse_args(["cpt", "--init-from", "runs/kiwilm2/best.pt"])
+
+    assert sft.init_from == Path("runs/kiwilm2/best.pt")
     assert sft.resume is None
     assert sft.max_tokens == 10_000_000
-    assert sft.warmup_tokens == 250_000
-    assert sft.batch_size == 8
-    assert sft.grad_accum_steps == 4
-    assert sft.precision == "auto"
-    assert report.data_dir == Path("data/tinystories-instruct-50k")
-    assert report.suite == Path("eval/instruction-adherence-prompts.json")
-    assert report.output_dir == Path("examples/comparisons/sft-adherence")
-    assert report.cache == "off"
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["sft"])
-
-
-def test_cli_cpt_defaults_and_requires_checkpoint() -> None:
-    parser = build_parser()
-    cpt = parser.parse_args(["cpt", "--init-from", "runs/model-y-750k/best.pt"])
-
-    assert cpt.data_dir == Path("data/simplestories-250k")
-    assert cpt.init_from == Path("runs/model-y-750k/best.pt")
+    assert cpt.init_from == Path("runs/kiwilm2/best.pt")
     assert cpt.resume is None
-    assert cpt.max_tokens == 50_000_000
-    assert cpt.warmup_tokens == 1_000_000
-    assert cpt.max_steps == 6_000
-    assert cpt.batch_size == 64
-    assert cpt.learning_rate == 3e-5
-    assert cpt.min_learning_rate == 3e-6
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["cpt"])
 
 
-def test_cpt_cli_uses_checkpoint_architecture_and_weight_initialization(
+@pytest.mark.parametrize(
+    ("architecture", "config_type", "output_dir"),
+    [
+        ("kiwilm2", KiwiLM2Config, Path("runs/kiwilm2")),
+        ("kiwilm2_slim", KiwiLM2SlimConfig, Path("runs/kiwilm2-slim")),
+    ],
+)
+def test_train_command_builds_active_config_and_default_output(
     monkeypatch: pytest.MonkeyPatch,
+    architecture: str,
+    config_type: type[KiwiLM2Config],
+    output_dir: Path,
 ) -> None:
     captured: dict[str, object] = {}
-    model_config = ModelYConfig(
-        vocab_size=64,
-        context_length=8,
-        d_model=16,
-        dropout=0.0,
-        num_heads=2,
-        swiglu_dim=32,
-    )
+    fake_data = SimpleNamespace(tokenizer=SimpleNamespace(vocab_size=320))
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: fake_data)
 
-    class DummyTokenizer:
-        vocab_size = 64
+    def fake_train(model_config, data, destination, settings, **kwargs):
+        captured.update(
+            model_config=model_config,
+            data=data,
+            destination=destination,
+            settings=settings,
+            kwargs=kwargs,
+        )
+        return {"step": 0}
 
-    class DummyData:
-        def __init__(self) -> None:
-            self.tokenizer = DummyTokenizer()
-            self.metadata = {
-                "tokenizer": {
-                    "reused_from": {
-                        "dataset_fingerprint": "a" * 64,
-                        "tokenizer_sha256": "b" * 64,
-                    }
-                }
-            }
-
-    def fake_train(
-        received_config: object,
-        _data: object,
-        output_dir: Path,
-        settings: object,
-        **kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = received_config
-        captured["output_dir"] = output_dir
-        captured["settings"] = settings
-        captured.update(kwargs)
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "_checkpoint_model_config", lambda _path: model_config)
-    monkeypatch.setattr(cli, "_checkpoint_data_fingerprint", lambda _path: "a" * 64)
     monkeypatch.setattr(cli, "train", fake_train)
-    args = build_parser().parse_args(
-        ["cpt", "--init-from", "runs/model-y-750k/best.pt"]
-    )
 
-    assert args.handler(args) == 0
-    assert captured["model_config"] == model_config
-    assert captured["output_dir"] == Path("runs/model-y-simplestories-cpt")
-    assert captured["init_from"] == Path("runs/model-y-750k/best.pt")
-    assert captured["resume_from"] is None
-    settings = captured["settings"]
-    assert settings.batch_mode == "story"
-    assert settings.eval_mode == "both"
-    assert settings.max_tokens == 50_000_000
-    assert settings.warmup_tokens == 1_000_000
-
-    monkeypatch.setattr(cli, "_checkpoint_data_fingerprint", lambda _path: "c" * 64)
-    with pytest.raises(ValueError, match="must reuse the tokenizer"):
-        args.handler(args)
-
-
-def test_sft_cli_uses_checkpoint_architecture_and_weight_initialization(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-    model_config = ModelXConfig(
-        vocab_size=64,
-        context_length=8,
-        d_model=16,
-        dropout=0.0,
-        num_heads=2,
-        swiglu_dim=32,
-    )
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-        @staticmethod
-        def format_prompt(prompt: str) -> str:
-            return "v2:" + prompt
-
-    def fake_train(
-        received_config: object,
-        _data: object,
-        output_dir: Path,
-        settings: object,
-        **kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = received_config
-        captured["output_dir"] = output_dir
-        captured["settings"] = settings
-        captured.update(kwargs)
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedSFTData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "_checkpoint_model_config", lambda _path: model_config)
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = build_parser().parse_args(
-        ["sft", "--init-from", "runs/model-x-750k/best.pt"]
-    )
-
-    assert args.handler(args) == 0
-    assert captured["model_config"] == model_config
-    assert captured["output_dir"] == Path("runs/model-x-sft")
-    assert captured["init_from"] == Path("runs/model-x-750k/best.pt")
-    assert captured["resume_from"] is None
-    settings = captured["settings"]
-    assert settings.batch_mode == "sft"
-    assert settings.eval_mode == "sft"
-    assert settings.sample_prompt.startswith("v2:")
-
-
-def test_cli_accepts_streaming_generation() -> None:
-    args = build_parser().parse_args(
+    result = cli.main(
         [
-            "generate",
-            "--checkpoint",
-            "model.pt",
-            "--prompt",
-            "Once",
-            "--stream",
+            "train",
+            "--architecture",
+            architecture,
+            "--context-length",
+            "16",
+            "--d-model",
+            "16",
+            "--query-heads",
+            "2",
+            "--kv-heads",
+            "1",
+            "--swiglu-dim",
+            "32",
+            "--bigram-buckets",
+            "16",
+            "--trigram-buckets",
+            "16",
+            "--max-steps",
+            "1",
         ]
     )
 
-    assert args.stream
+    assert result == 0
+    model_config = captured["model_config"]
+    assert isinstance(model_config, config_type)
+    assert model_config.vocab_size == 320
+    assert model_config.context_length == 16
+    assert captured["destination"] == output_dir
 
 
-def test_generate_applies_prepared_sft_prompt_format(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    captured: dict[str, str] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummySFTData:
-        fingerprint = "a" * 64
-        tokenizer = DummyTokenizer()
-
-        @staticmethod
-        def format_prompt(prompt: str) -> str:
-            return "instruction\n" + prompt
-
-    monkeypatch.setattr(cli, "PreparedSFTData", DummySFTData)
-    monkeypatch.setattr(cli, "load_prepared_data", lambda *_args, **_kwargs: DummySFTData())
-    monkeypatch.setattr(
-        cli,
-        "load_trained_model",
-        lambda *_args, **_kwargs: (
-                torch.nn.Identity(),
-                type("Config", (), {"context_length": 8, "vocab_size": 64})(),
-        ),
-    )
-
-    def fake_generate(_model: object, _tokenizer: object, prompt: str, **_kwargs: object) -> str:
-        captured["prompt"] = prompt
-        return "story"
-
-    monkeypatch.setattr(cli, "generate", fake_generate)
-    args = build_parser().parse_args(
-        ["generate", "--checkpoint", "model.pt", "--prompt", "Features: Dialogue"]
-    )
-
-    assert args.handler(args) == 0
-    assert captured["prompt"] == "instruction\nFeatures: Dialogue"
-    assert capsys.readouterr().out == "story\n"
-
-
-def test_cli_selects_model_b_and_comparison_defaults() -> None:
-    parser = build_parser()
-    training = parser.parse_args(["train", "--architecture", "cnn_attention"])
-    comparison = parser.parse_args(
-        [
-            "compare",
-            "--checkpoint-a",
-            "a.pt",
-            "--checkpoint-b",
-            "b.pt",
-        ]
-    )
-
-    assert training.attention_heads == 8
-    assert training.attention_feedforward_dim == 1024
-    assert comparison.suite == Path("eval/story-consistency-prompts.json")
-    assert comparison.output_dir == Path(
-        "examples/comparisons/model-a-vs-model-b"
-    )
-
-
-def test_cli_accepts_models_c_d_and_n_way_comparison() -> None:
-    parser = build_parser()
-    model_c = parser.parse_args(["train", "--architecture", "cnn_dual_attention"])
-    model_g = parser.parse_args(["train", "--architecture", "cnn_attention_ffn"])
-    model_d = parser.parse_args(["train", "--architecture", "cnn_attention_mamba"])
-    model_e = parser.parse_args(
-        ["train", "--architecture", "cnn_interleaved_attention"]
-    )
-    model_f = parser.parse_args(
-        ["train", "--architecture", "cnn_deep_interleaved_attention"]
-    )
-    transformer = parser.parse_args(["train", "--architecture", "transformer"])
-    model_y = parser.parse_args(["train", "--architecture", "model_y"])
-    model_x = parser.parse_args(["train", "--architecture", "model_x"])
-    model_z = parser.parse_args(["train", "--architecture", "model_z_parallel"])
-    comparison = parser.parse_args(
-        [
-            "compare",
-            "--checkpoints",
-            "b.pt",
-            "c.pt",
-            "d.pt",
-            "--labels",
-            "Model B",
-            "Model C",
-            "Model D",
-        ]
-    )
-
-    assert model_c.architecture == "cnn_dual_attention"
-    assert model_g.architecture == "cnn_attention_ffn"
-    assert model_d.mamba_inner_dim == 896
-    assert model_d.mamba_state_dim == 16
-    assert model_e.architecture == "cnn_interleaved_attention"
-    assert model_f.architecture == "cnn_deep_interleaved_attention"
-    assert transformer.architecture == "transformer"
-    assert model_y.architecture == "model_y"
-    assert model_y.model_y_swiglu_dim == 720
-    assert model_x.architecture == "model_x"
-    assert model_x.swiglu_dim == 640
-    assert model_z.architecture == "model_z_parallel"
-    assert model_z.model_z_swiglu_dim == 1280
-    assert comparison.checkpoints == [
-        Path("b.pt"),
-        Path("c.pt"),
-        Path("d.pt"),
-    ]
-    assert comparison.labels == ["Model B", "Model C", "Model D"]
-
-
-def test_cli_loads_checkpoint_and_rejects_other_data(tmp_path: Path) -> None:
-    config = GatedCNNConfig(
-        vocab_size=300,
-        context_length=8,
-        d_model=8,
-        dropout=0.0,
-        num_layers=1,
-        dilations=(1,),
-    )
-    checkpoint = save_checkpoint(
-        tmp_path / "model.pt",
-        model=build_model(config),
-        step=1,
-        model_config=config,
-        data_fingerprint="a" * 64,
-    )
-
-    model, loaded_config = _load_trained_model(
-        checkpoint,
-        data_fingerprint="a" * 64,
-        device=torch.device("cpu"),
-    )
-    assert loaded_config == config
-    assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 300)
-
-    with pytest.raises(CheckpointCompatibilityError, match="fingerprint"):
-        _load_trained_model(
-            checkpoint,
-            data_fingerprint="b" * 64,
-            device=torch.device("cpu"),
+def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_data = SimpleNamespace(tokenizer=SimpleNamespace(vocab_size=320))
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: fake_data)
+    with pytest.raises(ValueError, match="restricted to kiwilm2"):
+        cli.main(
+            [
+                "train",
+                "--architecture",
+                "kiwilm2_slim",
+                "--optimizer",
+                "muon",
+            ]
         )
 
 
-def test_evaluate_requires_explicit_cross_dataset_opt_in(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    source_dir = tmp_path / "source"
-    target_dir = tmp_path / "target"
-    source = prepare_from_stories(
-        source_dir,
-        ["A source training story."],
-        ["A source validation story long enough for evaluation."],
-        vocab_size=300,
-        min_frequency=1,
-    )
-    target = prepare_from_stories(
-        target_dir,
-        ["A different training story."],
-        ["A different validation story long enough for evaluation."],
-        vocab_size=300,
-        min_frequency=1,
-        tokenizer_from=source_dir,
-    )
-    config = GatedCNNConfig(
-        vocab_size=source["tokenizer"]["vocab_size"],
-        context_length=8,
-        d_model=8,
-        dropout=0.0,
-        num_layers=1,
-        dilations=(1,),
-    )
-    checkpoint = save_checkpoint(
-        tmp_path / "model.pt",
-        model=build_model(config),
-        step=1,
-        model_config=config,
-        data_fingerprint=source["fingerprint"],
-    )
-    base_args = [
-        "evaluate",
-        "--data-dir",
-        str(target_dir),
-        "--checkpoint",
-        str(checkpoint),
-        "--device",
-        "cpu",
-        "--batch-mode",
-        "story",
-        "--batch-size",
-        "1",
-        "--batches",
-        "1",
-    ]
-
-    with pytest.raises(CheckpointCompatibilityError, match="fingerprint"):
-        build_parser().parse_args(base_args).handler(
-            build_parser().parse_args(base_args)
-        )
-
-    args = build_parser().parse_args([*base_args, "--allow-data-mismatch"])
-    assert args.handler(args) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["checkpoint_data_fingerprint"] == source["fingerprint"]
-    assert result["data_fingerprint"] == target["fingerprint"]
-    assert result["data_mismatch"] is True
-    assert result["valid_targets"] > 0
-
-
-def test_cli_loads_model_b_checkpoint(tmp_path: Path) -> None:
-    config = CNNAttentionConfig(
-        vocab_size=64,
-        context_length=8,
-        d_model=16,
-        dropout=0.0,
-        num_heads=2,
-        feedforward_dim=32,
-    )
-    checkpoint = save_checkpoint(
-        tmp_path / "model-b.pt",
-        model=build_model(config),
-        step=1,
-        model_config=config,
-        data_fingerprint="a" * 64,
-    )
-
-    model, loaded_config = _load_trained_model(
-        checkpoint,
-        data_fingerprint="a" * 64,
-        device=torch.device("cpu"),
-    )
-
-    assert loaded_config == config
-    assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 64)
-
-
-def test_cli_loads_transformer_checkpoint(tmp_path: Path) -> None:
-    config = TransformerConfig(
-        vocab_size=64,
-        context_length=8,
-        d_model=16,
-        dropout=0.0,
-        num_layers=2,
-        num_heads=2,
-        feedforward_dim=32,
-    )
-    checkpoint = save_checkpoint(
-        tmp_path / "transformer.pt",
-        model=build_model(config),
-        step=1,
-        model_config=config,
-        data_fingerprint="a" * 64,
-    )
-
-    model, loaded_config = _load_trained_model(
-        checkpoint,
-        data_fingerprint="a" * 64,
-        device=torch.device("cpu"),
-    )
-
-    assert loaded_config == config
-    assert model(torch.ones((1, 2), dtype=torch.long)).shape == (1, 2, 64)
-
-
-def test_transformer_cli_uses_default_output_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-    def fake_train(
-        model_config: object,
-        _data: object,
-        output_dir: Path,
-        _train_config: object,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = model_config
-        captured["output_dir"] = output_dir
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = cli.build_parser().parse_args(
-        ["train", "--architecture", "transformer", "--max-steps", "1"]
-    )
-
-    assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], TransformerConfig)
-    assert captured["output_dir"] == Path("runs/transformer")
-
-
-def test_model_g_cli_uses_default_output_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-    def fake_train(
-        model_config: object,
-        _data: object,
-        output_dir: Path,
-        _train_config: object,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = model_config
-        captured["output_dir"] = output_dir
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = cli.build_parser().parse_args(
-        ["train", "--architecture", "cnn_attention_ffn", "--max-steps", "1"]
-    )
-
-    assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], CNNFFNAttentionConfig)
-    assert captured["output_dir"] == Path("runs/model-g")
-
-
-def test_model_x_cli_uses_default_output_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-    def fake_train(
-        model_config: object,
-        _data: object,
-        output_dir: Path,
-        _train_config: object,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = model_config
-        captured["output_dir"] = output_dir
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = cli.build_parser().parse_args(
-        ["train", "--architecture", "model_x", "--max-steps", "1"]
-    )
-
-    assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], ModelXConfig)
-    assert captured["output_dir"] == Path("runs/model-x")
-
-
-def test_model_y_cli_uses_default_output_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-    def fake_train(
-        model_config: object,
-        _data: object,
-        output_dir: Path,
-        _train_config: object,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = model_config
-        captured["output_dir"] = output_dir
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = cli.build_parser().parse_args(
-        ["train", "--architecture", "model_y", "--max-steps", "1"]
-    )
-
-    assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], ModelYConfig)
-    assert captured["model_config"].swiglu_dim == 720
-    assert captured["output_dir"] == Path("runs/model-y")
-
-
-def test_model_z_parallel_cli_uses_default_output_directory(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class DummyTokenizer:
-        vocab_size = 64
-
-    class DummyData:
-        tokenizer = DummyTokenizer()
-
-    def fake_train(
-        model_config: object,
-        _data: object,
-        output_dir: Path,
-        _train_config: object,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        captured["model_config"] = model_config
-        captured["output_dir"] = output_dir
-        return {}
-
-    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: DummyData())
-    monkeypatch.setattr(cli, "train", fake_train)
-    args = cli.build_parser().parse_args(
-        ["train", "--architecture", "model_z_parallel", "--max-steps", "1"]
-    )
-
-    assert args.handler(args) == 0
-    assert isinstance(captured["model_config"], ModelZParallelConfig)
-    assert captured["model_config"].swiglu_dim == 1280
-    assert captured["output_dir"] == Path("runs/model-z-parallel")
+def test_legacy_checkpoint_config_has_actionable_error() -> None:
+    with pytest.raises(ValueError, match="legacy branch"):
+        ModelConfig.from_dict({"architecture": "model_y"})

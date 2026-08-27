@@ -17,7 +17,7 @@ from kiwilm.checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
-from kiwilm.config import GatedCNNConfig
+from kiwilm.config import KiwiLM2Config, ModelConfig
 from kiwilm.generation import (
     generate,
     generate_stream,
@@ -100,7 +100,7 @@ def test_weighted_loss_preserves_target_count_and_changes_only_denominator() -> 
 
 
 class TinyLM(nn.Module):
-    def __init__(self, config: GatedCNNConfig) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config
         self.embedding = nn.Embedding(config.vocab_size, config.d_model)
@@ -110,18 +110,20 @@ class TinyLM(nn.Module):
         return self.projection(self.embedding(input_ids))
 
 
-def tiny_config(**overrides: object) -> GatedCNNConfig:
+def tiny_config(**overrides: object) -> KiwiLM2Config:
     values: dict[str, object] = {
         "vocab_size": 8,
         "context_length": 4,
         "d_model": 4,
         "dropout": 0.0,
-        "num_layers": 1,
-        "kernel_size": 3,
-        "dilations": (1,),
+        "num_query_heads": 1,
+        "num_kv_heads": 1,
+        "swiglu_dim": 8,
+        "bigram_buckets": 8,
+        "trigram_buckets": 8,
     }
     values.update(overrides)
-    return GatedCNNConfig(**values)
+    return KiwiLM2Config(**values)
 
 
 def test_train_defaults_device_and_schedule() -> None:
