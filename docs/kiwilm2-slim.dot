@@ -1,0 +1,71 @@
+digraph KiwiLM2 {
+    graph [
+        rankdir=TB,
+        bgcolor="#FFFFFF",
+        pad=0.28,
+        nodesep=0.24,
+        ranksep=0.40,
+        splines=ortho,
+        fontname="Helvetica",
+        fontsize=18,
+        label="KiwiLM 2 Slim — Frozen Hybrid Language Model",
+        labelloc=t
+    ];
+
+    node [
+        shape=box,
+        style="rounded,filled",
+        color="#64748B",
+        fillcolor="#F8FAFC",
+        fontcolor="#0F172A",
+        fontname="Helvetica",
+        fontsize=10,
+        margin="0.18,0.10",
+        penwidth=1.2
+    ];
+
+    edge [color="#475569", arrowsize=0.7, penwidth=1.3];
+
+    input [label="Input token IDs\n[B, T] • T ≤ 512", fillcolor="#DBEAFE", color="#3B82F6"];
+    token_embedding [label="Token embedding\n32,000 × 512", fillcolor="#DCFCE7", color="#22C55E"];
+    ngram_memory [label="Explicit n-gram memory\nhashed bigram + trigram tables\n16,384 × 512 each", fillcolor="#CCFBF1", color="#14B8A6"];
+    embedding_sum [label="Sum and scale by √(512/3)\n[B, T, 512]", fillcolor="#ECFCCB", color="#84CC16"];
+
+    block_1 [label="Block 1\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+    block_2 [label="Block 2\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_3 [label="Block 3\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_4 [label="Block 4\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+    block_5 [label="Block 5\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_6 [label="Block 6\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_7 [label="Block 7\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+    block_8 [label="Block 8\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_9 [label="Block 9\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_10 [label="Block 10\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Hadamard MLP 512-wide\nlearned diagonal → FWHT → SiLU → diagonal → FWHT → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+
+    final_norm [label="Final RMSNorm\n512 channels", fillcolor="#E2E8F0", color="#64748B"];
+    lm_head [label="Tied language-model head\nLinear 512 → 32,000 • no bias", fillcolor="#F3E8FF", color="#A855F7"];
+    logits [label="Next-token logits\n[B, T, 32,000]", fillcolor="#FFE4E6", color="#F43F5E"];
+    summary [shape=note, style="filled", label="40,679,936 parameters\n7,518,720 dense/non-embedding\n16,777,216 n-gram memory\n52,115,456 estimated FLOPs/token\n1 MiB fp16 KV cache at T=512", fillcolor="#F1F5F9", color="#94A3B8"];
+    cache [shape=note, style="filled", label="Cached autoregressive decoding\n4 GQA KV states + 6 convolution histories\ncontext rollover triggers a bounded prefill", fillcolor="#EFF6FF", color="#60A5FA"];
+
+    input -> token_embedding;
+    input -> ngram_memory;
+    token_embedding -> embedding_sum;
+    ngram_memory -> embedding_sum;
+    embedding_sum -> block_1;
+    block_1 -> block_2;
+    block_2 -> block_3;
+    block_3 -> block_4;
+    block_4 -> block_5;
+    block_5 -> block_6;
+    block_6 -> block_7;
+    block_7 -> block_8;
+    block_8 -> block_9;
+    block_9 -> block_10;
+    block_10 -> final_norm -> lm_head -> logits;
+    token_embedding -> lm_head [xlabel="shared weights", style=dashed, color="#9333EA", fontcolor="#7E22CE", constraint=false];
+    { rank=same; embedding_sum; cache; }
+    cache -> embedding_sum [style=invis];
+    { rank=same; final_norm; summary; }
+    summary -> final_norm [style=invis];
+}

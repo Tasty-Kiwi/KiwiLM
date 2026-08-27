@@ -17,6 +17,19 @@ uses a 1536-wide SwiGLU on that branch. `kiwilm2_slim` uses a width-preserving
 learned diagonal -> orthonormal FWHT -> SiLU -> learned diagonal -> FWHT mixer.
 Slim is intentionally not depth- or parameter-matched.
 
+## Architecture diagrams
+
+The diagrams are generated from the frozen Python configurations with
+`uv run python scripts/render_kiwilm2_graphviz.py`.
+
+### KiwiLM 2
+
+![KiwiLM 2 architecture](kiwilm2.svg)
+
+### KiwiLM 2 Slim
+
+![KiwiLM 2 Slim architecture](kiwilm2-slim.svg)
+
 The shared defaults are context 512, width 512, 8 query heads, 2 KV heads,
 cached RoPE on GQA only, six causal depthwise kernels `31/63/31/63/31/63`, no
 dropout, tied embeddings, and 16,384 buckets for each n-gram order. The
