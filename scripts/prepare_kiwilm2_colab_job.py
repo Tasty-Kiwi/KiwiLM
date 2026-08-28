@@ -24,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--min-learning-rate", type=float, default=3e-5)
     parser.add_argument("--precision", choices=("fp16", "bf16", "fp32"), default="fp16")
+    parser.add_argument(
+        "--compile-policy",
+        choices=("auto", "eager", "compiled"),
+        default="auto",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--allow-data-token-mismatch", action="store_true")
     parser.add_argument("--drive-root", default="/content/drive/MyDrive/KiwiLM2")
@@ -45,6 +50,7 @@ def main() -> int:
         learning_rate=args.learning_rate,
         min_learning_rate=args.min_learning_rate,
         precision=args.precision,
+        compile_policy=args.compile_policy,
         seed=args.seed,
         allow_data_token_mismatch=args.allow_data_token_mismatch,
         drive_backups=not args.no_drive_backups,

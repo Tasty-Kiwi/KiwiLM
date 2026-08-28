@@ -17,7 +17,7 @@ import torch
 from torch import Tensor, nn
 
 RETRIEVAL_SUITE_VERSION = 1
-DEFAULT_RETRIEVAL_DISTANCES = (32, 64, 128, 192)
+DEFAULT_RETRIEVAL_DISTANCES = (32, 128, 256, 384, 448)
 DEFAULT_RETRIEVAL_PAIRS_PER_DISTANCE = 32
 
 _CANDIDATE_POOL = (
@@ -77,7 +77,7 @@ _FILLER_PASSAGES = (
 def build_retrieval_suite(
     tokenizer: Any,
     *,
-    context_length: int = 256,
+    context_length: int = 512,
     distances: Sequence[int] = DEFAULT_RETRIEVAL_DISTANCES,
     pairs_per_distance: int = DEFAULT_RETRIEVAL_PAIRS_PER_DISTANCE,
     seed: int = 42,

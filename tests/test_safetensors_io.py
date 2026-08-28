@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.config import KiwiLM2Config
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.models import build_model
 from kiwilm.safetensors_io import (
@@ -24,7 +24,8 @@ from kiwilm.safetensors_io import (
 )
 
 
-def test_safetensors_export_round_trip_and_manifest(tmp_path: Path) -> None:
+@pytest.mark.parametrize("slim", [False, True])
+def test_safetensors_export_round_trip_and_manifest(tmp_path: Path, slim: bool) -> None:
     data_dir = tmp_path / "data"
     metadata = prepare_from_stories(
         data_dir,
@@ -34,7 +35,8 @@ def test_safetensors_export_round_trip_and_manifest(tmp_path: Path) -> None:
         min_frequency=1,
     )
     data = PreparedTokenData(data_dir)
-    config = KiwiLM2Config(
+    config_type = KiwiLM2SlimConfig if slim else KiwiLM2Config
+    config = config_type(
         vocab_size=data.tokenizer.vocab_size,
         context_length=8,
         d_model=16,

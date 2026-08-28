@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("runs/evaluations/context-retrieval"),
     )
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--context-length", type=int, default=256)
+    parser.add_argument("--context-length", type=int, default=512)
     parser.add_argument(
         "--distance",
         type=int,

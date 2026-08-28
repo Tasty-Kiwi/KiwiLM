@@ -26,6 +26,7 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
     locked_names = (
         "phase",
         "architecture",
+        "hadamard_variant",
         "optimizer",
         "muon_lr",
         "max_tokens",
@@ -46,6 +47,8 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
         json.dumps(locked, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:12]
     prefix = f"{job.get('phase')}-{job.get('architecture')}-{job.get('optimizer')}"
+    if job.get("hadamard_variant"):
+        prefix += f"-{job['hadamard_variant']}"
     if job.get("optimizer") == "muon":
         prefix += f"-{job.get('muon_lr')}"
     return f"{prefix}-{digest}".replace(".", "p")
@@ -64,6 +67,7 @@ def build_colab_job(
     learning_rate: float = 3e-4,
     min_learning_rate: float = 3e-5,
     precision: str = "fp16",
+    compile_policy: str = "auto",
     seed: int = 42,
     allow_data_token_mismatch: bool = False,
     drive_backups: bool = True,
@@ -81,6 +85,8 @@ def build_colab_job(
         raise ValueError("Muon is restricted to the dense KiwiLM 2 variant")
     if precision not in {"fp16", "bf16", "fp32"}:
         raise ValueError("Colab precision must be fp16, bf16, or fp32")
+    if compile_policy not in {"auto", "eager", "compiled"}:
+        raise ValueError("compile_policy must be auto, eager, or compiled")
     for name, value in (
         ("batch_size", batch_size),
         ("grad_accum_steps", grad_accum_steps),
@@ -144,9 +150,10 @@ def build_colab_job(
     required_steps = math.ceil(resolved_tokens / tokens_per_step)
     warmup_tokens = min(max(1, resolved_tokens // 50), resolved_tokens)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "phase": phase,
         "architecture": architecture,
+        "hadamard_variant": "gated_v2" if architecture == "kiwilm2_slim" else None,
         "optimizer": optimizer,
         "muon_lr": muon_lr,
         "max_tokens": resolved_tokens,
@@ -157,6 +164,7 @@ def build_colab_job(
         "learning_rate": learning_rate,
         "min_learning_rate": min_learning_rate,
         "precision": precision,
+        "compile_policy": compile_policy,
         "seed": seed,
         "context_length": 512,
         "d_model": 512,

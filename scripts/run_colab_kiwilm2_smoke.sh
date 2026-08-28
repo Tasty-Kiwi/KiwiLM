@@ -8,5 +8,7 @@ scripts/run_colab_kiwilm2.sh
 
 KIWILM2_PHASE=smoke \
 KIWILM2_VARIANT=kiwilm2_slim \
-KIWILM_RESULT_DIR="${KIWILM_RESULT_ROOT:-runs/colab/kiwilm2-smoke}/kiwilm2-slim-adamw" \
+KIWILM2_COMPILE_POLICY=auto \
+COLAB_SESSION_NAME="kiwilm2-smoke-kiwilm2-slim-gated-v2-adamw" \
+KIWILM_RESULT_DIR="${KIWILM_RESULT_ROOT:-runs/colab/kiwilm2-smoke}/kiwilm2-slim-gated-v2-adamw" \
 scripts/run_colab_kiwilm2.sh

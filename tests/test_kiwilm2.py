@@ -9,12 +9,16 @@ from pathlib import Path
 import pytest
 import torch
 
+from kiwilm.checkpoint import save_checkpoint
 from kiwilm.colab_kiwilm2 import build_colab_job, checkpoint_backup_key
+from kiwilm.compile_benchmark import benchmark_slim_runtime, select_slim_runtime
 from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, ModelConfig
 from kiwilm.data import PreparedTokenData, prepare_smollm_corpus
 from kiwilm.diagnostics import model_health_report
+from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import (
+    GatedHadamardMLP,
     HadamardMLP,
     KiwiLM2GQA,
     KiwiLM2LM,
@@ -59,7 +63,7 @@ def test_fixed_schedule_tied_embeddings_causality_and_backward(slim: bool) -> No
         for block in model.blocks
         if isinstance(block.mixer, XXLCausalGatedConv)
     ] == list(config.conv_kernel_sizes)
-    assert all(isinstance(block.mlp, HadamardMLP) == slim for block in model.blocks)
+    assert all(isinstance(block.mlp, GatedHadamardMLP) == slim for block in model.blocks)
 
     original = torch.randint(config.vocab_size, (2, config.context_length))
     changed = original.clone()
@@ -98,6 +102,29 @@ def test_hadamard_is_orthonormal_and_differentiable() -> None:
     assert values.grad is not None and bool(torch.isfinite(values.grad).all())
 
 
+def test_gated_hadamard_matches_reference_and_uses_depth_scaled_residual() -> None:
+    torch.manual_seed(107)
+    module = GatedHadamardMLP(8, dropout=0.0, residual_scale=1 / math.sqrt(20))
+    values = torch.randn(2, 3, 8, requires_grad=True)
+    gate = fast_walsh_hadamard(values * module.gate_scale + module.gate_bias)
+    value = fast_walsh_hadamard(values * module.value_scale + module.value_bias)
+    expected = fast_walsh_hadamard(
+        (torch.nn.functional.silu(gate) * value) * module.output_scale
+        + module.output_bias
+    ) * module.residual_scale
+    torch.testing.assert_close(module(values), expected)
+    assert float(module.residual_scale.detach()) == pytest.approx(1 / math.sqrt(20))
+    for scale in (module.gate_scale, module.value_scale, module.output_scale):
+        assert set(scale.detach().tolist()) <= {-1.0, 1.0}
+    for bias in (module.gate_bias, module.value_bias, module.output_bias):
+        assert torch.count_nonzero(bias) == 0
+    module(values).sum().backward()
+    assert all(
+        parameter.grad is not None and bool(torch.isfinite(parameter.grad).all())
+        for parameter in module.parameters()
+    )
+
+
 def test_config_round_trip_and_validation() -> None:
     for config in (small_config(), small_config(slim=True)):
         serialized = config.to_dict()
@@ -107,13 +134,73 @@ def test_config_round_trip_and_validation() -> None:
         small_config(mixer_schedule=("gqa",))
     with pytest.raises(ValueError, match="power of two"):
         small_config(slim=True, d_model=12, num_query_heads=3)
+    with pytest.raises(ValueError, match="hadamard_variant"):
+        small_config(slim=True, hadamard_variant="unknown")
+
+
+def test_pre_v2_slim_config_loads_the_minimal_negative_baseline() -> None:
+    serialized = small_config(slim=True).to_dict()
+    serialized.pop("hadamard_variant")
+    loaded = ModelConfig.from_dict(serialized)
+    assert isinstance(loaded, KiwiLM2SlimConfig)
+    assert loaded.hadamard_variant == "minimal_v1"
+    model = KiwiLM2LM(loaded)
+    assert all(isinstance(block.mlp, HadamardMLP) for block in model.blocks)
+
+
+def test_pre_v2_checkpoint_reconstructs_with_original_state_shape(tmp_path: Path) -> None:
+    config = small_config(slim=True, hadamard_variant="minimal_v1")
+    source = KiwiLM2LM(config)
+    checkpoint = save_checkpoint(tmp_path / "minimal-v1.pt", model=source, step=3)
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    payload["model_config"].pop("hadamard_variant")
+    torch.save(payload, checkpoint)
+
+    loaded, loaded_config = load_trained_model(
+        checkpoint,
+        data_fingerprint=None,
+        device=torch.device("cpu"),
+    )
+
+    assert isinstance(loaded_config, KiwiLM2SlimConfig)
+    assert loaded_config.hadamard_variant == "minimal_v1"
+    for name, tensor in source.state_dict().items():
+        torch.testing.assert_close(loaded.state_dict()[name], tensor)
+
+
+def test_compile_benchmark_checks_parity_and_runtime_selection() -> None:
+    result = benchmark_slim_runtime(
+        small_config(),
+        small_config(slim=True),
+        device=torch.device("cpu"),
+        batch_size=1,
+        precision="fp32",
+        warmup_iterations=1,
+        measured_iterations=1,
+        compile_backend="eager",
+    )
+    assert result["compiled_parity"] is True
+    assert result["selected_runtime"] in {"eager", "compiled"}
+    assert result["promotion_throughput_ratio"] > 0
+
+    synthetic = {
+        "dense_eager": {"median_tokens_per_second": 100.0},
+        "slim_eager": {"median_tokens_per_second": 90.0},
+        "slim_compiled": {"median_tokens_per_second": 110.0},
+        "compiled_parity": True,
+    }
+    assert select_slim_runtime(synthetic)[0] == "compiled"
+    synthetic["slim_compiled"]["median_tokens_per_second"] = 95.0
+    assert select_slim_runtime(synthetic)[0] == "eager"
 
 
 def test_profile_separates_memory_dense_and_cache_costs() -> None:
     dense = KiwiLM2LM(small_config())
     slim = KiwiLM2LM(small_config(slim=True))
+    minimal = KiwiLM2LM(small_config(slim=True, hadamard_variant="minimal_v1"))
     dense_profile = profile_kiwilm2(dense, sequence_length=8)
     slim_profile = profile_kiwilm2(slim, sequence_length=8)
+    minimal_profile = profile_kiwilm2(minimal, sequence_length=8)
     assert dense_profile["parameters"]["ngram"] == (17 + 19) * 8
     assert dense_profile["parameters"]["token_embedding"] == 71 * 8
     assert (
@@ -122,16 +209,29 @@ def test_profile_separates_memory_dense_and_cache_costs() -> None:
     )
     assert dense_profile["kv_cache"]["elements"] == 2 * 4 * 1 * 8 * 4
     assert dense_profile["estimated_flops_per_token"]["total"] > 0
+    assert slim_profile["hadamard_variant"] == "gated_v2"
+    assert minimal_profile["hadamard_variant"] == "minimal_v1"
+    assert (
+        slim_profile["parameters"]["total"] - minimal_profile["parameters"]["total"]
+        == 10 * (2 * slim.config.d_model + 1)
+    )
+    assert (
+        slim_profile["estimated_flops_per_token"]["mlp"]
+        > minimal_profile["estimated_flops_per_token"]["mlp"]
+    )
 
 
 def test_health_report_covers_every_block_and_ngram_table() -> None:
-    model = KiwiLM2LM(small_config())
+    model = KiwiLM2LM(small_config(slim=True))
     inputs = torch.randint(71, (2, 8))
     report = model_health_report(model, inputs, torch.roll(inputs, -1, dims=1))
     assert report["logits_finite"] is True
     assert len(report["blocks"]) == 10
     assert all(block["mixer_gradient_norm"] > 0 for block in report["blocks"])
     assert all(block["mlp_gradient_norm"] > 0 for block in report["blocks"])
+    assert all(block["mlp_residual_scale"] is not None for block in report["blocks"])
+    assert all(block["post_mlp_residual_rms"] > 0 for block in report["blocks"])
+    assert "health_passed" in report
     assert report["ngram"]["bigram_gradient_norm"] > 0
     assert report["ngram"]["trigram_gradient_norm"] > 0
 
@@ -269,3 +369,28 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
     assert key.startswith("smoke-kiwilm2-adamw-")
     changed = {**job, "batch_size": 2}
     assert checkpoint_backup_key(changed) != key
+
+    slim = build_colab_job(
+        None,
+        phase="smoke",
+        architecture="kiwilm2_slim",
+        max_tokens=120,
+        batch_size=1,
+        grad_accum_steps=1,
+    )
+    assert slim["hadamard_variant"] == "gated_v2"
+    assert slim["compile_policy"] == "auto"
+    assert slim["schema_version"] == 2
+    assert "gated_v2" in checkpoint_backup_key(slim)
+    assert checkpoint_backup_key({**slim, "compile_policy": "eager"}) == checkpoint_backup_key(
+        slim
+    )
+    legacy_shaped = {**slim, "hadamard_variant": "minimal_v1"}
+    assert checkpoint_backup_key(legacy_shaped) != checkpoint_backup_key(slim)
+    with pytest.raises(ValueError, match="compile_policy"):
+        build_colab_job(
+            None,
+            phase="smoke",
+            architecture="kiwilm2_slim",
+            compile_policy="sometimes",
+        )

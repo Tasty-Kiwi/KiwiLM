@@ -5,7 +5,9 @@ periodic grouped-query attention, large-kernel causal gated convolutions, and
 hashed bigram/trigram embeddings. The repository contains two matched variants:
 
 - `kiwilm2`: a 64.25M-parameter backbone with 1536-wide SwiGLU feed-forward blocks.
-- `kiwilm2_slim`: a 40.68M-parameter control using width-preserving Hadamard MLPs.
+- `kiwilm2_slim`: a 40.69M-parameter control using gated, width-preserving
+  Hadamard MLPs with independent signed diagonals and depth-scaled learned
+  residual gains.
 
 Both use a 32K tokenizer, 512-token context, tied token embeddings and LM head,
 8 query heads, 2 KV heads, cached RoPE on attention blocks, and the fixed mixer
@@ -97,8 +99,9 @@ uv run kiwilm train \
   --max-steps 3152
 ```
 
-Use `--architecture kiwilm2_slim` for Slim. Muon is deliberately restricted to
-Dense; AdamW is the shared baseline.
+Use `--architecture kiwilm2_slim` for gated Slim v2. Add `--compile-mode
+compiled` to force `torch.compile`; eager remains the portable local default.
+Muon is deliberately restricted to Dense; AdamW is the shared baseline.
 
 ## Colab
 
@@ -107,13 +110,17 @@ checkpoints to Google Drive:
 
 ```bash
 scripts/run_colab_kiwilm2_smoke.sh
+scripts/run_colab_kiwilm2_slim_smoke.sh
 scripts/run_colab_kiwilm2_architecture.sh
 scripts/run_colab_kiwilm2_muon_sweep.sh
 ```
 
-T4 and fp16 are the defaults. `scripts/run_colab_kiwilm2.sh` accepts environment
-overrides for the phase, variant, optimizer, GPU, precision, batch size, Drive
-root, resume checkpoint, and output directory.
+T4 and fp16 are the defaults. The Slim-only launcher benchmarks Dense eager,
+Slim eager, and Slim compiled on the same VM, selecting compiled execution only
+when it is both the fastest Slim path and faster than Dense. Set
+`KIWILM2_COMPILE_POLICY` to `eager`, `compiled`, or `auto`. The generic launcher
+also accepts overrides for phase, variant, optimizer, GPU, precision, batch
+size, Drive root, resume checkpoint, and output directory.
 
 ## Evaluate and inspect
 
@@ -134,9 +141,10 @@ The repository also retains side-by-side generation, retrieval, CPT, SFT,
 instruction scoring, portable tokenizer export, and Safetensors export commands.
 Use `uv run kiwilm <command> --help` for their interfaces.
 
-The completed 50M-token smoke evidence is stored in
+The completed 50M-token minimal-Slim-v1 smoke evidence is stored in
 [examples/comparisons/kiwilm2-smoke-dense-vs-slim](examples/comparisons/kiwilm2-smoke-dense-vs-slim/analysis.md).
-It is an implementation and stability result, not a final architecture verdict.
+It remains the negative baseline; gated-v2 evidence belongs in a separate
+comparison directory after that run completes.
 
 ## Repository layout
 

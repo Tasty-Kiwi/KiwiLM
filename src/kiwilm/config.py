@@ -153,6 +153,7 @@ class KiwiLM2SlimConfig(KiwiLM2Config):
     """KiwiLM 2 backbone with structured width-preserving Hadamard MLPs."""
 
     architecture: str = "kiwilm2_slim"
+    hadamard_variant: str = "gated_v2"
 
     def __post_init__(self) -> None:
         ModelConfig.__post_init__(self)
@@ -161,6 +162,22 @@ class KiwiLM2SlimConfig(KiwiLM2Config):
         self._validate_kiwilm2_fields()
         if self.d_model & (self.d_model - 1):
             raise ValueError("Hadamard MLP requires d_model to be a power of two")
+        if self.hadamard_variant not in {"minimal_v1", "gated_v2"}:
+            raise ValueError("hadamard_variant must be 'minimal_v1' or 'gated_v2'")
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        data = dict(values)
+        # Checkpoints produced before gated Slim v2 predate this discriminator.
+        # Treating a missing value as v1 preserves their exact state-dict shape.
+        data.setdefault("hadamard_variant", "minimal_v1")
+        for name in ("mixer_schedule", "conv_kernel_sizes"):
+            if name in data:
+                raw = data[name]
+                if isinstance(raw, (str, bytes)):
+                    raise ValueError(f"{name} must be a sequence")
+                data[name] = tuple(raw)  # type: ignore[arg-type]
+        return cls(**data)
 
 
 __all__ = [

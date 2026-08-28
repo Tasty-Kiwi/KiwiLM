@@ -44,11 +44,13 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
     assert dense.query_heads == 8
     assert dense.kv_heads == 2
     assert dense.swiglu_dim == 1_536
+    assert dense.compile_mode == "eager"
     assert slim.architecture == "kiwilm2_slim"
     assert slim.context_length == 256
     assert slim.kv_heads == 4
     assert slim.bigram_buckets == 8_192
     assert slim.trigram_buckets == 4_096
+    assert slim.compile_mode == "eager"
 
     with pytest.raises(SystemExit):
         parser.parse_args(["train", "--architecture", "historical_model"])
@@ -153,6 +155,7 @@ def test_train_command_builds_active_config_and_default_output(
     assert model_config.vocab_size == 320
     assert model_config.context_length == 16
     assert captured["destination"] == output_dir
+    assert captured["kwargs"]["compile_model"] is False
 
 
 def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:
