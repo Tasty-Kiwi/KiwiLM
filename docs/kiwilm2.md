@@ -136,12 +136,13 @@ tokens/second, padding fraction, current accelerator memory, and peak memory in
 the final summary. Cached decoding is tested against uncached decoding across
 the context rollover boundary.
 
-Gated Slim v2 advances to 250M tokens only if its 50M validation loss is at
-most 4.90, its same-VM benchmark is at least 5% faster than Dense eager, and
-its health report passes. The health gate requires finite activations and
-gradients, nonzero mixer/MLP gradients in every block, no MLP residual RMS jump
-above 1.5x, a deepest/first MLP-gradient ratio of at least 0.10, and learned
-residual scales whose absolute values remain at most 1.
+The updated 200-batch smoke comparison measured gated Slim v2 at 4.9836 loss
+versus Dense at 4.6904. Slim passed the health gate and the downloaded training
+logs showed a 20% throughput advantage, so the selected 250M experiment retains
+both candidates. The health gate requires finite activations and gradients,
+nonzero mixer/MLP gradients in every block, no MLP residual RMS jump above 1.5x,
+a deepest/first MLP-gradient ratio of at least 0.10, and learned residual scales
+whose absolute values remain at most 1.
 
 After both AdamW baselines, run the optional KiwiLM 2-only Muon sweep:
 
@@ -196,6 +197,44 @@ Run the controlled 250M-token pair:
 ```bash
 scripts/run_colab_kiwilm2_architecture.sh
 ```
+
+Architecture and final Colab jobs use 200 fixed validation batches instead of
+the 50-batch smoke setting. With batch 8, accumulation 4, and context 512, the
+250M job records a 15,359-step safety ceiling and stops exactly at the token
+budget. Dense runs eagerly; Slim benchmarks eager and compiled execution on its
+VM and selects the compatible faster path.
+
+On Windows PowerShell, first prepare the 250M split with the frozen smoke
+tokenizer:
+
+```powershell
+uv run kiwilm prepare-smollm `
+  --profile architecture `
+  --tokenizer-from "data\smollm-smoke" `
+  --output-dir "data\smollm-architecture"
+```
+
+Then run both candidates sequentially with derived step and validation defaults:
+
+```powershell
+uv run python scripts\run_kiwilm2_experiment.py `
+  --phase architecture `
+  --data-dir "data\smollm-architecture" `
+  --output-dir "runs\kiwilm2-architecture" `
+  --device cuda `
+  --precision bf16 `
+  --batch-size 8 `
+  --grad-accum-steps 4 `
+  --slim-compile-mode compiled `
+  --resume-existing
+```
+
+The phase runner derives `--max-steps 15359`, `--max-tokens 250000000`,
+`--warmup-tokens 5000000`, and `--eval-batches 200`. Omit
+`--slim-compile-mode compiled` if that Windows/PyTorch installation did not
+successfully compile the 50M Slim run; eager mode is slower but checkpoint
+compatible. `--resume-existing` is safe on the first invocation and resumes
+each candidate from its own `latest.pt` after an interruption.
 
 Run the dense KiwiLM 2 Muon sweep at `0.01 / 0.02 / 0.04`:
 

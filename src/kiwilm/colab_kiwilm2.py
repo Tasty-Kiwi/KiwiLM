@@ -43,6 +43,11 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
         "data_cache_key",
     )
     locked = {name: job.get(name) for name in locked_names}
+    # Smoke historically used 50 evaluation batches without serializing the
+    # value into the job. Preserve those backup keys while separating the more
+    # robust architecture/final evaluation profile.
+    if job.get("eval_batches", 50) != 50:
+        locked["eval_batches"] = job["eval_batches"]
     digest = hashlib.sha256(
         json.dumps(locked, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:12]
@@ -149,6 +154,7 @@ def build_colab_job(
     tokens_per_step = batch_size * grad_accum_steps * 512
     required_steps = math.ceil(resolved_tokens / tokens_per_step)
     warmup_tokens = min(max(1, resolved_tokens // 50), resolved_tokens)
+    eval_batches = 50 if phase == "smoke" else 200
     return {
         "schema_version": 2,
         "phase": phase,
@@ -159,6 +165,7 @@ def build_colab_job(
         "max_tokens": resolved_tokens,
         "max_steps": required_steps + 100,
         "warmup_tokens": warmup_tokens,
+        "eval_batches": eval_batches,
         "batch_size": batch_size,
         "grad_accum_steps": grad_accum_steps,
         "learning_rate": learning_rate,
