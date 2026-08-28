@@ -16,7 +16,7 @@ from kiwilm.data import (
     prepare_simplestories,
     prepare_tinystories,
 )
-from kiwilm.tokenizer import ByteBPETokenizer
+from kiwilm.tokenizer import ByteBPETokenizer, ReservedTokenError
 
 TEST_VOCAB_SIZE = 300
 
@@ -59,8 +59,37 @@ def test_byte_bpe_round_trip_special_tokens_and_json(tmp_path: Path) -> None:
     loaded = ByteBPETokenizer.load(path)
     assert loaded.encode(text, add_bos=True, add_eos=True) == bounded
     assert loaded.decode(bounded) == text
-    with pytest.raises(ValueError, match="reserved tokenizer control token"):
+    with pytest.raises(ReservedTokenError, match="reserved tokenizer control token"):
         loaded.encode("A story containing [EOS] as ordinary source text")
+
+
+def test_packing_skips_reserved_control_token_documents(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    output_dir = tmp_path / "filtered"
+    _prepare_test_data(source_dir)
+    metadata = prepare_from_stories(
+        output_dir,
+        ["first clean story", "malicious [BOS] boundary", "second clean story"],
+        ["clean validation story"],
+        vocab_size=TEST_VOCAB_SIZE,
+        min_frequency=1,
+        tokenizer_from=source_dir,
+    )
+    prepared = PreparedTokenData(output_dir)
+    expected = [
+        token_id
+        for story in ("first clean story", "second clean story")
+        for token_id in prepared.tokenizer.encode(
+            story,
+            add_bos=True,
+            add_eos=True,
+        )
+    ]
+
+    assert metadata["splits"]["train"]["stories"] == 2
+    assert metadata["splits"]["train"]["skipped_reserved_token_stories"] == 1
+    assert "skipped_reserved_token_stories" not in metadata["splits"]["validation"]
+    assert prepared.tokens("train").tolist() == expected
 
 
 def test_byte_bpe_streaming_decode_preserves_split_utf8() -> None:

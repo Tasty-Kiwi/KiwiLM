@@ -20,6 +20,7 @@ from kiwilm.tokenizer import (
     MAX_UINT16_VOCAB_SIZE,
     SPECIAL_TOKENS,
     ByteBPETokenizer,
+    ReservedTokenError,
 )
 
 DEFAULT_DATASET_NAME = "roneneldan/TinyStories"
@@ -204,10 +205,18 @@ def _write_packed_split(
         )
     digest = hashlib.sha256()
     story_count = 0
+    skipped_reserved_token_stories = 0
     token_count = 0
     with path.open("wb") as stream:
         for text in texts:
-            token_ids = tokenizer.encode(text, add_bos=True, add_eos=True)
+            try:
+                token_ids = tokenizer.encode(text, add_bos=True, add_eos=True)
+            except ReservedTokenError:
+                # Corpus text must never be able to inject control-token IDs.
+                # Skip the complete document and keep streaming until the exact
+                # requested token budget is filled.
+                skipped_reserved_token_stories += 1
+                continue
             if max_tokens is not None:
                 remaining = max_tokens - token_count
                 if remaining <= 0:
@@ -231,13 +240,16 @@ def _write_packed_split(
             f"{split} source ended at {token_count} tokens before the requested "
             f"exact budget of {max_tokens}"
         )
-    return {
+    details = {
         "file": path.name.removeprefix(".").split(".", maxsplit=1)[0],
         "stories": story_count,
         "tokens": token_count,
         "bytes": token_count * np.dtype("<u2").itemsize,
         "sha256": digest.hexdigest(),
     }
+    if skipped_reserved_token_stories:
+        details["skipped_reserved_token_stories"] = skipped_reserved_token_stories
+    return details
 
 
 def _prepare(

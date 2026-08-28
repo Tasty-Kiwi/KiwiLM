@@ -282,10 +282,24 @@ def test_muon_split_uses_linear_matrices_but_not_tables_or_depthwise() -> None:
 def test_smollm_preparation_is_exact_disjoint_and_reproducible(tmp_path: Path) -> None:
     rows = {
         "fineweb-edu-dedup": [
-            {"text": f"FineWeb educational document number {index}."} for index in range(40)
+            {
+                "text": (
+                    "FineWeb contaminated [BOS] document."
+                    if index == 2
+                    else f"FineWeb educational document number {index}."
+                )
+            }
+            for index in range(40)
         ],
         "cosmopedia-v2": [
-            {"text": f"Cosmopedia synthetic textbook section {index}."} for index in range(40)
+            {
+                "text": (
+                    "Cosmopedia contaminated [BOS] section."
+                    if index == 2
+                    else f"Cosmopedia synthetic textbook section {index}."
+                )
+            }
+            for index in range(40)
         ],
     }
 
@@ -306,6 +320,7 @@ def test_smollm_preparation_is_exact_disjoint_and_reproducible(tmp_path: Path) -
     )
     assert metadata["splits"]["train"]["tokens"] == 120
     assert metadata["splits"]["validation"]["tokens"] == 40
+    assert metadata["splits"]["train"]["skipped_reserved_token_stories"] >= 1
     assert metadata["config"]["python_edu_included"] is False
     prepared = PreparedTokenData(output)
     assert prepared.fingerprint == metadata["fingerprint"]

@@ -38,8 +38,12 @@ Windows PowerShell:
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 uv sync --locked
-uv run --locked python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO CUDA GPU')"
+uv run --locked python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO CUDA GPU')"
 ```
+
+The lock selects PyTorch's official CUDA 13.2 wheel index on Windows, so
+`uv sync` and `uv run` no longer replace a CUDA installation with PyPI's CPU
+wheel. macOS and Linux continue to use their normal PyPI resolution.
 
 ## Prepare data
 

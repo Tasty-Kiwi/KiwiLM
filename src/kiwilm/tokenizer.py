@@ -17,6 +17,14 @@ MAX_UINT16_VOCAB_SIZE = 65_535
 MIN_BYTE_BPE_VOCAB_SIZE = len(SPECIAL_TOKENS) + 256
 
 
+class ReservedTokenError(ValueError):
+    """Raised when untrusted source text contains a tokenizer control token."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+        super().__init__(f"text contains reserved tokenizer control token {token!r}")
+
+
 def _tokenizers_api() -> dict[str, Any]:
     try:
         from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
@@ -245,9 +253,7 @@ class ByteBPETokenizer:
     def _validate_text(text: str) -> None:
         reserved = next((token for token in SPECIAL_TOKENS if token in text), None)
         if reserved is not None:
-            raise ValueError(
-                f"text contains reserved tokenizer control token {reserved!r}"
-            )
+            raise ReservedTokenError(reserved)
 
 
 # The shorter alias is useful in type annotations while keeping the byte-level
@@ -264,4 +270,5 @@ __all__ = [
     "UNK_TOKEN",
     "BPETokenizer",
     "ByteBPETokenizer",
+    "ReservedTokenError",
 ]
