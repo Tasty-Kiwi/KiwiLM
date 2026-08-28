@@ -115,6 +115,12 @@ scripts/run_colab_kiwilm2_architecture.sh
 scripts/run_colab_kiwilm2_muon_sweep.sh
 ```
 
+The architecture launcher runs the controlled 250M-token Dense and gated-Slim
+pair. It uses 200 validation batches, a 5M-token warmup, and an automatically
+derived 15,359-step ceiling while stopping exactly at 250M tokens. Windows
+PowerShell preparation and training commands are documented in the
+[KiwiLM 2 runbook](docs/kiwilm2.md#colab-launchers).
+
 T4 and fp16 are the defaults. The Slim-only launcher benchmarks Dense eager,
 Slim eager, and Slim compiled on the same VM, selecting compiled execution only
 when it is both the fastest Slim path and faster than Dense. Set

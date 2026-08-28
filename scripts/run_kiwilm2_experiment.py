@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -31,18 +32,41 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--output-dir", type=Path, required=True)
     result.add_argument("--phase", choices=tuple(PHASE_TOKENS), default="smoke")
     result.add_argument("--max-tokens", type=int)
-    result.add_argument("--max-steps", type=int, default=1_000_000)
+    result.add_argument(
+        "--max-steps",
+        type=int,
+        help="optimizer-step ceiling; defaults to the token budget plus 100 steps",
+    )
     result.add_argument("--batch-size", type=int, default=8)
     result.add_argument("--grad-accum-steps", type=int, default=1)
     result.add_argument("--learning-rate", type=float, default=3e-4)
     result.add_argument("--min-learning-rate", type=float, default=3e-5)
-    result.add_argument("--warmup-tokens", type=int, default=1_000_000)
+    result.add_argument(
+        "--warmup-tokens",
+        type=int,
+        help="defaults to two percent of the token budget",
+    )
     result.add_argument("--precision", choices=("fp32", "fp16", "bf16", "auto"), default="auto")
     result.add_argument("--device", default="auto")
     result.add_argument("--seed", type=int, default=42)
     result.add_argument("--eval-interval", type=int, default=500)
-    result.add_argument("--eval-batches", type=int, default=50)
+    result.add_argument(
+        "--eval-batches",
+        type=int,
+        help="defaults to 50 for smoke and 200 for larger phases",
+    )
     result.add_argument("--checkpoint-interval", type=int, default=500)
+    result.add_argument(
+        "--slim-compile-mode",
+        choices=("eager", "compiled"),
+        default="eager",
+        help="runtime for the gated Slim candidate",
+    )
+    result.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help="resume each candidate from its output directory's latest.pt",
+    )
     result.add_argument(
         "--muon-lrs",
         type=float,
@@ -56,7 +80,23 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     resolved_device = choose_device(args.device)
-    max_tokens = args.max_tokens or PHASE_TOKENS[args.phase]
+    max_tokens = args.max_tokens if args.max_tokens is not None else PHASE_TOKENS[args.phase]
+    if args.batch_size < 1 or args.grad_accum_steps < 1:
+        raise ValueError("batch_size and grad_accum_steps must be positive")
+    tokens_per_step = args.batch_size * args.grad_accum_steps * 512
+    max_steps = (
+        args.max_steps
+        if args.max_steps is not None
+        else math.ceil(max_tokens / tokens_per_step) + 100
+    )
+    warmup_tokens = (
+        args.warmup_tokens if args.warmup_tokens is not None else max(1, max_tokens // 50)
+    )
+    eval_batches = (
+        args.eval_batches
+        if args.eval_batches is not None
+        else (50 if args.phase == "smoke" else 200)
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     source = PreparedTokenData(args.data_dir, seed=args.seed)
     common: dict[str, Any] = {
@@ -71,16 +111,16 @@ def main() -> int:
         "kiwilm2-slim-gated-v2-adamw": KiwiLM2SlimConfig(**common),
     }
     settings = TrainConfig(
-        max_steps=args.max_steps,
+        max_steps=max_steps,
         max_tokens=max_tokens,
-        warmup_tokens=min(args.warmup_tokens, max_tokens),
+        warmup_tokens=min(warmup_tokens, max_tokens),
         batch_size=args.batch_size,
         grad_accum_steps=args.grad_accum_steps,
         lr=args.learning_rate,
         min_lr=args.min_learning_rate,
         precision=args.precision,
         eval_interval=args.eval_interval,
-        eval_batches=args.eval_batches,
+        eval_batches=eval_batches,
         checkpoint_interval=args.checkpoint_interval,
         seed=args.seed,
     )
@@ -90,6 +130,8 @@ def main() -> int:
         "data_fingerprint": source.fingerprint,
         "tokenizer_vocab_size": source.tokenizer.vocab_size,
         "max_tokens": max_tokens,
+        "slim_compile_mode": args.slim_compile_mode,
+        "resume_existing": args.resume_existing,
         "shared_train_config": settings.to_dict(),
         "runs": {},
     }
@@ -98,12 +140,20 @@ def main() -> int:
         assert isinstance(model, KiwiLM2LM)
         profile = profile_kiwilm2(model)
         del model
+        run_dir = args.output_dir / label
+        resume_from = run_dir / "latest.pt" if args.resume_existing else None
+        if resume_from is not None and not resume_from.is_file():
+            resume_from = None
         summary = train(
             config,
             PreparedTokenData(args.data_dir, seed=args.seed),
-            args.output_dir / label,
+            run_dir,
             settings,
             device=resolved_device,
+            resume_from=resume_from,
+            compile_model=(
+                isinstance(config, KiwiLM2SlimConfig) and args.slim_compile_mode == "compiled"
+            ),
         )
         trained, _ = load_trained_model(
             summary["latest_checkpoint"],
@@ -137,12 +187,17 @@ def main() -> int:
                 "muon_lr": muon_lr,
             }
         )
+        run_dir = args.output_dir / label
+        resume_from = run_dir / "latest.pt" if args.resume_existing else None
+        if resume_from is not None and not resume_from.is_file():
+            resume_from = None
         summary = train(
             config,
             PreparedTokenData(args.data_dir, seed=args.seed),
-            args.output_dir / label,
+            run_dir,
             muon_settings,
             device=resolved_device,
+            resume_from=resume_from,
         )
         trained, _ = load_trained_model(
             summary["latest_checkpoint"],

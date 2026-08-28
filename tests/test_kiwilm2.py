@@ -365,8 +365,13 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
     assert job["drive_backups"] is True
     assert job["drive_root"] == "/content/drive/MyDrive/KiwiLM2"
     assert job["data_cache_key"] == "smoke-120-seed42"
+    assert job["eval_batches"] == 50
     key = checkpoint_backup_key(job)
     assert key.startswith("smoke-kiwilm2-adamw-")
+    legacy_job = {
+        name: value for name, value in job.items() if name != "eval_batches"
+    }
+    assert key == checkpoint_backup_key(legacy_job)
     changed = {**job, "batch_size": 2}
     assert checkpoint_backup_key(changed) != key
 
@@ -394,3 +399,18 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
             architecture="kiwilm2_slim",
             compile_policy="sometimes",
         )
+
+    architecture = build_colab_job(
+        None,
+        phase="architecture",
+        architecture="kiwilm2",
+        batch_size=8,
+        grad_accum_steps=4,
+    )
+    assert architecture["max_tokens"] == 250_000_000
+    assert architecture["max_steps"] == 15_359
+    assert architecture["warmup_tokens"] == 5_000_000
+    assert architecture["eval_batches"] == 200
+    assert checkpoint_backup_key(architecture) != checkpoint_backup_key(
+        {**architecture, "eval_batches": 50}
+    )
