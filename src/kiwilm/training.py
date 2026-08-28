@@ -288,6 +288,8 @@ def train(
     resume_from: str | Path | None = None,
     init_from: str | Path | None = None,
     model: nn.Module | None = None,
+    compile_model: bool = False,
+    compile_backend: str | None = None,
     log_fn: Callable[[str], None] | None = print,
 ) -> dict[str, Any]:
     """Train a model and return a JSON-serializable run summary."""
@@ -402,6 +404,15 @@ def train(
             checkpoint_metrics.get("best_validation_perplexity", math.inf)
         )
         _truncate_metrics_after(metrics_path, completed_step)
+
+    if compile_model:
+        compile_method = getattr(network, "compile", None)
+        if compile_method is None:
+            raise RuntimeError("this PyTorch build does not support in-place model compilation")
+        compile_kwargs: dict[str, Any] = {"dynamic": False}
+        if compile_backend is not None:
+            compile_kwargs["backend"] = compile_backend
+        compile_method(**compile_kwargs)
 
     metric_mode = "a" if resume_from is not None else "w"
     last_log_time = time.perf_counter()
@@ -703,6 +714,7 @@ def train(
         "tokens_per_parameter": tokens_seen / parameter_count,
         "precision": resolved_precision,
         "optimizer": settings.optimizer,
+        "compiled": compile_model,
         "batch_mode": settings.batch_mode,
         "eval_mode": settings.eval_mode,
         "stop_reason": stop_reason,

@@ -23,7 +23,9 @@ def build_dot(config: KiwiLM2Config) -> str:
     slim = isinstance(config, KiwiLM2SlimConfig)
     variant = "KiwiLM 2 Slim" if slim else "KiwiLM 2"
     feed_forward = (
-        "Hadamard MLP 512-wide\\nlearned diagonal → FWHT → SiLU → diagonal → FWHT"
+        "Gated Hadamard MLP 512-wide\\n"
+        "independent signed D₁/D₂/D₃ diagonals\\n"
+        "H(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224"
         if slim
         else "SwiGLU FFN\\n512 → 1,536 gate/up → 512"
     )

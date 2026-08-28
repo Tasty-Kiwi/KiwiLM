@@ -19,6 +19,8 @@ from typing import Any
 import torch
 from torch import nn
 
+from kiwilm.config import ModelConfig
+
 CHECKPOINT_FORMAT_VERSION = 1
 
 
@@ -47,8 +49,8 @@ def load_model_weights(
         else getattr(model, "config", None)
     )
     if resolved_expected_config is not None:
-        expected = config_to_dict(resolved_expected_config)
-        actual = _normalise(payload.get("model_config", {}))
+        expected = _canonical_model_config(config_to_dict(resolved_expected_config))
+        actual = _canonical_model_config(payload.get("model_config", {}))
         if actual != expected:
             raise CheckpointCompatibilityError(
                 "checkpoint model configuration does not match the requested model"
@@ -214,8 +216,8 @@ def load_checkpoint(
         else getattr(model, "config", None)
     )
     if resolved_expected_config is not None:
-        expected = config_to_dict(resolved_expected_config)
-        actual = _normalise(payload.get("model_config", {}))
+        expected = _canonical_model_config(config_to_dict(resolved_expected_config))
+        actual = _canonical_model_config(payload.get("model_config", {}))
         if actual != expected:
             raise CheckpointCompatibilityError(
                 "checkpoint model configuration does not match the requested model"
@@ -280,6 +282,16 @@ def _nested_tuple(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return tuple(_nested_tuple(item) for item in value)
     return value
+
+
+def _canonical_model_config(value: Any) -> Any:
+    normalized = _normalise(value)
+    if not isinstance(normalized, Mapping) or "architecture" not in normalized:
+        return normalized
+    try:
+        return ModelConfig.from_dict(normalized).to_dict()
+    except (TypeError, ValueError):
+        return normalized
 
 
 def _sha256_file(path: Path) -> str:

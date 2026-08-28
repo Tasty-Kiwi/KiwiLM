@@ -204,7 +204,7 @@ def fast_walsh_hadamard(values: Tensor) -> Tensor:
 
 
 class HadamardMLP(nn.Module):
-    """Width-preserving learned diagonal/FWHT mixer used by KiwiLM 2 Slim.
+    """Original minimal learned diagonal/FWHT mixer used by Slim v1.
 
     This is intentionally not parameter-matched to SwiGLU. Two learned diagonal
     affine stages surround orthonormal transforms; SiLU supplies non-linearity.
@@ -223,6 +223,31 @@ class HadamardMLP(nn.Module):
         mixed = F.silu(mixed)
         mixed = fast_walsh_hadamard(mixed * self.output_scale + self.output_bias)
         return self.dropout(mixed)
+
+
+class GatedHadamardMLP(nn.Module):
+    """Gated three-transform Hadamard mixer used by KiwiLM 2 Slim v2."""
+
+    def __init__(self, width: int, *, dropout: float, residual_scale: float) -> None:
+        super().__init__()
+        self.gate_scale = nn.Parameter(torch.empty(width))
+        self.gate_bias = nn.Parameter(torch.zeros(width))
+        self.value_scale = nn.Parameter(torch.empty(width))
+        self.value_bias = nn.Parameter(torch.zeros(width))
+        self.output_scale = nn.Parameter(torch.empty(width))
+        self.output_bias = nn.Parameter(torch.zeros(width))
+        self.residual_scale = nn.Parameter(torch.tensor(float(residual_scale)))
+        self.dropout = nn.Dropout(dropout)
+        with torch.no_grad():
+            for scale in (self.gate_scale, self.value_scale, self.output_scale):
+                scale.bernoulli_(0.5).mul_(2).sub_(1)
+
+    def forward(self, values: Tensor) -> Tensor:
+        gate = fast_walsh_hadamard(values * self.gate_scale + self.gate_bias)
+        value = fast_walsh_hadamard(values * self.value_scale + self.value_bias)
+        mixed = F.silu(gate) * value
+        mixed = fast_walsh_hadamard(mixed * self.output_scale + self.output_bias)
+        return self.dropout(mixed) * self.residual_scale
 
 
 class NGramEmbedding(nn.Module):
@@ -267,11 +292,20 @@ class KiwiLM2Block(nn.Module):
         self.mixer_norm = RMSNorm(config.d_model, eps=config.rms_norm_eps)
         self.mixer = mixer
         self.mlp_norm = RMSNorm(config.d_model, eps=config.rms_norm_eps)
-        self.mlp = (
-            HadamardMLP(config.d_model, dropout=config.dropout)
-            if slim
-            else SwiGLU(config.d_model, config.swiglu_dim, dropout=config.dropout)
-        )
+        if slim:
+            if not isinstance(config, KiwiLM2SlimConfig):
+                raise TypeError("Slim blocks require KiwiLM2SlimConfig")
+            self.mlp: nn.Module = (
+                GatedHadamardMLP(
+                    config.d_model,
+                    dropout=config.dropout,
+                    residual_scale=1.0 / math.sqrt(2 * len(config.mixer_schedule)),
+                )
+                if config.hadamard_variant == "gated_v2"
+                else HadamardMLP(config.d_model, dropout=config.dropout)
+            )
+        else:
+            self.mlp = SwiGLU(config.d_model, config.swiglu_dim, dropout=config.dropout)
 
     def forward(self, values: Tensor) -> Tensor:
         values = values + self.mixer(self.mixer_norm(values))
@@ -406,6 +440,7 @@ register_model("kiwilm2_slim", _build_kiwilm2_slim)
 
 __all__ = [
     "CachedRotaryEmbedding",
+    "GatedHadamardMLP",
     "HadamardMLP",
     "KiwiLM2Block",
     "KiwiLM2Cache",

@@ -35,7 +35,7 @@ def install_package() -> None:
 
 
 job = json.loads(JOB_PATH.read_text(encoding="utf-8"))
-if job.get("schema_version") != 1:
+if job.get("schema_version") != 2:
     raise RuntimeError("unsupported KiwiLM 2 Colab job schema")
 install_package()
 
@@ -49,6 +49,7 @@ from kiwilm.colab_drive import (  # noqa: E402
     restore_prepared_data,
 )
 from kiwilm.colab_kiwilm2 import checkpoint_backup_key  # noqa: E402
+from kiwilm.compile_benchmark import benchmark_slim_runtime  # noqa: E402
 from kiwilm.data import (  # noqa: E402
     TOKENIZER_BUNDLE_FILE,
     PreparedTokenData,
@@ -183,8 +184,13 @@ device = torch.device("cuda")
 
 from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig  # noqa: E402
 
-config_type = KiwiLM2Config if job["architecture"] == "kiwilm2" else KiwiLM2SlimConfig
-model_config = config_type(vocab_size=data.tokenizer.vocab_size)
+if job["architecture"] == "kiwilm2":
+    model_config = KiwiLM2Config(vocab_size=data.tokenizer.vocab_size)
+else:
+    model_config = KiwiLM2SlimConfig(
+        vocab_size=data.tokenizer.vocab_size,
+        hadamard_variant=job["hadamard_variant"],
+    )
 eval_interval = 250 if job["phase"] == "smoke" else 500
 if job["phase"].startswith("final"):
     eval_interval = 1_000
@@ -206,6 +212,24 @@ settings = TrainConfig(
     sample_tokens=64,
     seed=job["seed"],
 )
+compile_benchmark = None
+compile_model = False
+compile_policy = job["compile_policy"]
+if compile_policy == "compiled":
+    compile_model = True
+elif compile_policy == "auto" and isinstance(model_config, KiwiLM2SlimConfig):
+    dense_benchmark_config = KiwiLM2Config(vocab_size=data.tokenizer.vocab_size)
+    print("Benchmarking Dense eager and gated Slim eager/compiled...", flush=True)
+    compile_benchmark = benchmark_slim_runtime(
+        dense_benchmark_config,
+        model_config,
+        device=device,
+        batch_size=job["batch_size"],
+        precision=job["precision"],
+    )
+    compile_model = compile_benchmark["selected_runtime"] == "compiled"
+    print(json.dumps({"compile_benchmark": compile_benchmark}, indent=2), flush=True)
+runtime = "compiled" if compile_model else "eager"
 gpu = run(
     "nvidia-smi",
     "--query-gpu=name,memory.total,driver_version",
@@ -246,6 +270,7 @@ try:
         settings,
         device=device,
         resume_from=resume_path,
+        compile_model=compile_model,
     )
     elapsed = time.perf_counter() - started
 
@@ -292,6 +317,9 @@ try:
         "elapsed_seconds": elapsed,
         "peak_cuda_memory_bytes": torch.cuda.max_memory_allocated(device),
         "training": training_summary,
+        "runtime": runtime,
+        "compile_policy": compile_policy,
+        "compile_benchmark": compile_benchmark,
         "final_train_metrics": final_train,
         "profile": profile,
         "health": health,

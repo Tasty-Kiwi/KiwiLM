@@ -144,6 +144,16 @@ def test_retrieval_suite_is_deterministic_balanced_and_token_exact() -> None:
     assert tokenizer_a.vocab_size == tokenizer_b.vocab_size
 
 
+def test_default_retrieval_suite_exercises_the_512_token_window() -> None:
+    suite = build_retrieval_suite(TinyTokenizer(), pairs_per_distance=4)
+    assert suite["context_length"] == 512
+    assert suite["distances"] == [32, 128, 256, 384, 448]
+    assert all(
+        pair["measured_distance"] == pair["requested_distance"]
+        for pair in suite["pairs"]
+    )
+
+
 def test_retrieval_metrics_reward_counterfactual_context_use() -> None:
     tokenizer, suite = _suite()
     candidate_ids = [candidate["token_id"] for candidate in suite["candidates"]]

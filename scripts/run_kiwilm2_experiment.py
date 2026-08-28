@@ -68,7 +68,7 @@ def main() -> int:
     }
     configs = {
         "kiwilm2-adamw": KiwiLM2Config(**common),
-        "kiwilm2-slim-adamw": KiwiLM2SlimConfig(**common),
+        "kiwilm2-slim-gated-v2-adamw": KiwiLM2SlimConfig(**common),
     }
     settings = TrainConfig(
         max_steps=args.max_steps,

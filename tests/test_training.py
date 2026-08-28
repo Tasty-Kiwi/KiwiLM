@@ -262,6 +262,33 @@ def test_evaluate_and_short_training_run(tmp_path) -> None:
     assert all("step" in event for event in events)
 
 
+def test_compiled_training_preserves_checkpoint_state_keys(tmp_path: Path) -> None:
+    config = tiny_config()
+    model = TinyLM(config)
+    expected_keys = tuple(model.state_dict())
+    result = train(
+        config,
+        TinyData(config.vocab_size),
+        tmp_path,
+        TrainConfig(
+            max_steps=1,
+            batch_size=1,
+            eval_interval=0,
+            checkpoint_interval=1,
+            log_interval=0,
+            sample_tokens=0,
+        ),
+        device="cpu",
+        model=model,
+        compile_model=True,
+        compile_backend="eager",
+        log_fn=None,
+    )
+    payload = torch.load(tmp_path / "latest.pt", weights_only=True)
+    assert result["compiled"] is True
+    assert tuple(payload["model_state_dict"]) == expected_keys
+
+
 def test_checkpoint_round_trip_compatibility_and_rng_restore(tmp_path) -> None:
     config = tiny_config()
     model = TinyLM(config)

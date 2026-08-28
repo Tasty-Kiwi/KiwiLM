@@ -66,8 +66,13 @@ def profile_kiwilm2(
             projection_flops += 2 * (2 * d_model * d_model + d_model * d_model)
             convolution_flops += 2 * d_model * kernel
         if isinstance(config, KiwiLM2SlimConfig):
-            # Two FWHTs: width*log2(width) butterflies, each with add/sub.
-            mlp_flops += 4 * d_model * (d_model.bit_length() - 1)
+            transforms = 3 if config.hadamard_variant == "gated_v2" else 2
+            # Each FWHT has width*log2(width) butterfly outputs. Count an
+            # add/sub as two scalar operations to retain the existing estimate.
+            mlp_flops += 2 * transforms * d_model * (d_model.bit_length() - 1)
+            if config.hadamard_variant == "gated_v2":
+                # Three affine diagonals and one elementwise gate product.
+                mlp_flops += 7 * d_model
         else:
             mlp_flops += 2 * 3 * d_model * config.swiglu_dim
     lm_head_flops = 2 * d_model * config.vocab_size
@@ -76,6 +81,9 @@ def profile_kiwilm2(
     )
     return {
         "architecture": config.architecture,
+        "hadamard_variant": (
+            config.hadamard_variant if isinstance(config, KiwiLM2SlimConfig) else None
+        ),
         "parameters": {
             "total": total,
             "dense_non_embedding": dense_parameters,

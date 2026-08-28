@@ -10,7 +10,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
-from kiwilm.models.kiwilm2 import KiwiLM2LM
+from kiwilm.models.kiwilm2 import GatedHadamardMLP, KiwiLM2LM
 
 
 def _rms(values: Tensor) -> float:
@@ -35,6 +35,7 @@ def model_health_report(
     if targets.shape != input_ids.shape:
         raise ValueError("targets must match input_ids")
     activations: dict[str, float] = {}
+    residuals: dict[str, float] = {}
     handles = []
 
     def capture(name: str) -> Callable[..., None]:
@@ -43,9 +44,26 @@ def model_health_report(
 
         return hook
 
+    def capture_input(name: str) -> Callable[..., None]:
+        def hook(_module: Any, inputs: tuple[Tensor, ...]) -> None:
+            residuals[name] = _rms(inputs[0])
+
+        return hook
+
+    def capture_output(name: str) -> Callable[..., None]:
+        def hook(_module: Any, _inputs: Any, output: Tensor) -> None:
+            residuals[name] = _rms(output)
+
+        return hook
+
     for index, block in enumerate(model.blocks):
+        handles.append(block.register_forward_pre_hook(capture_input(f"{index}.input")))
         handles.append(block.mixer.register_forward_hook(capture(f"{index}.mixer")))
+        handles.append(
+            block.mlp_norm.register_forward_pre_hook(capture_input(f"{index}.post_mixer"))
+        )
         handles.append(block.mlp.register_forward_hook(capture(f"{index}.mlp")))
+        handles.append(block.register_forward_hook(capture_output(f"{index}.output")))
     was_training = model.training
     model.eval()
     model.zero_grad(set_to_none=True)
@@ -57,21 +75,71 @@ def model_health_report(
         total_hashes = input_ids.numel()
         block_health = []
         for index, block in enumerate(model.blocks):
+            residual_scale = (
+                float(block.mlp.residual_scale.detach())
+                if isinstance(block.mlp, GatedHadamardMLP)
+                else None
+            )
             block_health.append(
                 {
                     "index": index,
                     "mixer": model.config.mixer_schedule[index],
+                    "residual_input_rms": residuals[f"{index}.input"],
+                    "post_mixer_residual_rms": residuals[f"{index}.post_mixer"],
+                    "post_mlp_residual_rms": residuals[f"{index}.output"],
                     "mixer_output_rms": activations[f"{index}.mixer"],
                     "mlp_output_rms": activations[f"{index}.mlp"],
+                    "mlp_residual_scale": residual_scale,
                     "mixer_gradient_norm": _gradient_norm(block.mixer.parameters()),
                     "mlp_gradient_norm": _gradient_norm(block.mlp.parameters()),
                 }
             )
+        finite_values = all(
+            math.isfinite(float(value))
+            for block in block_health
+            for value in block.values()
+            if isinstance(value, float)
+        )
+        nonzero_gradients = all(
+            block[gradient] > 0
+            for block in block_health
+            for gradient in ("mixer_gradient_norm", "mlp_gradient_norm")
+        )
+        bounded_residual_steps = all(
+            block["post_mlp_residual_rms"] <= 1.5 * block["post_mixer_residual_rms"]
+            for block in block_health
+        )
+        first_mlp_gradient = block_health[0]["mlp_gradient_norm"]
+        deepest_gradient_ratio = (
+            block_health[-1]["mlp_gradient_norm"] / first_mlp_gradient
+            if first_mlp_gradient > 0
+            else 0.0
+        )
+        residual_scales = [
+            block["mlp_residual_scale"]
+            for block in block_health
+            if block["mlp_residual_scale"] is not None
+        ]
+        bounded_residual_scales = all(abs(scale) <= 1.0 for scale in residual_scales)
+        health_checks = {
+            "finite": finite_values and bool(torch.isfinite(logits).all()),
+            "nonzero_gradients": nonzero_gradients,
+            "bounded_residual_steps": bounded_residual_steps,
+            "deepest_to_first_mlp_gradient_ratio": deepest_gradient_ratio,
+            "deepest_gradient_ratio_passed": deepest_gradient_ratio >= 0.1,
+            "bounded_residual_scales": bounded_residual_scales,
+        }
         return {
             "loss": float(loss.detach()),
             "logits_finite": bool(torch.isfinite(logits).all()),
             "logits_rms": _rms(logits),
             "blocks": block_health,
+            "health_checks": health_checks,
+            "health_passed": all(
+                value
+                for name, value in health_checks.items()
+                if name != "deepest_to_first_mlp_gradient_ratio"
+            ),
             "ngram": {
                 "bigram_unique_fraction": bigram.unique().numel() / total_hashes,
                 "trigram_unique_fraction": trigram.unique().numel() / total_hashes,

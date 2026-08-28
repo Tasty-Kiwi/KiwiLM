@@ -18,9 +18,23 @@ earlier 5M-parameter TinyStories ranking. Both variants use this frozen stack:
 ```
 
 Every mixer is followed by a second pre-RMSNorm residual branch. `kiwilm2`
-uses a 1536-wide SwiGLU on that branch. `kiwilm2_slim` uses a width-preserving
-learned diagonal -> orthonormal FWHT -> SiLU -> learned diagonal -> FWHT mixer.
-Slim is intentionally not depth- or parameter-matched.
+uses a 1536-wide SwiGLU on that branch. New `kiwilm2_slim` runs use gated Slim
+v2:
+
+```text
+a = H(x ⊙ d₁ + b₁)
+b = H(x ⊙ d₂ + b₂)
+y = H((SiLU(a) ⊙ b) ⊙ d₃ + b₃) × α
+```
+
+Each block owns a learned scalar `α` initialized to `1/sqrt(20) ≈ 0.2236`.
+The three learned diagonal scales start as independent Rademacher vectors
+(`±1` with equal probability), which keeps the two branches distinct and
+prevents a positive gate product from concentrating in the FWHT DC channel;
+all diagonal biases start at zero.
+Serialized Slim configs record `hadamard_variant=gated_v2`; old configs without
+the field load as `minimal_v1`, preserving the original negative-baseline
+checkpoint shape. Slim remains intentionally unmatched in depth and parameters.
 
 ## Architecture diagrams
 
@@ -45,11 +59,13 @@ n-gram hash at position `t` uses only tokens at or before `t`.
 | Variant | Total params | Dense/non-embedding | Token embedding | N-gram tables | Estimated FLOPs/token at 512 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | KiwiLM 2 | 64,252,416 | 31,091,200 | 16,384,000 | 16,777,216 | 99,117,056 |
-| KiwiLM 2 Slim | 40,679,936 | 7,518,720 | 16,384,000 | 16,777,216 | 52,115,456 |
+| KiwiLM 2 Slim gated v2 | 40,690,186 | 7,528,970 | 16,384,000 | 16,777,216 | 52,243,456 |
 
 Both variants use 1,048,576 bytes of fp16 KV cache per sequence at context
 512. FLOPs are a static estimate with multiply-add counted as two operations;
-hashing, lookups, norms, and activations are omitted. Reproduce the report:
+hashing, lookups, norms, and activation-function internals are omitted. The
+gated Slim estimate includes three affine diagonals and the gate product.
+Reproduce the report:
 
 ```bash
 uv run kiwilm profile-kiwilm2 --architecture kiwilm2
@@ -120,6 +136,13 @@ tokens/second, padding fraction, current accelerator memory, and peak memory in
 the final summary. Cached decoding is tested against uncached decoding across
 the context rollover boundary.
 
+Gated Slim v2 advances to 250M tokens only if its 50M validation loss is at
+most 4.90, its same-VM benchmark is at least 5% faster than Dense eager, and
+its health report passes. The health gate requires finite activations and
+gradients, nonzero mixer/MLP gradients in every block, no MLP residual RMS jump
+above 1.5x, a deepest/first MLP-gradient ratio of at least 0.10, and learned
+residual scales whose absolute values remain at most 1.
+
 After both AdamW baselines, run the optional KiwiLM 2-only Muon sweep:
 
 ```bash
@@ -154,6 +177,19 @@ Run both AdamW smoke candidates sequentially on fresh T4 sessions:
 ```bash
 scripts/run_colab_kiwilm2_smoke.sh
 ```
+
+Run only the gated Slim v2 smoke without repeating Dense training:
+
+```bash
+scripts/run_colab_kiwilm2_slim_smoke.sh
+```
+
+The Slim launcher defaults to `KIWILM2_COMPILE_POLICY=auto`. It performs three
+warm-up and ten measured full-model forward/backward iterations for Dense eager,
+Slim eager, and Slim compiled on the same VM. Compilation is selected only when
+numerically compatible, faster than Slim eager, and faster than Dense eager;
+otherwise the 50M run continues eagerly. The benchmark and the 5% promotion
+speed gate are recorded in `summary.json`.
 
 Run the controlled 250M-token pair:
 
@@ -252,18 +288,19 @@ uv run kiwilm evaluate \
   --allow-data-mismatch
 ```
 
-Run the existing counterfactual retrieval suite with the checkpoint's own
-SmolLM prepared-data fingerprint:
+Run the 512-token counterfactual retrieval suite with the checkpoint's own
+SmolLM prepared-data fingerprint. Its distances are 32, 128, 256, 384, and 448;
+write gated-v2 results separately from the retained 256-token v1 evidence:
 
 ```bash
 uv run python scripts/evaluate_context_retrieval.py \
   --data-dir data/smollm-architecture \
   --context-length 512 \
   --checkpoint runs/kiwilm2-architecture/kiwilm2-adamw/best.pt \
-  --checkpoint runs/kiwilm2-architecture/kiwilm2-slim-adamw/best.pt \
+  --checkpoint runs/kiwilm2-architecture/kiwilm2-slim-gated-v2-adamw/best.pt \
   --label KiwiLM-2 \
   --label KiwiLM-2-Slim \
-  --output-dir runs/kiwilm2-architecture/retrieval
+  --output-dir runs/kiwilm2-architecture/retrieval-gated-v2-512
 ```
 
 General side-by-side generation remains available through `kiwilm compare`.

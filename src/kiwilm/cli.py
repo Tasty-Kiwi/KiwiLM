@@ -287,6 +287,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="greedy tokens generated after training; 0 disables the sample",
     )
     train_parser.add_argument("--seed", type=int, default=42)
+    train_parser.add_argument(
+        "--compile-mode",
+        choices=("eager", "compiled"),
+        default="eager",
+        help="compile the model forward/backward graph with torch.compile",
+    )
     train_parser.set_defaults(handler=_train_command)
 
     profile_parser = subparsers.add_parser(
@@ -774,6 +780,7 @@ def _train_command(args: argparse.Namespace) -> int:
         train_config,
         device=args.device,
         resume_from=args.resume,
+        compile_model=args.compile_mode == "compiled",
     )
     _print_json(summary)
     return 0

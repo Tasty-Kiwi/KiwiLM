@@ -3,6 +3,7 @@
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.kiwilm2 import (
     CachedRotaryEmbedding,
+    GatedHadamardMLP,
     HadamardMLP,
     KiwiLM2Block,
     KiwiLM2Cache,
@@ -19,6 +20,7 @@ from kiwilm.models.registry import build_model, register_model
 __all__ = [
     "CachedRotaryEmbedding",
     "CausalLanguageModel",
+    "GatedHadamardMLP",
     "HadamardMLP",
     "KiwiLM2Block",
     "KiwiLM2Cache",
