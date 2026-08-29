@@ -11,6 +11,8 @@ dependencies = [
     "safetensors>=0.5",
     "tokenizers>=0.23",
     "torch>=2.7",
+    "triton>=3.3; sys_platform == 'linux'",
+    "triton-windows>=3.3; sys_platform == 'win32'",
     "tqdm>=4.67",
 ]
 
