@@ -1,0 +1,243 @@
+{
+  "comparison": "KiwiLM 2 Slim v3 50M-token hybrid-FFN ablation",
+  "external_transfer": {
+    "simple_stories": null,
+    "tiny_stories": null,
+    "unavailable_reason": "Prepared external evaluation datasets were not available locally."
+  },
+  "fixed_validation": {
+    "batch_size": 8,
+    "batches": 50,
+    "context_length": 512,
+    "device": "cpu",
+    "models": {
+      "KiwiLM 2 Dense": {
+        "perplexity": 109.648414,
+        "validation_loss": 4.6972790146
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "perplexity": 146.50823,
+        "validation_loss": 4.987081604
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "perplexity": 121.045788,
+        "validation_loss": 4.79616889
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "perplexity": 126.869322,
+        "validation_loss": 4.8431575966
+      }
+    },
+    "precision": "fp32",
+    "seed": 42,
+    "targets_per_model": 204800
+  },
+  "generation": {
+    "models": {
+      "KiwiLM 2 Dense": {
+        "distinct_unigram_ratio": 0.4813418344,
+        "maximum_consecutive_identical_words": 4,
+        "mean_maximum_consecutive_identical_words": 1.75,
+        "repeated_four_gram_ratio": 0.111835088
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "distinct_unigram_ratio": 0.4918859059,
+        "maximum_consecutive_identical_words": 8,
+        "mean_maximum_consecutive_identical_words": 2.25,
+        "repeated_four_gram_ratio": 0.067959399
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "distinct_unigram_ratio": 0.4637352509,
+        "maximum_consecutive_identical_words": 2,
+        "mean_maximum_consecutive_identical_words": 1.75,
+        "repeated_four_gram_ratio": 0.1049421674
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "distinct_unigram_ratio": 0.5226055436,
+        "maximum_consecutive_identical_words": 43,
+        "mean_maximum_consecutive_identical_words": 5.5833333333,
+        "repeated_four_gram_ratio": 0.1182167473
+      }
+    },
+    "rows": 48,
+    "suite": "eval/story-consistency-prompts.json"
+  },
+  "health_probe": {
+    "models": {
+      "KiwiLM 2 Dense": {
+        "cached_generation_parity": true,
+        "final_residual_rms": 1.671637,
+        "health_passed": true,
+        "mlp_families": {
+          "swiglu": {
+            "gradient_last_to_first_ratio": 1.057945,
+            "output_rms_last_to_first_ratio": 3.688695
+          }
+        }
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "cached_generation_parity": true,
+        "final_residual_rms": 1.565421,
+        "health_passed": true,
+        "mlp_families": {
+          "hadamard": {
+            "gradient_last_to_first_ratio": 0.650964,
+            "output_rms_last_to_first_ratio": 0.68308
+          }
+        }
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "cached_generation_parity": true,
+        "final_residual_rms": 1.669313,
+        "health_passed": true,
+        "mlp_families": {
+          "hadamard": {
+            "gradient_last_to_first_ratio": 1.487095,
+            "output_rms_last_to_first_ratio": 0.816097
+          },
+          "swiglu": {
+            "gradient_last_to_first_ratio": 1.13736,
+            "output_rms_last_to_first_ratio": 3.173093
+          }
+        }
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "cached_generation_parity": true,
+        "final_residual_rms": 1.699569,
+        "health_passed": true,
+        "mlp_families": {
+          "hadamard": {
+            "gradient_last_to_first_ratio": 0.25716,
+            "output_rms_last_to_first_ratio": 0.710164
+          },
+          "swiglu": {
+            "gradient_last_to_first_ratio": 1.160224,
+            "output_rms_last_to_first_ratio": 2.478398
+          }
+        }
+      }
+    }
+  },
+  "profiles": {
+    "models": {
+      "KiwiLM 2 Dense": {
+        "dense_non_embedding_parameters": 31091200,
+        "estimated_flops_per_token": 99117056,
+        "mlp_schedule": "S S S S S S S S S S",
+        "total_parameters": 64252416
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "dense_non_embedding_parameters": 7528970,
+        "estimated_flops_per_token": 52243456,
+        "mlp_schedule": "H H H H H H H H H H",
+        "total_parameters": 40690186
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "dense_non_embedding_parameters": 16953862,
+        "estimated_flops_per_token": 70992896,
+        "mlp_schedule": "H H H H H H S S S S",
+        "total_parameters": 50115078
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "dense_non_embedding_parameters": 14597639,
+        "estimated_flops_per_token": 66305536,
+        "mlp_schedule": "H H H H H H H S S S",
+        "total_parameters": 47758855
+      }
+    }
+  },
+  "provenance": {
+    "checkpoint_kind": "latest",
+    "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+    "maximum_training_tokens": 50000000,
+    "optimizer": "adamw",
+    "seed": 42,
+    "tokenizer_vocab_size": 32000,
+    "validated": true
+  },
+  "retrieval": {
+    "context_length": 512,
+    "distances": [
+      32,
+      128,
+      256,
+      384,
+      448
+    ],
+    "models": {
+      "KiwiLM 2 Dense": {
+        "candidate_accuracy": 0.25,
+        "contextual_logit_lift": 0.0903835572,
+        "paired_flip_accuracy": 0.0,
+        "target_margin": -0.6508429088
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "candidate_accuracy": 0.25,
+        "contextual_logit_lift": 0.0782724977,
+        "paired_flip_accuracy": 0.0,
+        "target_margin": -0.5568589389
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "candidate_accuracy": 0.25,
+        "contextual_logit_lift": 0.2726531774,
+        "paired_flip_accuracy": 0.0,
+        "target_margin": -0.6265376806
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "candidate_accuracy": 0.25,
+        "contextual_logit_lift": 0.1097840354,
+        "paired_flip_accuracy": 0.0,
+        "target_margin": -0.8657639459
+      }
+    },
+    "pairs_per_distance": 32,
+    "seed": 42
+  },
+  "training_logs": {
+    "measurement": "Median training tokens/s after 1M tokens, excluding validation-adjacent windows.",
+    "models": {
+      "KiwiLM 2 Dense": {
+        "compiled": false,
+        "mean_tokens_per_second": 26768.029,
+        "median_tokens_per_second": 27162.698,
+        "peak_memory_bytes": 4053881344,
+        "p10_tokens_per_second": 25816.601,
+        "p90_tokens_per_second": 27717.947
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "compiled": true,
+        "mean_tokens_per_second": 32417.877,
+        "median_tokens_per_second": 32630.116,
+        "peak_memory_bytes": 2943033856,
+        "p10_tokens_per_second": 31164.959,
+        "p90_tokens_per_second": 33307.717
+      },
+      "KiwiLM 2 Slim v3 H6/S4": {
+        "compiled": true,
+        "mean_tokens_per_second": 31230.22,
+        "median_tokens_per_second": 28152.798,
+        "peak_memory_bytes": 3718857728,
+        "p10_tokens_per_second": 27319.326,
+        "p90_tokens_per_second": 39173.755
+      },
+      "KiwiLM 2 Slim v3 H7/S3": {
+        "compiled": true,
+        "mean_tokens_per_second": 36587.44,
+        "median_tokens_per_second": 39090.905,
+        "peak_memory_bytes": 3129215488,
+        "p10_tokens_per_second": 30537.995,
+        "p90_tokens_per_second": 39293.41
+      }
+    }
+  },
+  "training_validation_curve": {
+    "models": {
+      "KiwiLM 2 Dense": [5.803276, 5.292646, 4.963813, 4.861957, 4.75214, 4.712853, 4.680801],
+      "KiwiLM 2 Slim Gated v2": [6.047588, 5.515169, 5.257883, 5.100004, 5.089633, 4.903552, 4.979919],
+      "KiwiLM 2 Slim v3 H6/S4": [5.913551, 5.357049, 5.10311, 4.97138, 4.839003, 4.793721, 4.805072],
+      "KiwiLM 2 Slim v3 H7/S3": [5.944048, 5.400762, 5.142329, 5.015815, 4.882122, 4.838175, 4.851376]
+    },
+    "steps": [500, 1000, 1500, 2000, 2500, 3000, 3052],
+    "tokens_seen": [8192000, 16384000, 24576000, 32768000, 40960000, 49152000, 50000000]
+  }
+}

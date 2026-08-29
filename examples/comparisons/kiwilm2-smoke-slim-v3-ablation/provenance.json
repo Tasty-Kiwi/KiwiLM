@@ -1,0 +1,94 @@
+{
+  "checkpoints": {
+    "dense": {
+      "architecture": "kiwilm2",
+      "checkpoint": "runs/kiwilm2-dense-smoke/latest.pt",
+      "tokens_seen": 50000000,
+      "train_config": {
+        "batch_mode": "packed",
+        "batch_size": 8,
+        "beta2": 0.95,
+        "grad_accum_steps": 4,
+        "grad_clip": 1.0,
+        "lr": 0.0003,
+        "max_steps": 3152,
+        "max_tokens": 50000000,
+        "min_lr": 3e-05,
+        "optimizer": "adamw",
+        "precision": "bf16",
+        "seed": 42,
+        "warmup_tokens": 1000000,
+        "weight_decay": 0.1
+      },
+      "upper_swiglu_blocks": null
+    },
+    "h6s4": {
+      "architecture": "kiwilm2_slim_v3",
+      "checkpoint": "runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h6-s4-adamw/latest.pt",
+      "tokens_seen": 50000000,
+      "train_config": {
+        "batch_mode": "packed",
+        "batch_size": 8,
+        "beta2": 0.95,
+        "grad_accum_steps": 4,
+        "grad_clip": 1.0,
+        "lr": 0.0003,
+        "max_steps": 3152,
+        "max_tokens": 50000000,
+        "min_lr": 3e-05,
+        "optimizer": "adamw",
+        "precision": "bf16",
+        "seed": 42,
+        "warmup_tokens": 1000000,
+        "weight_decay": 0.1
+      },
+      "upper_swiglu_blocks": 4
+    },
+    "h7s3": {
+      "architecture": "kiwilm2_slim_v3",
+      "checkpoint": "runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h7-s3-adamw/latest.pt",
+      "tokens_seen": 50000000,
+      "train_config": {
+        "batch_mode": "packed",
+        "batch_size": 8,
+        "beta2": 0.95,
+        "grad_accum_steps": 4,
+        "grad_clip": 1.0,
+        "lr": 0.0003,
+        "max_steps": 3152,
+        "max_tokens": 50000000,
+        "min_lr": 3e-05,
+        "optimizer": "adamw",
+        "precision": "bf16",
+        "seed": 42,
+        "warmup_tokens": 1000000,
+        "weight_decay": 0.1
+      },
+      "upper_swiglu_blocks": 3
+    },
+    "slim_v2": {
+      "architecture": "kiwilm2_slim",
+      "checkpoint": "runs/kiwilm2-slim-gated-v2-smoke/latest.pt",
+      "tokens_seen": 50000000,
+      "train_config": {
+        "batch_mode": "packed",
+        "batch_size": 8,
+        "beta2": 0.95,
+        "grad_accum_steps": 4,
+        "grad_clip": 1.0,
+        "lr": 0.0003,
+        "max_steps": 3152,
+        "max_tokens": 50000000,
+        "min_lr": 3e-05,
+        "optimizer": "adamw",
+        "precision": "bf16",
+        "seed": 42,
+        "warmup_tokens": 1000000,
+        "weight_decay": 0.1
+      },
+      "upper_swiglu_blocks": null
+    }
+  },
+  "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+  "tokenizer_vocab_size": 32000
+}

@@ -1,0 +1,24 @@
+{
+  "h6s4_to_dense_throughput_ratio": 1.0364507237094047,
+  "loss_gate": {
+    "minimum": 0.03,
+    "passed": true
+  },
+  "loss_improvement_h6s4_over_h7s3": 0.04698870660000054,
+  "measurements": {
+    "dense_tokens_per_second": 27162.698,
+    "h6s4_tokens_per_second": 28152.798,
+    "h6s4_validation_loss": 4.79616889,
+    "h7s3_validation_loss": 4.8431575966
+  },
+  "promotion_commands": {
+    "colab_bash": "KIWILM2_PHASE=architecture \\\nKIWILM2_VARIANT=kiwilm2_slim_v3 \\\nKIWILM2_UPPER_SWIGLU_BLOCKS=3 \\\nCOLAB_GPU=L4 \\\nKIWILM2_PRECISION=bf16 \\\nscripts/run_colab_kiwilm2.sh",
+    "windows_powershell": "uv run --locked python scripts\\run_kiwilm2_experiment.py `\n  --phase architecture `\n  --data-dir \"data\\smollm-architecture\" `\n  --output-dir \"runs\\kiwilm2-slim-v3-architecture\" `\n  --candidates slim-v3-h7s3 `\n  --device cuda `\n  --precision bf16 `\n  --batch-size 8 `\n  --grad-accum-steps 4 `\n  --resume-existing"
+  },
+  "reason": "H6/S4 did not pass both gates; select the cheaper H7/S3 schedule",
+  "selected": "h7s3",
+  "throughput_gate": {
+    "minimum": 1.1,
+    "passed": false
+  }
+}
