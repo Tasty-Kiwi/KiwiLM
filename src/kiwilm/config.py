@@ -51,7 +51,7 @@ class ModelConfig:
 
     @classmethod
     def from_dict(cls, values: Mapping[str, object]) -> Self:
-        """Reconstruct one of the two active KiwiLM 2 configurations."""
+        """Reconstruct one of the active KiwiLM 2 configurations."""
 
         data = dict(values)
         if cls is not ModelConfig:
@@ -61,6 +61,8 @@ class ModelConfig:
             return cast(Self, KiwiLM2Config.from_dict(data))
         if architecture == "kiwilm2_slim":
             return cast(Self, KiwiLM2SlimConfig.from_dict(data))
+        if architecture == "kiwilm2_slim_v3":
+            return cast(Self, KiwiLM2SlimV3Config.from_dict(data))
         raise ValueError(
             f"unsupported model architecture {architecture!r} on master; "
             "check out the legacy branch to load historical KiwiLM checkpoints"
@@ -180,9 +182,57 @@ class KiwiLM2SlimConfig(KiwiLM2Config):
         return cls(**data)
 
 
+@dataclass(frozen=True, slots=True)
+class KiwiLM2SlimV3Config(KiwiLM2Config):
+    """Hybrid Slim v3 with Hadamard lower blocks and dense upper FFNs."""
+
+    architecture: str = "kiwilm2_slim_v3"
+    hadamard_variant: str = "gated_v2"
+    upper_swiglu_blocks: int = 4
+
+    def __post_init__(self) -> None:
+        ModelConfig.__post_init__(self)
+        if self.architecture != "kiwilm2_slim_v3":
+            raise ValueError(
+                "KiwiLM2SlimV3Config architecture must be 'kiwilm2_slim_v3'"
+            )
+        self._validate_kiwilm2_fields()
+        if self.d_model & (self.d_model - 1):
+            raise ValueError("Hadamard MLP requires d_model to be a power of two")
+        if self.hadamard_variant != "gated_v2":
+            raise ValueError("Slim v3 requires hadamard_variant='gated_v2'")
+        if (
+            isinstance(self.upper_swiglu_blocks, bool)
+            or not isinstance(self.upper_swiglu_blocks, int)
+            or self.upper_swiglu_blocks not in {3, 4}
+        ):
+            raise ValueError("upper_swiglu_blocks must be 3 or 4")
+
+    @property
+    def mlp_schedule(self) -> tuple[str, ...]:
+        """Return the frozen contiguous lower-Hadamard/upper-SwiGLU schedule."""
+
+        hadamard_blocks = len(self.mixer_schedule) - self.upper_swiglu_blocks
+        return ("hadamard",) * hadamard_blocks + (
+            "swiglu",
+        ) * self.upper_swiglu_blocks
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> Self:
+        data = dict(values)
+        for name in ("mixer_schedule", "conv_kernel_sizes"):
+            if name in data:
+                raw = data[name]
+                if isinstance(raw, (str, bytes)):
+                    raise ValueError(f"{name} must be a sequence")
+                data[name] = tuple(raw)  # type: ignore[arg-type]
+        return cls(**data)
+
+
 __all__ = [
     "KIWILM2_MIXER_SCHEDULE",
     "KiwiLM2Config",
     "KiwiLM2SlimConfig",
+    "KiwiLM2SlimV3Config",
     "ModelConfig",
 ]

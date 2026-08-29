@@ -10,7 +10,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
-from kiwilm.models.kiwilm2 import GatedHadamardMLP, KiwiLM2LM
+from kiwilm.models.kiwilm2 import GatedHadamardMLP, HadamardMLP, KiwiLM2LM, SwiGLU
 
 
 def _rms(values: Tensor) -> float:
@@ -84,6 +84,13 @@ def model_health_report(
                 {
                     "index": index,
                     "mixer": model.config.mixer_schedule[index],
+                    "mlp_type": (
+                        "hadamard"
+                        if isinstance(block.mlp, (HadamardMLP, GatedHadamardMLP))
+                        else "swiglu"
+                        if isinstance(block.mlp, SwiGLU)
+                        else type(block.mlp).__name__
+                    ),
                     "residual_input_rms": residuals[f"{index}.input"],
                     "post_mixer_residual_rms": residuals[f"{index}.post_mixer"],
                     "post_mlp_residual_rms": residuals[f"{index}.output"],
@@ -109,11 +116,29 @@ def model_health_report(
             block["post_mlp_residual_rms"] <= 1.5 * block["post_mixer_residual_rms"]
             for block in block_health
         )
-        first_mlp_gradient = block_health[0]["mlp_gradient_norm"]
+        family_gradient_ratios: dict[str, float] = {}
+        family_output_rms_ratios: dict[str, float] = {}
+        for mlp_type in ("hadamard", "swiglu"):
+            family_blocks = [
+                block for block in block_health if block["mlp_type"] == mlp_type
+            ]
+            if family_blocks:
+                first_gradient = family_blocks[0]["mlp_gradient_norm"]
+                family_gradient_ratios[mlp_type] = (
+                    family_blocks[-1]["mlp_gradient_norm"] / first_gradient
+                    if first_gradient > 0
+                    else 0.0
+                )
+                first_output_rms = family_blocks[0]["mlp_output_rms"]
+                family_output_rms_ratios[mlp_type] = (
+                    family_blocks[-1]["mlp_output_rms"] / first_output_rms
+                    if first_output_rms > 0
+                    else 0.0
+                )
         deepest_gradient_ratio = (
-            block_health[-1]["mlp_gradient_norm"] / first_mlp_gradient
-            if first_mlp_gradient > 0
-            else 0.0
+            next(iter(family_gradient_ratios.values()))
+            if len(family_gradient_ratios) == 1
+            else None
         )
         residual_scales = [
             block["mlp_residual_scale"]
@@ -126,7 +151,9 @@ def model_health_report(
             "nonzero_gradients": nonzero_gradients,
             "bounded_residual_steps": bounded_residual_steps,
             "deepest_to_first_mlp_gradient_ratio": deepest_gradient_ratio,
-            "deepest_gradient_ratio_passed": deepest_gradient_ratio >= 0.1,
+            "family_gradient_ratios_passed": all(
+                ratio >= 0.1 for ratio in family_gradient_ratios.values()
+            ),
             "bounded_residual_scales": bounded_residual_scales,
         }
         return {
@@ -134,6 +161,8 @@ def model_health_report(
             "logits_finite": bool(torch.isfinite(logits).all()),
             "logits_rms": _rms(logits),
             "blocks": block_health,
+            "mlp_family_gradient_ratios": family_gradient_ratios,
+            "mlp_family_output_rms_ratios": family_output_rms_ratios,
             "health_checks": health_checks,
             "health_passed": all(
                 value
@@ -160,4 +189,59 @@ def model_health_report(
         model.train(was_training)
 
 
-__all__ = ["model_health_report"]
+def cached_generation_parity_report(
+    model: KiwiLM2LM,
+    input_ids: Tensor,
+    *,
+    rtol: float = 2e-3,
+    atol: float = 2e-3,
+) -> dict[str, Any]:
+    """Compare cached decoding with full forward, including context rollover."""
+
+    if not isinstance(model, KiwiLM2LM):
+        raise TypeError("cached_generation_parity_report requires a KiwiLM2LM")
+    if input_ids.ndim != 2 or input_ids.shape[1] < 2:
+        raise ValueError("parity input must have shape [batch, time] with time >= 2")
+    tokens = input_ids[:1, -model.config.context_length :]
+    prefix = tokens[:, :-1]
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            _, cache = model.prefill(prefix)
+            cached, cache = model.decode_step(tokens[:, -1:], cache)
+            expected = model(tokens)[:, -1:]
+            direct_difference = float(
+                (cached.float() - expected.float()).abs().max()
+            )
+            direct_passed = bool(torch.allclose(cached, expected, rtol=rtol, atol=atol))
+
+            rollover_token = tokens[:, :1]
+            cached_rollover, _ = model.decode_step(rollover_token, cache)
+            cached_rollover = cached_rollover[:, -1:]
+            rollover_window = torch.cat((tokens, rollover_token), dim=1)[
+                :, -model.config.context_length :
+            ]
+            expected_rollover = model(rollover_window)[:, -1:]
+            rollover_difference = float(
+                (cached_rollover.float() - expected_rollover.float()).abs().max()
+            )
+            rollover_passed = bool(
+                torch.allclose(
+                    cached_rollover, expected_rollover, rtol=rtol, atol=atol
+                )
+            )
+        return {
+            "passed": direct_passed and rollover_passed,
+            "direct_passed": direct_passed,
+            "rollover_passed": rollover_passed,
+            "direct_max_absolute_difference": direct_difference,
+            "rollover_max_absolute_difference": rollover_difference,
+            "rtol": rtol,
+            "atol": atol,
+        }
+    finally:
+        model.train(was_training)
+
+
+__all__ = ["cached_generation_parity_report", "model_health_report"]

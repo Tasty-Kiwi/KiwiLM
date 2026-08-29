@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
 from kiwilm.data import PreparedTokenData
 
 PHASE_TOKENS = {
@@ -16,7 +18,7 @@ PHASE_TOKENS = {
     "final-500m": 500_000_000,
     "final-1b": 1_000_000_000,
 }
-ARCHITECTURES = {"kiwilm2", "kiwilm2_slim"}
+ARCHITECTURES = {"kiwilm2", "kiwilm2_slim", "kiwilm2_slim_v3"}
 OPTIMIZERS = {"adamw", "muon"}
 
 
@@ -43,6 +45,8 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
         "data_cache_key",
     )
     locked = {name: job.get(name) for name in locked_names}
+    if job.get("architecture") == "kiwilm2_slim_v3":
+        locked["upper_swiglu_blocks"] = job.get("upper_swiglu_blocks")
     # Smoke historically used 50 evaluation batches without serializing the
     # value into the job. Preserve those backup keys while separating the more
     # robust architecture/final evaluation profile.
@@ -54,6 +58,9 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
     prefix = f"{job.get('phase')}-{job.get('architecture')}-{job.get('optimizer')}"
     if job.get("hadamard_variant"):
         prefix += f"-{job['hadamard_variant']}"
+    if job.get("architecture") == "kiwilm2_slim_v3":
+        upper = int(job.get("upper_swiglu_blocks") or 4)
+        prefix += f"-h{10 - upper}-s{upper}"
     if job.get("optimizer") == "muon":
         prefix += f"-{job.get('muon_lr')}"
     return f"{prefix}-{digest}".replace(".", "p")
@@ -73,6 +80,7 @@ def build_colab_job(
     min_learning_rate: float = 3e-5,
     precision: str = "fp16",
     compile_policy: str = "auto",
+    upper_swiglu_blocks: int | None = None,
     seed: int = 42,
     allow_data_token_mismatch: bool = False,
     drive_backups: bool = True,
@@ -88,6 +96,17 @@ def build_colab_job(
         raise ValueError(f"unknown optimizer: {optimizer}")
     if optimizer == "muon" and architecture != "kiwilm2":
         raise ValueError("Muon is restricted to the dense KiwiLM 2 variant")
+    if architecture == "kiwilm2_slim_v3":
+        if upper_swiglu_blocks is None:
+            upper_swiglu_blocks = 4
+        if (
+            isinstance(upper_swiglu_blocks, bool)
+            or not isinstance(upper_swiglu_blocks, int)
+            or upper_swiglu_blocks not in {3, 4}
+        ):
+            raise ValueError("upper_swiglu_blocks must be 3 or 4 for Slim v3")
+    elif upper_swiglu_blocks is not None:
+        raise ValueError("upper_swiglu_blocks is valid only for kiwilm2_slim_v3")
     if precision not in {"fp16", "bf16", "fp32"}:
         raise ValueError("Colab precision must be fp16, bf16, or fp32")
     if compile_policy not in {"auto", "eager", "compiled"}:
@@ -156,10 +175,13 @@ def build_colab_job(
     warmup_tokens = min(max(1, resolved_tokens // 50), resolved_tokens)
     eval_batches = 50 if phase == "smoke" else 200
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "phase": phase,
         "architecture": architecture,
-        "hadamard_variant": "gated_v2" if architecture == "kiwilm2_slim" else None,
+        "hadamard_variant": (
+            "gated_v2" if architecture in {"kiwilm2_slim", "kiwilm2_slim_v3"} else None
+        ),
+        "upper_swiglu_blocks": upper_swiglu_blocks,
         "optimizer": optimizer,
         "muon_lr": muon_lr,
         "max_tokens": resolved_tokens,
@@ -189,10 +211,33 @@ def build_colab_job(
     }
 
 
+def build_colab_model_config(
+    job: Mapping[str, Any], *, vocab_size: int
+) -> KiwiLM2Config:
+    """Reconstruct the model configuration encoded by a validated Colab job."""
+
+    architecture = job.get("architecture")
+    if architecture == "kiwilm2":
+        return KiwiLM2Config(vocab_size=vocab_size)
+    if architecture == "kiwilm2_slim":
+        return KiwiLM2SlimConfig(
+            vocab_size=vocab_size,
+            hadamard_variant=str(job.get("hadamard_variant")),
+        )
+    if architecture == "kiwilm2_slim_v3":
+        return KiwiLM2SlimV3Config(
+            vocab_size=vocab_size,
+            hadamard_variant=str(job.get("hadamard_variant")),
+            upper_swiglu_blocks=job.get("upper_swiglu_blocks"),
+        )
+    raise ValueError(f"unknown KiwiLM 2 architecture: {architecture}")
+
+
 __all__ = [
     "ARCHITECTURES",
     "OPTIMIZERS",
     "PHASE_TOKENS",
     "build_colab_job",
+    "build_colab_model_config",
     "checkpoint_backup_key",
 ]

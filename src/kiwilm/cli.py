@@ -15,6 +15,7 @@ from kiwilm.comparison import compare_checkpoints
 from kiwilm.config import (
     KiwiLM2Config,
     KiwiLM2SlimConfig,
+    KiwiLM2SlimV3Config,
     ModelConfig,
 )
 from kiwilm.data import (
@@ -240,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_data_argument(train_parser)
     train_parser.add_argument(
         "--architecture",
-        choices=("kiwilm2", "kiwilm2_slim"),
+        choices=("kiwilm2", "kiwilm2_slim", "kiwilm2_slim_v3"),
         default="kiwilm2",
     )
     train_parser.add_argument("--output-dir", type=Path)
@@ -254,6 +255,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--swiglu-dim", type=int, default=1_536)
     train_parser.add_argument("--bigram-buckets", type=int, default=16_384)
     train_parser.add_argument("--trigram-buckets", type=int, default=16_384)
+    train_parser.add_argument(
+        "--upper-swiglu-blocks",
+        type=int,
+        choices=(3, 4),
+        help="upper SwiGLU suffix for kiwilm2_slim_v3 (defaults to 4)",
+    )
     train_parser.add_argument("--untie-embeddings", action="store_true")
     train_parser.add_argument("--max-steps", type=int, default=2_000)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -299,13 +306,18 @@ def build_parser() -> argparse.ArgumentParser:
         "profile-kiwilm2", help="report KiwiLM 2 parameters, KV cache, and FLOPs"
     )
     profile_parser.add_argument(
-        "--architecture", choices=("kiwilm2", "kiwilm2_slim"), default="kiwilm2"
+        "--architecture",
+        choices=("kiwilm2", "kiwilm2_slim", "kiwilm2_slim_v3"),
+        default="kiwilm2",
     )
     profile_parser.add_argument("--vocab-size", type=int, default=32_000)
     profile_parser.add_argument("--sequence-length", type=int, default=512)
     profile_parser.add_argument("--kv-heads", type=int, default=2)
     profile_parser.add_argument("--swiglu-dim", type=int, default=1_536)
     profile_parser.add_argument("--ngram-buckets", type=int, default=16_384)
+    profile_parser.add_argument(
+        "--upper-swiglu-blocks", type=int, choices=(3, 4)
+    )
     profile_parser.add_argument("--cache-dtype-bytes", type=int, default=2)
     profile_parser.set_defaults(handler=_profile_kiwilm2_command)
 
@@ -601,13 +613,23 @@ def _prepare_smollm_command(args: argparse.Namespace) -> int:
 
 
 def _profile_kiwilm2_command(args: argparse.Namespace) -> int:
-    config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
-    config = config_type(
+    if args.upper_swiglu_blocks is not None and args.architecture != "kiwilm2_slim_v3":
+        raise ValueError("--upper-swiglu-blocks is valid only for kiwilm2_slim_v3")
+    config_types = {
+        "kiwilm2": KiwiLM2Config,
+        "kiwilm2_slim": KiwiLM2SlimConfig,
+        "kiwilm2_slim_v3": KiwiLM2SlimV3Config,
+    }
+    config_kwargs: dict[str, Any] = {}
+    if args.architecture == "kiwilm2_slim_v3":
+        config_kwargs["upper_swiglu_blocks"] = args.upper_swiglu_blocks or 4
+    config = config_types[args.architecture](
         vocab_size=args.vocab_size,
         num_kv_heads=args.kv_heads,
         swiglu_dim=args.swiglu_dim,
         bigram_buckets=args.ngram_buckets,
         trigram_buckets=args.ngram_buckets,
+        **config_kwargs,
     )
     model = build_model(config)
     _print_json(
@@ -733,8 +755,17 @@ def _train_command(args: argparse.Namespace) -> int:
     data = PreparedTokenData(args.data_dir, seed=args.seed)
     if args.optimizer == "muon" and args.architecture != "kiwilm2":
         raise ValueError("the KiwiLM 2.0 Muon experiment is restricted to kiwilm2")
-    config_type = KiwiLM2Config if args.architecture == "kiwilm2" else KiwiLM2SlimConfig
-    model_config = config_type(
+    if args.upper_swiglu_blocks is not None and args.architecture != "kiwilm2_slim_v3":
+        raise ValueError("--upper-swiglu-blocks is valid only for kiwilm2_slim_v3")
+    config_types = {
+        "kiwilm2": KiwiLM2Config,
+        "kiwilm2_slim": KiwiLM2SlimConfig,
+        "kiwilm2_slim_v3": KiwiLM2SlimV3Config,
+    }
+    config_kwargs: dict[str, Any] = {}
+    if args.architecture == "kiwilm2_slim_v3":
+        config_kwargs["upper_swiglu_blocks"] = args.upper_swiglu_blocks or 4
+    model_config = config_types[args.architecture](
         vocab_size=data.tokenizer.vocab_size,
         context_length=args.context_length,
         d_model=args.d_model,
@@ -745,6 +776,7 @@ def _train_command(args: argparse.Namespace) -> int:
         swiglu_dim=args.swiglu_dim,
         bigram_buckets=args.bigram_buckets,
         trigram_buckets=args.trigram_buckets,
+        **config_kwargs,
     )
     default_output_dir = Path(f"runs/{args.architecture.replace('_', '-')}")
     output_dir = args.output_dir or default_output_dir

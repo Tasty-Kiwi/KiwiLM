@@ -7,19 +7,32 @@ optimizer="${KIWILM2_OPTIMIZER:-adamw}"
 muon_lr="${KIWILM2_MUON_LR:-0.02}"
 gpu="${COLAB_GPU:-T4}"
 colab_bin="${COLAB_BIN:-colab}"
-session_name="${COLAB_SESSION_NAME:-kiwilm2-${phase}-${variant}-${optimizer}}"
-result_dir="${KIWILM_RESULT_DIR:-runs/colab/${phase}-${variant}-${optimizer}}"
 batch_size="${KIWILM2_BATCH_SIZE:-8}"
 grad_accum_steps="${KIWILM2_GRAD_ACCUM_STEPS:-4}"
 learning_rate="${KIWILM2_LEARNING_RATE:-0.0003}"
 min_learning_rate="${KIWILM2_MIN_LEARNING_RATE:-0.00003}"
 precision="${KIWILM2_PRECISION:-fp16}"
 compile_policy="${KIWILM2_COMPILE_POLICY:-auto}"
+upper_swiglu_blocks="${KIWILM2_UPPER_SWIGLU_BLOCKS:-}"
 seed="${KIWILM2_SEED:-42}"
 timeout_seconds="${COLAB_TIMEOUT_SECONDS:-82800}"
 resume_from="${KIWILM2_RESUME_FROM:-}"
 drive_backups="${KIWILM2_DRIVE_BACKUPS:-1}"
 drive_root="${KIWILM2_DRIVE_ROOT:-/content/drive/MyDrive/KiwiLM2}"
+schedule_suffix=""
+if [[ "${variant}" == "kiwilm2_slim_v3" ]]; then
+  upper_swiglu_blocks="${upper_swiglu_blocks:-4}"
+  if [[ "${upper_swiglu_blocks}" != "3" && "${upper_swiglu_blocks}" != "4" ]]; then
+    echo "KIWILM2_UPPER_SWIGLU_BLOCKS must be 3 or 4 for Slim v3" >&2
+    exit 1
+  fi
+  schedule_suffix="-h$((10 - upper_swiglu_blocks))-s${upper_swiglu_blocks}"
+elif [[ -n "${upper_swiglu_blocks}" ]]; then
+  echo "KIWILM2_UPPER_SWIGLU_BLOCKS is valid only for kiwilm2_slim_v3" >&2
+  exit 1
+fi
+session_name="${COLAB_SESSION_NAME:-kiwilm2-${phase}-${variant}${schedule_suffix}-${optimizer}}"
+result_dir="${KIWILM_RESULT_DIR:-runs/colab/${phase}-${variant}${schedule_suffix}-${optimizer}}"
 artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/kiwilm2-colab.XXXXXX")"
 job_path="${artifact_dir}/kiwilm2-job.json"
 session_started=0
@@ -96,6 +109,9 @@ job_command=(
 )
 if [[ -n "${KIWILM2_MAX_TOKENS:-}" ]]; then
   job_command+=(--max-tokens "${KIWILM2_MAX_TOKENS}")
+fi
+if [[ -n "${upper_swiglu_blocks}" ]]; then
+  job_command+=(--upper-swiglu-blocks "${upper_swiglu_blocks}")
 fi
 if [[ "${KIWILM2_ALLOW_DATA_TOKEN_MISMATCH:-0}" == "1" ]]; then
   job_command+=(--allow-data-token-mismatch)

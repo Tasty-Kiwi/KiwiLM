@@ -35,7 +35,7 @@ def install_package() -> None:
 
 
 job = json.loads(JOB_PATH.read_text(encoding="utf-8"))
-if job.get("schema_version") != 2:
+if job.get("schema_version") != 3:
     raise RuntimeError("unsupported KiwiLM 2 Colab job schema")
 install_package()
 
@@ -48,7 +48,10 @@ from kiwilm.colab_drive import (  # noqa: E402
     restore_checkpoint_backup,
     restore_prepared_data,
 )
-from kiwilm.colab_kiwilm2 import checkpoint_backup_key  # noqa: E402
+from kiwilm.colab_kiwilm2 import (  # noqa: E402
+    build_colab_model_config,
+    checkpoint_backup_key,
+)
 from kiwilm.compile_benchmark import benchmark_slim_runtime  # noqa: E402
 from kiwilm.data import (  # noqa: E402
     TOKENIZER_BUNDLE_FILE,
@@ -56,7 +59,10 @@ from kiwilm.data import (  # noqa: E402
     export_tokenizer_bundle,
     prepare_smollm_corpus,
 )
-from kiwilm.diagnostics import model_health_report  # noqa: E402
+from kiwilm.diagnostics import (  # noqa: E402
+    cached_generation_parity_report,
+    model_health_report,
+)
 from kiwilm.generation import generate  # noqa: E402
 from kiwilm.inference import load_trained_model  # noqa: E402
 from kiwilm.model_profile import profile_kiwilm2  # noqa: E402
@@ -182,15 +188,13 @@ if not torch.cuda.is_available():
     raise RuntimeError("KiwiLM 2 Colab training requires a CUDA GPU")
 device = torch.device("cuda")
 
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig  # noqa: E402
+from kiwilm.config import (  # noqa: E402
+    KiwiLM2Config,
+    KiwiLM2SlimConfig,
+    KiwiLM2SlimV3Config,
+)
 
-if job["architecture"] == "kiwilm2":
-    model_config = KiwiLM2Config(vocab_size=data.tokenizer.vocab_size)
-else:
-    model_config = KiwiLM2SlimConfig(
-        vocab_size=data.tokenizer.vocab_size,
-        hadamard_variant=job["hadamard_variant"],
-    )
+model_config = build_colab_model_config(job, vocab_size=data.tokenizer.vocab_size)
 eval_interval = 250 if job["phase"] == "smoke" else 500
 if job["phase"].startswith("final"):
     eval_interval = 1_000
@@ -217,7 +221,9 @@ compile_model = False
 compile_policy = job["compile_policy"]
 if compile_policy == "compiled":
     compile_model = True
-elif compile_policy == "auto" and isinstance(model_config, KiwiLM2SlimConfig):
+elif compile_policy == "auto" and isinstance(
+    model_config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config)
+):
     dense_benchmark_config = KiwiLM2Config(vocab_size=data.tokenizer.vocab_size)
     print("Benchmarking Dense eager and gated Slim eager/compiled...", flush=True)
     compile_benchmark = benchmark_slim_runtime(
@@ -290,6 +296,7 @@ try:
         generator=generator,
     )
     health = model_health_report(model, diagnostic_inputs, diagnostic_targets)
+    cached_generation = cached_generation_parity_report(model, diagnostic_inputs)
     profile = profile_kiwilm2(model)
     sample = generate(
         model,
@@ -323,6 +330,7 @@ try:
         "final_train_metrics": final_train,
         "profile": profile,
         "health": health,
+        "cached_generation": cached_generation,
         "sample": sample,
         "resumed": resume_path is not None,
         "drive_checkpoint_dir": str(backup_dir) if backup_dir is not None else None,

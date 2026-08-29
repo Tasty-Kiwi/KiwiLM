@@ -2,12 +2,14 @@
 
 KiwiLM 2 is a controlled language-model architecture experiment combining
 periodic grouped-query attention, large-kernel causal gated convolutions, and
-hashed bigram/trigram embeddings. The repository contains two matched variants:
+hashed bigram/trigram embeddings. The repository contains three active variants:
 
 - `kiwilm2`: a 64.25M-parameter backbone with 1536-wide SwiGLU feed-forward blocks.
 - `kiwilm2_slim`: a 40.69M-parameter control using gated, width-preserving
   Hadamard MLPs with independent signed diagonals and depth-scaled learned
   residual gains.
+- `kiwilm2_slim_v3`: a hybrid ablation with gated Hadamard lower blocks and a
+  contiguous upper SwiGLU suffix. H7/S3 and H6/S4 are the controlled schedules.
 
 Both use a 32K tokenizer, 512-token context, tied token embeddings and LM head,
 8 query heads, 2 KV heads, cached RoPE on attention blocks, and the fixed mixer
@@ -17,6 +19,8 @@ Earlier KiwiLM architectures and their reports are preserved on the `legacy`
 branch. Check out that branch to load historical checkpoints.
 
 ![KiwiLM 2 architecture](docs/kiwilm2.svg)
+
+![KiwiLM 2 Slim v3 H6/S4 architecture](docs/kiwilm2-slim-v3-h6-s4.svg)
 
 The complete architecture, data, Colab, checkpoint, and evaluation specification
 is in the [KiwiLM 2 runbook](docs/kiwilm2.md).
@@ -107,6 +111,18 @@ Use `--architecture kiwilm2_slim` for gated Slim v2. Add `--compile-mode
 compiled` to force `torch.compile`; eager remains the portable local default.
 Muon is deliberately restricted to Dense; AdamW is the shared baseline.
 
+Run only the two Slim v3 smoke candidates without repeating the controls:
+
+```bash
+uv run python scripts/run_kiwilm2_experiment.py \
+  --phase smoke \
+  --data-dir data/smollm-smoke \
+  --output-dir runs/kiwilm2-slim-v3-smoke \
+  --candidates slim-v3-h7s3 slim-v3-h6s4 \
+  --device cuda \
+  --precision bf16
+```
+
 ## Colab
 
 The launchers prepare data inside the Colab VM and optionally mirror completed
@@ -115,6 +131,7 @@ checkpoints to Google Drive:
 ```bash
 scripts/run_colab_kiwilm2_smoke.sh
 scripts/run_colab_kiwilm2_slim_smoke.sh
+scripts/run_colab_kiwilm2_slim_v3_smoke.sh
 scripts/run_colab_kiwilm2_architecture.sh
 scripts/run_colab_kiwilm2_muon_sweep.sh
 ```
@@ -151,10 +168,11 @@ The repository also retains side-by-side generation, retrieval, CPT, SFT,
 instruction scoring, portable tokenizer export, and Safetensors export commands.
 Use `uv run kiwilm <command> --help` for their interfaces.
 
-The completed 50M-token minimal-Slim-v1 smoke evidence is stored in
+The completed 50M-token minimal-Slim-v1, gated-v2 smoke, and 250M architecture
+evidence is stored under `examples/comparisons`. The Slim v3 comparison folder
+contains the provenance, evaluation, and promotion commands to run after both
+hybrid checkpoints arrive. The original minimal-v1 report remains at
 [examples/comparisons/kiwilm2-smoke-dense-vs-slim](examples/comparisons/kiwilm2-smoke-dense-vs-slim/analysis.md).
-It remains the negative baseline; gated-v2 evidence belongs in a separate
-comparison directory after that run completes.
 
 ## Repository layout
 

@@ -10,7 +10,12 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, ModelConfig
+from kiwilm.config import (
+    KiwiLM2Config,
+    KiwiLM2SlimConfig,
+    KiwiLM2SlimV3Config,
+    ModelConfig,
+)
 from kiwilm.models.base import CausalLanguageModel
 from kiwilm.models.components import initialize_weights, validate_input_ids
 from kiwilm.models.registry import register_model
@@ -286,15 +291,15 @@ class KiwiLM2Block(nn.Module):
         config: KiwiLM2Config,
         mixer: KiwiLM2GQA | XXLCausalGatedConv,
         *,
-        slim: bool,
+        mlp_kind: str,
     ) -> None:
         super().__init__()
         self.mixer_norm = RMSNorm(config.d_model, eps=config.rms_norm_eps)
         self.mixer = mixer
         self.mlp_norm = RMSNorm(config.d_model, eps=config.rms_norm_eps)
-        if slim:
-            if not isinstance(config, KiwiLM2SlimConfig):
-                raise TypeError("Slim blocks require KiwiLM2SlimConfig")
+        if mlp_kind == "hadamard":
+            if not isinstance(config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config)):
+                raise TypeError("Hadamard blocks require a Slim configuration")
             self.mlp: nn.Module = (
                 GatedHadamardMLP(
                     config.d_model,
@@ -304,8 +309,10 @@ class KiwiLM2Block(nn.Module):
                 if config.hadamard_variant == "gated_v2"
                 else HadamardMLP(config.d_model, dropout=config.dropout)
             )
-        else:
+        elif mlp_kind == "swiglu":
             self.mlp = SwiGLU(config.d_model, config.swiglu_dim, dropout=config.dropout)
+        else:
+            raise ValueError("mlp_kind must be 'hadamard' or 'swiglu'")
 
     def forward(self, values: Tensor) -> Tensor:
         values = values + self.mixer(self.mixer_norm(values))
@@ -347,8 +354,15 @@ class KiwiLM2LM(CausalLanguageModel):
         self.embedding_scale = math.sqrt(model_config.d_model / 3)
         conv_index = 0
         blocks: list[KiwiLM2Block] = []
-        slim = isinstance(model_config, KiwiLM2SlimConfig)
-        for mixer_name in model_config.mixer_schedule:
+        if isinstance(model_config, KiwiLM2SlimV3Config):
+            mlp_schedule = model_config.mlp_schedule
+        elif isinstance(model_config, KiwiLM2SlimConfig):
+            mlp_schedule = ("hadamard",) * len(model_config.mixer_schedule)
+        else:
+            mlp_schedule = ("swiglu",) * len(model_config.mixer_schedule)
+        for mixer_name, mlp_kind in zip(
+            model_config.mixer_schedule, mlp_schedule, strict=True
+        ):
             if mixer_name == "gqa":
                 mixer: KiwiLM2GQA | XXLCausalGatedConv = KiwiLM2GQA(model_config)
             else:
@@ -358,7 +372,7 @@ class KiwiLM2LM(CausalLanguageModel):
                     dropout=model_config.dropout,
                 )
                 conv_index += 1
-            blocks.append(KiwiLM2Block(model_config, mixer, slim=slim))
+            blocks.append(KiwiLM2Block(model_config, mixer, mlp_kind=mlp_kind))
         self.blocks = nn.ModuleList(blocks)
         self.final_norm = RMSNorm(model_config.d_model, eps=model_config.rms_norm_eps)
         self.lm_head = nn.Linear(model_config.d_model, model_config.vocab_size, bias=False)
@@ -366,7 +380,7 @@ class KiwiLM2LM(CausalLanguageModel):
         for module in self.modules():
             if isinstance(module, RMSNorm):
                 nn.init.ones_(module.weight)
-        if slim:
+        if isinstance(model_config, KiwiLM2SlimConfig):
             for module in self.modules():
                 if isinstance(module, HadamardMLP):
                     nn.init.ones_(module.input_scale)
@@ -423,7 +437,9 @@ class KiwiLM2LM(CausalLanguageModel):
 
 
 def _build_kiwilm2(config: ModelConfig) -> CausalLanguageModel:
-    if not isinstance(config, KiwiLM2Config) or isinstance(config, KiwiLM2SlimConfig):
+    if not isinstance(config, KiwiLM2Config) or isinstance(
+        config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config)
+    ):
         raise TypeError("kiwilm2 requires KiwiLM2Config")
     return KiwiLM2LM(config)
 
@@ -434,8 +450,15 @@ def _build_kiwilm2_slim(config: ModelConfig) -> CausalLanguageModel:
     return KiwiLM2LM(config)
 
 
+def _build_kiwilm2_slim_v3(config: ModelConfig) -> CausalLanguageModel:
+    if not isinstance(config, KiwiLM2SlimV3Config):
+        raise TypeError("kiwilm2_slim_v3 requires KiwiLM2SlimV3Config")
+    return KiwiLM2LM(config)
+
+
 register_model("kiwilm2", _build_kiwilm2)
 register_model("kiwilm2_slim", _build_kiwilm2_slim)
+register_model("kiwilm2_slim_v3", _build_kiwilm2_slim_v3)
 
 
 __all__ = [

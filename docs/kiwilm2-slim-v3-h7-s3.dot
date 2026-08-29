@@ -8,7 +8,7 @@ digraph KiwiLM2 {
         splines=ortho,
         fontname="Helvetica",
         fontsize=18,
-        label="KiwiLM 2 Slim v2 — Frozen Hybrid Language Model",
+        label="KiwiLM 2 Slim v3 H7/S3 — Frozen Hybrid Language Model",
         labelloc=t
     ];
 
@@ -38,14 +38,14 @@ digraph KiwiLM2 {
     block_5 [label="Block 5\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
     block_6 [label="Block 6\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
     block_7 [label="Block 7\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
-    block_8 [label="Block 8\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
-    block_9 [label="Block 9\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
-    block_10 [label="Block 10\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → Gated Hadamard MLP 512-wide\nindependent signed D₁/D₂/D₃ diagonals\nH(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224 → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
+    block_8 [label="Block 8\nPre-RMSNorm → XXL causal gated convolution • k=31\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → SwiGLU FFN\n512 → 1,536 gate/up → 512 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_9 [label="Block 9\nPre-RMSNorm → XXL causal gated convolution • k=63\npointwise 512→1,024 • depthwise conv • gated output → residual\nPre-RMSNorm → SwiGLU FFN\n512 → 1,536 gate/up → 512 → residual", fillcolor="#FEF3C7", color="#F59E0B"];
+    block_10 [label="Block 10\nPre-RMSNorm → GQA • 8Q/2KV heads\ncached RoPE • causal global mixing → residual\nPre-RMSNorm → SwiGLU FFN\n512 → 1,536 gate/up → 512 → residual", fillcolor="#EDE9FE", color="#8B5CF6"];
 
     final_norm [label="Final RMSNorm\n512 channels", fillcolor="#E2E8F0", color="#64748B"];
     lm_head [label="Tied language-model head\nLinear 512 → 32,000 • no bias", fillcolor="#F3E8FF", color="#A855F7"];
     logits [label="Next-token logits\n[B, T, 32,000]", fillcolor="#FFE4E6", color="#F43F5E"];
-    summary [shape=note, style="filled", label="40,690,186 parameters\n7,528,970 dense/non-embedding\n16,777,216 n-gram memory\n10 Hadamard + 0 SwiGLU blocks\n52,243,456 estimated FLOPs/token\n1 MiB fp16 KV cache at T=512", fillcolor="#F1F5F9", color="#94A3B8"];
+    summary [shape=note, style="filled", label="47,758,855 parameters\n14,597,639 dense/non-embedding\n16,777,216 n-gram memory\n7 Hadamard + 3 SwiGLU blocks\n66,305,536 estimated FLOPs/token\n1 MiB fp16 KV cache at T=512", fillcolor="#F1F5F9", color="#94A3B8"];
     cache [shape=note, style="filled", label="Cached autoregressive decoding\n4 GQA KV states + 6 convolution histories\ncontext rollover triggers a bounded prefill", fillcolor="#EFF6FF", color="#60A5FA"];
 
     input -> token_embedding;

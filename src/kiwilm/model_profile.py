@@ -6,8 +6,8 @@ from typing import Any
 
 from torch import nn
 
-from kiwilm.config import KiwiLM2SlimConfig
-from kiwilm.models.kiwilm2 import KiwiLM2LM
+from kiwilm.config import KiwiLM2SlimConfig, KiwiLM2SlimV3Config
+from kiwilm.models.kiwilm2 import GatedHadamardMLP, HadamardMLP, KiwiLM2LM, SwiGLU
 
 
 def _unique_parameters(module: nn.Module) -> dict[int, nn.Parameter]:
@@ -55,7 +55,8 @@ def profile_kiwilm2(
     convolution_flops = 0
     mlp_flops = 0
     kernel_index = 0
-    for mixer in config.mixer_schedule:
+    mlp_schedule: list[str] = []
+    for mixer, block in zip(config.mixer_schedule, model.blocks, strict=True):
         if mixer == "gqa":
             kv_width = config.num_kv_heads * head_dim
             projection_flops += 2 * (d_model * d_model + 2 * d_model * kv_width + d_model * d_model)
@@ -65,16 +66,23 @@ def profile_kiwilm2(
             kernel_index += 1
             projection_flops += 2 * (2 * d_model * d_model + d_model * d_model)
             convolution_flops += 2 * d_model * kernel
-        if isinstance(config, KiwiLM2SlimConfig):
-            transforms = 3 if config.hadamard_variant == "gated_v2" else 2
+        if isinstance(block.mlp, HadamardMLP):
+            transforms = 2
+            mlp_schedule.append("hadamard")
+            mlp_flops += 2 * transforms * d_model * (d_model.bit_length() - 1)
+        elif isinstance(block.mlp, GatedHadamardMLP):
+            transforms = 3
+            mlp_schedule.append("hadamard")
             # Each FWHT has width*log2(width) butterfly outputs. Count an
             # add/sub as two scalar operations to retain the existing estimate.
             mlp_flops += 2 * transforms * d_model * (d_model.bit_length() - 1)
-            if config.hadamard_variant == "gated_v2":
-                # Three affine diagonals and one elementwise gate product.
-                mlp_flops += 7 * d_model
-        else:
+            # Three affine diagonals and one elementwise gate product.
+            mlp_flops += 7 * d_model
+        elif isinstance(block.mlp, SwiGLU):
+            mlp_schedule.append("swiglu")
             mlp_flops += 2 * 3 * d_model * config.swiglu_dim
+        else:
+            raise TypeError(f"unsupported KiwiLM 2 MLP: {type(block.mlp).__name__}")
     lm_head_flops = 2 * d_model * config.vocab_size
     flops_per_token = (
         projection_flops + attention_flops + convolution_flops + mlp_flops + lm_head_flops
@@ -82,8 +90,20 @@ def profile_kiwilm2(
     return {
         "architecture": config.architecture,
         "hadamard_variant": (
-            config.hadamard_variant if isinstance(config, KiwiLM2SlimConfig) else None
+            config.hadamard_variant
+            if isinstance(config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config))
+            else None
         ),
+        "upper_swiglu_blocks": (
+            config.upper_swiglu_blocks
+            if isinstance(config, KiwiLM2SlimV3Config)
+            else None
+        ),
+        "mlp_schedule": mlp_schedule,
+        "mlp_counts": {
+            "hadamard": mlp_schedule.count("hadamard"),
+            "swiglu": mlp_schedule.count("swiglu"),
+        },
         "parameters": {
             "total": total,
             "dense_non_embedding": dense_parameters,

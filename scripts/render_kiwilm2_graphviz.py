@@ -8,7 +8,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import KiwiLM2LM
 
@@ -20,15 +20,18 @@ def _format_count(value: int) -> str:
 def build_dot(config: KiwiLM2Config) -> str:
     """Build a DOT graph directly from one frozen KiwiLM 2 configuration."""
 
-    slim = isinstance(config, KiwiLM2SlimConfig)
-    variant = "KiwiLM 2 Slim" if slim else "KiwiLM 2"
-    feed_forward = (
-        "Gated Hadamard MLP 512-wide\\n"
-        "independent signed D₁/D₂/D₃ diagonals\\n"
-        "H(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224"
-        if slim
-        else "SwiGLU FFN\\n512 → 1,536 gate/up → 512"
-    )
+    if isinstance(config, KiwiLM2SlimV3Config):
+        variant = (
+            f"KiwiLM 2 Slim v3 H{10 - config.upper_swiglu_blocks}/"
+            f"S{config.upper_swiglu_blocks}"
+        )
+        mlp_schedule = config.mlp_schedule
+    elif isinstance(config, KiwiLM2SlimConfig):
+        variant = "KiwiLM 2 Slim v2"
+        mlp_schedule = ("hadamard",) * len(config.mixer_schedule)
+    else:
+        variant = "KiwiLM 2"
+        mlp_schedule = ("swiglu",) * len(config.mixer_schedule)
     model = KiwiLM2LM(config)
     profile = profile_kiwilm2(model)
     parameters = profile["parameters"]
@@ -57,6 +60,13 @@ def build_dot(config: KiwiLM2Config) -> str:
             )
             fill = "#FEF3C7"
             color = "#F59E0B"
+        feed_forward = (
+            "Gated Hadamard MLP 512-wide\\n"
+            "independent signed D₁/D₂/D₃ diagonals\\n"
+            "H(D₃(SiLU(H(D₁x)) ⊙ H(D₂x))) × learned α=0.224"
+            if mlp_schedule[index - 1] == "hadamard"
+            else "SwiGLU FFN\\n512 → 1,536 gate/up → 512"
+        )
         block_lines.append(
             f'    {node} [label="Block {index}\\nPre-RMSNorm → {mixer_label} → residual\\n'
             f'Pre-RMSNorm → {feed_forward} → residual", fillcolor="{fill}", '
@@ -70,6 +80,8 @@ def build_dot(config: KiwiLM2Config) -> str:
         f"{_format_count(parameters['total'])} parameters\\n"
         f"{_format_count(parameters['dense_non_embedding'])} dense/non-embedding\\n"
         f"{_format_count(parameters['ngram'])} n-gram memory\\n"
+        f"{profile['mlp_counts']['hadamard']} Hadamard + "
+        f"{profile['mlp_counts']['swiglu']} SwiGLU blocks\\n"
         f"{_format_count(flops)} estimated FLOPs/token\\n"
         f"{cache_bytes // (1024 * 1024)} MiB fp16 KV cache at T=512"
     )
@@ -141,6 +153,14 @@ def main() -> int:
     variants = (
         ("kiwilm2", KiwiLM2Config()),
         ("kiwilm2-slim", KiwiLM2SlimConfig()),
+        (
+            "kiwilm2-slim-v3-h7-s3",
+            KiwiLM2SlimV3Config(upper_swiglu_blocks=3),
+        ),
+        (
+            "kiwilm2-slim-v3-h6-s4",
+            KiwiLM2SlimV3Config(upper_swiglu_blocks=4),
+        ),
     )
     for name, config in variants:
         dot_path = args.output_dir / f"{name}.dot"

@@ -170,7 +170,7 @@ def _render_report(
     lines = [
         "# KiwiLM generation comparison report",
         "",
-        "The outputs below use the same prompt and sampling seed for both models.",
+        "The outputs below use the same prompt and sampling seed for every model.",
         "",
     ]
     grouped: dict[tuple[str, str], dict[str, Mapping[str, Any]]] = {}

@@ -9,7 +9,12 @@ import pytest
 
 import kiwilm.cli as cli
 from kiwilm.cli import build_parser
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, ModelConfig
+from kiwilm.config import (
+    KiwiLM2Config,
+    KiwiLM2SlimConfig,
+    KiwiLM2SlimV3Config,
+    ModelConfig,
+)
 
 
 def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
@@ -36,6 +41,15 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
             "4096",
         ]
     )
+    slim_v3 = parser.parse_args(
+        [
+            "train",
+            "--architecture",
+            "kiwilm2_slim_v3",
+            "--upper-swiglu-blocks",
+            "3",
+        ]
+    )
 
     assert dense.architecture == "kiwilm2"
     assert dense.context_length == 512
@@ -51,6 +65,8 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
     assert slim.bigram_buckets == 8_192
     assert slim.trigram_buckets == 4_096
     assert slim.compile_mode == "eager"
+    assert slim_v3.architecture == "kiwilm2_slim_v3"
+    assert slim_v3.upper_swiglu_blocks == 3
 
     with pytest.raises(SystemExit):
         parser.parse_args(["train", "--architecture", "historical_model"])
@@ -101,6 +117,11 @@ def test_cli_sft_and_cpt_keep_checkpoint_initialization_contracts() -> None:
     [
         ("kiwilm2", KiwiLM2Config, Path("runs/kiwilm2")),
         ("kiwilm2_slim", KiwiLM2SlimConfig, Path("runs/kiwilm2-slim")),
+        (
+            "kiwilm2_slim_v3",
+            KiwiLM2SlimV3Config,
+            Path("runs/kiwilm2-slim-v3"),
+        ),
     ],
 )
 def test_train_command_builds_active_config_and_default_output(
@@ -158,6 +179,15 @@ def test_train_command_builds_active_config_and_default_output(
     assert captured["kwargs"]["compile_model"] is False
 
 
+def test_upper_swiglu_flag_is_restricted_to_slim_v3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_data = SimpleNamespace(tokenizer=SimpleNamespace(vocab_size=320))
+    monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: fake_data)
+    with pytest.raises(ValueError, match="valid only for kiwilm2_slim_v3"):
+        cli.main(["train", "--architecture", "kiwilm2", "--upper-swiglu-blocks", "3"])
+
+
 def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_data = SimpleNamespace(tokenizer=SimpleNamespace(vocab_size=320))
     monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: fake_data)
@@ -167,6 +197,16 @@ def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:
                 "train",
                 "--architecture",
                 "kiwilm2_slim",
+                "--optimizer",
+                "muon",
+            ]
+        )
+    with pytest.raises(ValueError, match="restricted to kiwilm2"):
+        cli.main(
+            [
+                "train",
+                "--architecture",
+                "kiwilm2_slim_v3",
                 "--optimizer",
                 "muon",
             ]

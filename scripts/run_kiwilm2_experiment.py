@@ -10,9 +10,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
 from kiwilm.data import PreparedTokenData
-from kiwilm.diagnostics import model_health_report
+from kiwilm.diagnostics import cached_generation_parity_report, model_health_report
 from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import KiwiLM2LM, build_model
@@ -24,6 +24,7 @@ PHASE_TOKENS = {
     "final-500m": 500_000_000,
     "final-1b": 1_000_000_000,
 }
+CANDIDATES = ("dense", "slim-v2", "slim-v3-h7s3", "slim-v3-h6s4")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -63,6 +64,13 @@ def parser() -> argparse.ArgumentParser:
         help="runtime for the gated Slim candidate",
     )
     result.add_argument(
+        "--candidates",
+        nargs="+",
+        choices=CANDIDATES,
+        default=("dense", "slim-v2"),
+        help="AdamW candidates to train; v3-only runs can omit existing controls",
+    )
+    result.add_argument(
         "--resume-existing",
         action="store_true",
         help="resume each candidate from its output directory's latest.pt",
@@ -79,6 +87,8 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    if len(set(args.candidates)) != len(args.candidates):
+        raise ValueError("--candidates cannot contain duplicates")
     resolved_device = choose_device(args.device)
     max_tokens = args.max_tokens if args.max_tokens is not None else PHASE_TOKENS[args.phase]
     if args.batch_size < 1 or args.grad_accum_steps < 1:
@@ -106,10 +116,22 @@ def main() -> int:
         "dropout": 0.0,
         "tie_embeddings": True,
     }
-    configs = {
-        "kiwilm2-adamw": KiwiLM2Config(**common),
-        "kiwilm2-slim-gated-v2-adamw": KiwiLM2SlimConfig(**common),
+    available_configs = {
+        "dense": ("kiwilm2-adamw", KiwiLM2Config(**common)),
+        "slim-v2": (
+            "kiwilm2-slim-gated-v2-adamw",
+            KiwiLM2SlimConfig(**common),
+        ),
+        "slim-v3-h7s3": (
+            "kiwilm2-slim-v3-h7-s3-adamw",
+            KiwiLM2SlimV3Config(**common, upper_swiglu_blocks=3),
+        ),
+        "slim-v3-h6s4": (
+            "kiwilm2-slim-v3-h6-s4-adamw",
+            KiwiLM2SlimV3Config(**common, upper_swiglu_blocks=4),
+        ),
     }
+    configs = dict(available_configs[candidate] for candidate in args.candidates)
     settings = TrainConfig(
         max_steps=max_steps,
         max_tokens=max_tokens,
@@ -131,6 +153,7 @@ def main() -> int:
         "tokenizer_vocab_size": source.tokenizer.vocab_size,
         "max_tokens": max_tokens,
         "slim_compile_mode": args.slim_compile_mode,
+        "candidates": list(args.candidates),
         "resume_existing": args.resume_existing,
         "shared_train_config": settings.to_dict(),
         "runs": {},
@@ -152,7 +175,8 @@ def main() -> int:
             device=resolved_device,
             resume_from=resume_from,
             compile_model=(
-                isinstance(config, KiwiLM2SlimConfig) and args.slim_compile_mode == "compiled"
+                isinstance(config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config))
+                and args.slim_compile_mode == "compiled"
             ),
         )
         trained, _ = load_trained_model(
@@ -170,12 +194,14 @@ def main() -> int:
         )
         assert isinstance(trained, KiwiLM2LM)
         health = model_health_report(trained, diagnostic_inputs, diagnostic_targets)
+        cached_generation = cached_generation_parity_report(trained, diagnostic_inputs)
         del trained
         manifest["runs"][label] = {
             "config": config.to_dict(),
             "profile": profile,
             "summary": summary,
             "health": health,
+            "cached_generation": cached_generation,
         }
     for muon_lr in args.muon_lrs:
         label = f"kiwilm2-muon-{muon_lr:g}"

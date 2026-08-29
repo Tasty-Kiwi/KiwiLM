@@ -10,7 +10,7 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 
-from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
 from kiwilm.models.kiwilm2 import KiwiLM2LM
 
 
@@ -130,7 +130,7 @@ def select_slim_runtime(benchmark: dict[str, Any]) -> tuple[str, str]:
 
 def benchmark_slim_runtime(
     dense_config: KiwiLM2Config,
-    slim_config: KiwiLM2SlimConfig,
+    slim_config: KiwiLM2SlimConfig | KiwiLM2SlimV3Config,
     *,
     device: torch.device,
     batch_size: int,
@@ -142,7 +142,7 @@ def benchmark_slim_runtime(
     """Benchmark Dense eager and gated Slim eager/compiled on one device."""
 
     if slim_config.hadamard_variant != "gated_v2":
-        raise ValueError("compile selection is defined only for gated Slim v2")
+        raise ValueError("compile selection is defined only for gated Slim models")
     common = {
         "device": device,
         "batch_size": batch_size,
