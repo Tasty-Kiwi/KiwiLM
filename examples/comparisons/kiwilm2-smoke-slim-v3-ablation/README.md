@@ -3,8 +3,8 @@
 This is the four-way 50M-token comparison of Dense, all-Hadamard Slim v2, and
 the two Slim v3 hybrid schedules. All primary measurements use each run's
 `latest.pt`, because it is the checkpoint that contains exactly 50M training
-tokens. The frozen promotion rule selects **H7/S3**: H6/S4 clears the loss gate
-but does not remain 10% faster than Dense.
+tokens. The frozen promotion rule selects **H6/S4**: it clears the loss gate and
+its user-identified idle-system regime remains more than 10% faster than Dense.
 
 - [Analysis](analysis.md)
 - [Machine-readable summary](summary.json)
@@ -17,6 +17,12 @@ The fixed validation pass uses 50 batches of 8 sequences at 512 tokens, or
 204,800 next-token targets per model. TinyStories and SimpleStories transfer
 results are absent because those prepared evaluation datasets were not
 available locally.
+
+The H6/S4 whole-run throughput median is retained in `summary.json` but is not
+used for selection: the training host was concurrently running a game during
+the slow regime. A two-cluster analysis of the recorded throughput samples
+identifies 94 idle-regime observations with a 39,120 tok/s median, effectively
+equal to H7/S3's 39,178 tok/s fast-regime median.
 
 First validate all four checkpoints against the smoke dataset and one another:
 

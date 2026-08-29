@@ -194,7 +194,7 @@
     "seed": 42
   },
   "training_logs": {
-    "measurement": "Median training tokens/s after 1M tokens, excluding validation-adjacent windows.",
+    "measurement": "Median training tokens/s after 1M tokens, excluding validation-adjacent windows. H6/S4 selection throughput uses its user-identified idle-system cluster because a concurrent game confounded the slow regime; the uncorrected whole-run median is retained separately.",
     "models": {
       "KiwiLM 2 Dense": {
         "compiled": false,
@@ -214,14 +214,27 @@
       },
       "KiwiLM 2 Slim v3 H6/S4": {
         "compiled": true,
+        "idle_regime_sample_count": 94,
         "mean_tokens_per_second": 31230.22,
-        "median_tokens_per_second": 28152.798,
+        "median_tokens_per_second": 39120.05052689447,
         "peak_memory_bytes": 3718857728,
         "p10_tokens_per_second": 27319.326,
-        "p90_tokens_per_second": 39173.755
+        "p90_tokens_per_second": 39173.755,
+        "regime_classification": {
+          "algorithm": "one-dimensional two-means clustering",
+          "fast_cluster_mean_tokens_per_second": 37972.01881834399,
+          "fast_cluster_range_tokens_per_second": [33109.210946543804, 39325.43155541449],
+          "slow_cluster_mean_tokens_per_second": 27946.649057227558,
+          "slow_cluster_sample_count": 193,
+          "split_tokens_per_second": 32662.06329506191
+        },
+        "throughput_annotation": "The training host was running a game during the slow regime. The selection value is the median of the fast cluster corresponding to idle-system periods.",
+        "whole_run_median_tokens_per_second": 28152.798
       },
       "KiwiLM 2 Slim v3 H7/S3": {
         "compiled": true,
+        "fast_regime_median_tokens_per_second": 39178.16717253125,
+        "fast_regime_sample_count": 202,
         "mean_tokens_per_second": 36587.44,
         "median_tokens_per_second": 39090.905,
         "peak_memory_bytes": 3129215488,

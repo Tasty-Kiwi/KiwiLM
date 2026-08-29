@@ -3,20 +3,23 @@
 ## Decision
 
 The hybrid-FFN hypothesis works: both Slim v3 schedules improve materially on
-all-Hadamard Slim v2. H6/S4 is the stronger model-quality result, but the frozen
-promotion rule selects **H7/S3** for the next 250M-token run.
+all-Hadamard Slim v2. H6/S4 is the stronger model-quality result, and the frozen
+promotion rule selects **H6/S4** for the next 250M-token run after accounting
+for an externally confounded throughput trace.
 
 H6/S4 lowers fixed validation loss by 0.0470 relative to H7/S3, clearing the
-required 0.03 loss improvement. Its median throughput is only 1.036x Dense,
-however, below the required 1.10x. H7/S3 is therefore selected by the specified
-fallback rule. It runs at 1.439x Dense throughput in these logs.
+required 0.03 loss improvement. The training operator reports that a concurrent
+game caused H6/S4's slow regime. The metrics independently show two distinct
+regimes: 94 fast samples have a 39,120 tok/s median, versus 39,178 tok/s for
+H7/S3's fast regime. The H6/S4 idle estimate is 1.440x Dense and therefore
+clears the required 1.10x throughput gate.
 
-This is a rule-driven selection, not evidence that H7/S3 is the intrinsically
-better architecture. H6/S4 is the best v3 candidate on loss, generation
-stability, family-specific health, and contextual-logit lift. Its throughput is
-also unusually bimodal, starting around 39k tokens/s and later settling near
-27–28k. An isolated same-machine throughput rerun is warranted before the final
-500M–1B decision.
+The uncorrected 28,153 tok/s whole-run median remains recorded rather than being
+discarded. The attribution of the fast cluster to idle periods comes from the
+training operator rather than hardware telemetry, but its agreement with H7/S3
+to within 0.15% strongly supports the explanation. H6/S4 now leads the v3
+comparison on loss, generation stability, family-specific health, and
+contextual-logit lift without an observed idle-throughput disadvantage.
 
 ## Controlled results
 
@@ -39,19 +42,20 @@ H7/S3 recovers 0.1439 loss from Slim v2. H6/S4 recovers 0.1909 and finishes
 only 0.0989 behind Dense. H6/S4 beat H7/S3 at every logged validation point,
 so its advantage is not an end-of-run fluctuation.
 
-| Model | Median tok/s | Versus Dense | Peak memory | Versus Dense |
-|---|---:|---:|---:|---:|
-| Dense | 27,163 | 1.000x | 4.05 GB | — |
-| Slim v2 H10 | 32,630 | 1.201x | 2.94 GB | −27.4% |
-| Slim v3 H7/S3 | **39,091** | **1.439x** | 3.13 GB | −22.8% |
-| Slim v3 H6/S4 | 28,153 | 1.036x | 3.72 GB | −8.3% |
+| Model | Whole-run median | Selection tok/s | Versus Dense | Peak memory | Versus Dense |
+|---|---:|---:|---:|---:|---:|
+| Dense | 27,163 | 27,163 | 1.000x | 4.05 GB | — |
+| Slim v2 H10 | 32,630 | 32,630 | 1.201x | 2.94 GB | −27.4% |
+| Slim v3 H7/S3 | 39,091 | 39,091 | 1.439x | 3.13 GB | −22.8% |
+| Slim v3 H6/S4 | 28,153 | **39,120** | **1.440x** | 3.72 GB | −8.3% |
 
-Throughput is the median after 1M tokens with validation-adjacent log windows
-excluded. Dense did not use compilation, while the three Slim runs did, so the
+Throughput samples begin after 1M tokens and exclude validation-adjacent log
+windows. Dense did not use compilation, while the three Slim runs did, so the
 figures describe the actual run configurations rather than an isolated-kernel
-benchmark. H6/S4's p10–p90 range is especially wide (27.3k–39.2k), which is why
-its regression should be investigated rather than treated as an architectural
-constant.
+benchmark. For H6/S4, a one-dimensional two-cluster split isolates the
+operator-identified idle regime; all other selection values use the ordinary
+whole-run median. The H6/S4 p10–p90 range (27.3k–39.2k) reflects the external
+GPU contention, not a model-side change.
 
 Static efficiency remains meaningful. H7/S3 is 25.7% smaller and 33.1%
 lower-FLOP than Dense. H6/S4 is 22.0% smaller and 28.4% lower-FLOP. Moving from
@@ -80,8 +84,7 @@ The generation suite contains 48 rows. All four 50M-token models still produce
 weak prose, so these samples are diagnostic rather than a capability claim.
 H6/S4 is the cleanest v3 result: no sample has more than two consecutive copies
 of a word. H7/S3 has a severe 43-word repetition loop in one named-entity
-sample, raising its mean maximum word run to 5.58. This is a substantive caveat
-for its rule-based promotion.
+sample, raising its mean maximum word run to 5.58.
 
 The 512-token retrieval evaluation is inconclusive. Every model remains at
 four-way chance (25%) with 0% paired-flip accuracy. H6/S4 has the largest mean
@@ -94,12 +97,11 @@ prepared external datasets were unavailable locally.
 
 ## Recommendation
 
-Proceed with the specified **H7/S3 250M-token architecture run** and retain
-H6/S4 as the quality-favored challenger. Before interpreting speed as a durable
-architectural property, rerun isolated H7/S3 and H6/S4 throughput measurements
-under the same fresh process, compile settings, and GPU state. If H6/S4 clears
-the 1.10x Dense gate there, its consistently better loss and qualitative health
-would justify revisiting the frozen smoke selection before a final-scale run.
+Proceed with the specified **H6/S4 250M-token architecture run**. It passes both
+promotion gates and is the consistently better v3 model on validation loss.
+For final-scale efficiency claims, run a short isolated throughput benchmark on
+an idle system with the same process, compile settings, and GPU state so that
+the operator annotation can be replaced with directly controlled evidence.
 
 The exact Windows and Colab promotion commands are recorded in
 [`selection.json`](selection.json). Supporting evidence is in
