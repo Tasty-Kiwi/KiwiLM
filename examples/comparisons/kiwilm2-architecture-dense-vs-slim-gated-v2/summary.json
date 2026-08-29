@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "title": "KiwiLM 2 Dense vs KiwiLM 2 Slim Gated v2: 250M architecture run",
+  "data": {
+    "fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+    "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+    "train_tokens": 250000000,
+    "validation_tokens": 2000000,
+    "vocab_size": 32000
+  },
+  "training": {
+    "device": "cuda",
+    "precision": "bf16",
+    "optimizer": "adamw",
+    "seed": 42,
+    "batch_size": 8,
+    "grad_accum_steps": 4,
+    "context_length": 512,
+    "validation_batches": 200,
+    "validation_targets": 819200,
+    "models": {
+      "KiwiLM 2 Dense": {
+        "checkpoint": "runs/kiwilm2-architecture/kiwilm2-adamw/best.pt",
+        "compiled": false,
+        "best_step": 14000,
+        "best_tokens_seen": 229376000,
+        "best_validation_loss": 3.7628302145004273,
+        "best_validation_perplexity": 43.07015141002609,
+        "final_step": 15259,
+        "final_tokens_seen": 250000000,
+        "final_validation_loss": 3.775666124820709,
+        "final_validation_perplexity": 43.62655937287457,
+        "median_tokens_per_second": 27734.480739135728,
+        "peak_accelerator_memory_bytes": 4050326016
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "checkpoint": "runs/kiwilm2-architecture/kiwilm2-slim-gated-v2-adamw/best.pt",
+        "compiled": true,
+        "best_step": 15000,
+        "best_tokens_seen": 245760000,
+        "best_validation_loss": 4.015918585062027,
+        "best_validation_perplexity": 55.47422980394756,
+        "final_step": 15259,
+        "final_tokens_seen": 250000000,
+        "final_validation_loss": 4.030960941314698,
+        "final_validation_perplexity": 56.315000665363854,
+        "median_tokens_per_second": 44099.96372195032,
+        "peak_accelerator_memory_bytes": 3205227008
+      }
+    }
+  },
+  "static_profile": {
+    "sequence_length": 512,
+    "models": {
+      "KiwiLM 2 Dense": {
+        "total_parameters": 64252416,
+        "dense_non_embedding_parameters": 31091200,
+        "token_embedding_parameters": 16384000,
+        "ngram_parameters": 16777216,
+        "estimated_flops_per_token": 99117056,
+        "kv_cache_bytes": 1048576
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "total_parameters": 40690186,
+        "dense_non_embedding_parameters": 7528970,
+        "token_embedding_parameters": 16384000,
+        "ngram_parameters": 16777216,
+        "estimated_flops_per_token": 52243456,
+        "kv_cache_bytes": 1048576
+      }
+    }
+  },
+  "health_probe": {
+    "models": {
+      "KiwiLM 2 Dense": {
+        "loss": 4.271193504333496,
+        "logits_rms": 3.980159282684326,
+        "health_passed": true,
+        "deepest_to_first_mlp_gradient_ratio": 1.7133185167729819,
+        "maximum_mixer_output_rms": 0.6848134994506836,
+        "final_post_mlp_residual_rms": 2.3217806816101074
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "loss": 4.529521465301514,
+        "logits_rms": 4.035569190979004,
+        "health_passed": false,
+        "deepest_to_first_mlp_gradient_ratio": 0.06564547935874823,
+        "maximum_mixer_output_rms": 0.9275685548782349,
+        "final_post_mlp_residual_rms": 1.8135149478912354,
+        "learned_residual_scale_minimum": 0.17503458261489868,
+        "learned_residual_scale_mean": 0.3633667916059494,
+        "learned_residual_scale_maximum": 0.5127119421958923
+      }
+    }
+  },
+  "generation": {
+    "suite": "eval/story-consistency-prompts.json",
+    "rows": 24,
+    "cache": "off",
+    "device": "cpu",
+    "models": {
+      "KiwiLM 2 Dense": {
+        "mean_distinct_unigram_fraction": 0.4002137470772234,
+        "mean_maximum_consecutive_word_run": 13.416666666666666,
+        "maximum_consecutive_word_run": 146,
+        "mean_repeated_fourgram_fraction": 0.29645086278325183
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "mean_distinct_unigram_fraction": 0.4202097376975131,
+        "mean_maximum_consecutive_word_run": 1.8333333333333333,
+        "maximum_consecutive_word_run": 4,
+        "mean_repeated_fourgram_fraction": 0.15998847509494143
+      }
+    }
+  },
+  "retrieval": {
+    "context_length": 512,
+    "seed": 42,
+    "distances": [32, 128, 256, 384, 448],
+    "pairs_per_distance": 32,
+    "device": "cpu",
+    "models": {
+      "KiwiLM 2 Dense": {
+        "candidate_accuracy": 0.25,
+        "paired_flip_accuracy": 0.0,
+        "mean_target_vs_best_distractor_margin": -0.6516265444457531,
+        "mean_contextual_logit_lift": 0.8754143442958593
+      },
+      "KiwiLM 2 Slim Gated v2": {
+        "candidate_accuracy": 0.3,
+        "paired_flip_accuracy": 0.025,
+        "mean_target_vs_best_distractor_margin": -0.5450715109705925,
+        "mean_contextual_logit_lift": 0.6318090967833996
+      }
+    }
+  }
+}
