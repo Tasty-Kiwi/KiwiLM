@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "title": "KiwiLM 2 Dense AdamW vs Muon 0.02: 250M architecture run",
+  "data": {
+    "fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+    "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+    "train_tokens": 250000000,
+    "validation_tokens": 2000000,
+    "vocab_size": 32000
+  },
+  "provenance": {
+    "comparable": true,
+    "shared_model_configuration": true,
+    "shared_data_fingerprint": true,
+    "shared_seed": true,
+    "shared_token_budget": true,
+    "shared_data_order": true,
+    "intentional_training_difference": "optimizer",
+    "primary_checkpoint_policy": "latest checkpoints at exactly 250M tokens",
+    "best_checkpoint_warning": "best checkpoints occur at different token counts and are not used for generation or retrieval"
+  },
+  "training": {
+    "device": "cuda",
+    "precision": "bf16",
+    "seed": 42,
+    "batch_size": 8,
+    "grad_accum_steps": 4,
+    "context_length": 512,
+    "validation_batches": 200,
+    "validation_targets": 819200,
+    "throughput_definition": "median valid tokens/s from 5M to below 250M tokens, excluding validation-adjacent steps",
+    "models": {
+      "KiwiLM 2 Dense AdamW": {
+        "checkpoint": "runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt",
+        "optimizer": "adamw",
+        "compiled": false,
+        "best_step": 14000,
+        "best_tokens_seen": 229376000,
+        "best_validation_loss": 3.7628302145004273,
+        "best_validation_perplexity": 43.07015141002609,
+        "final_step": 15259,
+        "final_tokens_seen": 250000000,
+        "final_validation_loss": 3.775666124820709,
+        "final_validation_perplexity": 43.62655937287457,
+        "median_tokens_per_second": 27737.879275585794,
+        "peak_accelerator_memory_bytes": 4053881344
+      },
+      "KiwiLM 2 Dense Muon 0.02": {
+        "checkpoint": "runs/kiwilm2-architecture/kiwilm2-muon-0.02/latest.pt",
+        "optimizer": "muon",
+        "muon_learning_rate": 0.02,
+        "auxiliary_adamw_learning_rate": 0.0003,
+        "compiled": false,
+        "best_step": 15000,
+        "best_tokens_seen": 245760000,
+        "best_validation_loss": 3.7581850147247313,
+        "best_validation_perplexity": 42.870545914979296,
+        "final_step": 15259,
+        "final_tokens_seen": 250000000,
+        "final_validation_loss": 3.7698613095283506,
+        "final_validation_perplexity": 43.37404885138886,
+        "median_tokens_per_second": 21141.227567999827,
+        "peak_accelerator_memory_bytes": 3929362944
+      }
+    }
+  },
+  "tokens_to_loss": {
+    "evaluation_granularity_steps": 500,
+    "targets": {
+      "4.4": {
+        "adamw_tokens": 57344000,
+        "muon_tokens": 65536000
+      },
+      "4.0": {
+        "adamw_tokens": 122880000,
+        "muon_tokens": 172032000
+      },
+      "3.9": {
+        "adamw_tokens": 155648000,
+        "muon_tokens": 196608000
+      },
+      "3.8": {
+        "adamw_tokens": 204800000,
+        "muon_tokens": 229376000
+      },
+      "3.78": {
+        "adamw_tokens": 229376000,
+        "muon_tokens": 229376000
+      }
+    }
+  },
+  "static_profile": {
+    "sequence_length": 512,
+    "total_parameters": 64252416,
+    "dense_non_embedding_parameters": 31091200,
+    "token_embedding_parameters": 16384000,
+    "ngram_parameters": 16777216,
+    "estimated_flops_per_token": 99117056,
+    "kv_cache_bytes": 1048576
+  },
+  "health_probe": {
+    "device": "cpu",
+    "same_validation_batch": true,
+    "models": {
+      "KiwiLM 2 Dense AdamW": {
+        "loss": 4.180140495300293,
+        "logits_rms": 3.968066692352295,
+        "health_passed": true,
+        "deepest_to_first_mlp_gradient_ratio": 2.1005749433418974,
+        "deepest_to_first_mlp_output_rms_ratio": 8.103469215877887,
+        "first_post_mlp_residual_rms": 0.5136964917182922,
+        "final_post_mlp_residual_rms": 2.435065269470215,
+        "cached_generation_parity_passed": true
+      },
+      "KiwiLM 2 Dense Muon 0.02": {
+        "loss": 4.174828052520752,
+        "logits_rms": 4.120721340179443,
+        "health_passed": true,
+        "deepest_to_first_mlp_gradient_ratio": 0.9093910701295923,
+        "deepest_to_first_mlp_output_rms_ratio": 1.9957095348967198,
+        "first_post_mlp_residual_rms": 0.47550368309020996,
+        "final_post_mlp_residual_rms": 1.4052454233169556,
+        "cached_generation_parity_passed": true
+      }
+    }
+  },
+  "generation": {
+    "suite": "eval/story-consistency-prompts.json",
+    "checkpoint_policy": "latest checkpoints at exactly 250M tokens",
+    "rows": 24,
+    "cache": "off",
+    "device": "cpu",
+    "models": {
+      "KiwiLM 2 Dense AdamW": {
+        "mean_distinct_unigram_fraction": 0.4184245718465775,
+        "mean_maximum_consecutive_word_run": 1.25,
+        "maximum_consecutive_word_run": 2,
+        "mean_repeated_fourgram_fraction": 0.19385385779131567
+      },
+      "KiwiLM 2 Dense Muon 0.02": {
+        "mean_distinct_unigram_fraction": 0.3975329725624596,
+        "mean_maximum_consecutive_word_run": 1.3333333333333333,
+        "maximum_consecutive_word_run": 2,
+        "mean_repeated_fourgram_fraction": 0.2719856485013806
+      }
+    }
+  },
+  "retrieval": {
+    "checkpoint_policy": "latest checkpoints at exactly 250M tokens",
+    "context_length": 512,
+    "seed": 42,
+    "distances": [32, 128, 256, 384, 448],
+    "pairs_per_distance": 32,
+    "device": "cpu",
+    "models": {
+      "KiwiLM 2 Dense AdamW": {
+        "candidate_accuracy": 0.2625,
+        "paired_flip_accuracy": 0.0,
+        "mean_target_vs_best_distractor_margin": -0.44649035707116125,
+        "mean_contextual_logit_lift": 0.8097955251112581
+      },
+      "KiwiLM 2 Dense Muon 0.02": {
+        "candidate_accuracy": 0.4625,
+        "paired_flip_accuracy": 0.1,
+        "mean_target_vs_best_distractor_margin": -0.1516295440495014,
+        "mean_contextual_logit_lift": 2.901412701793015
+      }
+    }
+  },
+  "decision": {
+    "adopt_muon_for_final_runs": false,
+    "reason": "Muon 0.02 does not improve tokens-to-loss through most of the measured quality range and is materially slower despite its retrieval advantage.",
+    "next_optimizer_candidate": "muon-0.01"
+  }
+}
