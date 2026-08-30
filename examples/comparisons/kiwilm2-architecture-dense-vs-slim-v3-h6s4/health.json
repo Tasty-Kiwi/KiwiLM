@@ -1,0 +1,48 @@
+{
+  "batch_size": 2,
+  "batches": 5,
+  "context_length": 512,
+  "data_fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+  "device": "cpu",
+  "models": {
+    "KiwiLM 2 Dense": {
+      "final_residual_rms_mean": 2.247716760635376,
+      "health_passes": 5,
+      "maximum_residual_step_ratio_mean": 1.414440643613032,
+      "maximum_residual_step_ratio_range": [
+        1.3545630264915773,
+        1.4709869070776824
+      ],
+      "residual_step_failure_blocks": []
+    },
+    "KiwiLM 2 Slim Gated v2": {
+      "final_residual_rms_mean": 1.7871435165405274,
+      "health_passes": 3,
+      "maximum_residual_step_ratio_mean": 1.0266317276883672,
+      "maximum_residual_step_ratio_range": [
+        1.0261611213987905,
+        1.027199308858748
+      ],
+      "note": "Failures are caused by the Hadamard-family gradient-ratio check, not residual growth.",
+      "residual_step_failure_blocks": []
+    },
+    "KiwiLM 2 Slim v3 H6/S4": {
+      "final_residual_rms_mean": 2.069640564918518,
+      "health_passes": 3,
+      "maximum_residual_step_ratio_mean": 1.4958274165733867,
+      "maximum_residual_step_ratio_range": [
+        1.4370581771360003,
+        1.5651702117292219
+      ],
+      "residual_step_failure_blocks": [
+        9,
+        9
+      ]
+    }
+  },
+  "seed": 141,
+  "thresholds": {
+    "family_gradient_last_to_first_minimum": 0.1,
+    "post_mlp_to_post_mixer_residual_rms_maximum": 1.5
+  }
+}
