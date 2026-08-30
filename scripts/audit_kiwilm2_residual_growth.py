@@ -23,6 +23,54 @@ from kiwilm.models import KiwiLM2LM
 from kiwilm.training import choose_device
 
 EXPECTED_TOKENS = 250_000_000
+EXPECTED_SMOKE_TOKENS = 50_000_000
+
+
+def _prepared_data_identity(source: PreparedTokenData) -> dict[str, Any]:
+    metadata = source.metadata
+    dataset = metadata.get("dataset")
+    tokenizer = metadata.get("tokenizer")
+    splits = metadata.get("splits")
+    train = splits.get("train") if isinstance(splits, dict) else None
+    validation = splits.get("validation") if isinstance(splits, dict) else None
+    if not all(
+        isinstance(value, dict)
+        for value in (dataset, tokenizer, train, validation)
+    ):
+        raise ValueError("prepared data metadata is missing provenance fields")
+    return {
+        "fingerprint": source.fingerprint,
+        "dataset_name": dataset.get("name"),
+        "resolved_revision": dataset.get("resolved_revision"),
+        "tokenizer_sha256": tokenizer.get("sha256"),
+        "train_tokens": train.get("tokens"),
+        "validation_tokens": validation.get("tokens"),
+        "validation_sha256": validation.get("sha256"),
+    }
+
+
+def _validate_smoke_data(
+    architecture: dict[str, Any], smoke: dict[str, Any]
+) -> None:
+    if smoke.get("train_tokens") != EXPECTED_SMOKE_TOKENS:
+        raise ValueError(
+            f"smoke data must contain exactly {EXPECTED_SMOKE_TOKENS} train tokens"
+        )
+    shared_fields = (
+        "dataset_name",
+        "resolved_revision",
+        "tokenizer_sha256",
+        "validation_tokens",
+        "validation_sha256",
+    )
+    mismatches = [
+        name for name in shared_fields if architecture.get(name) != smoke.get(name)
+    ]
+    if mismatches:
+        raise ValueError(
+            "smoke and architecture data provenance differ for: "
+            + ", ".join(mismatches)
+        )
 
 
 def _checkpoint_metadata(path: Path, *, fingerprint: str) -> dict[str, Any]:
@@ -103,6 +151,12 @@ def _audit_model(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
+    parser.add_argument(
+        "--smoke-data-dir",
+        type=Path,
+        required=True,
+        help="frozen 50M subset that the successful audit will authorize",
+    )
     parser.add_argument("--dense", type=Path, required=True)
     parser.add_argument("--h6s4", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -120,6 +174,10 @@ def main() -> int:
         raise ValueError("at least one integer seed is required")
 
     source = PreparedTokenData(args.data_dir)
+    smoke_source = PreparedTokenData(args.smoke_data_dir)
+    architecture_data = _prepared_data_identity(source)
+    authorized_smoke_data = _prepared_data_identity(smoke_source)
+    _validate_smoke_data(architecture_data, authorized_smoke_data)
     device = choose_device(args.device)
     checkpoints = {
         "dense": _checkpoint_metadata(args.dense, fingerprint=source.fingerprint),
@@ -172,6 +230,7 @@ def main() -> int:
     result = {
         "schema_version": 1,
         "data_fingerprint": source.fingerprint,
+        "authorized_smoke_data": authorized_smoke_data,
         "audit": {
             "seeds": list(seeds),
             "batches_per_seed": args.batches_per_seed,

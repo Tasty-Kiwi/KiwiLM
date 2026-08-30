@@ -13,6 +13,15 @@
     ],
     "total_batches": 100
   },
+  "authorized_smoke_data": {
+    "dataset_name": "HuggingFaceTB/smollm-corpus",
+    "fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+    "resolved_revision": "3ba9d605774198c5868892d7a8deda78031a781f",
+    "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+    "train_tokens": 50000000,
+    "validation_sha256": "afc8a779d6d941584505c17318c24e56a6ac3e1e02b906beb33dcafb87be1e1c",
+    "validation_tokens": 2000000
+  },
   "checkpoints": {
     "dense": {
       "checkpoint": "runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt",

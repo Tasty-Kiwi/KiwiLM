@@ -114,6 +114,10 @@ def test_residual_audit_authorization_requires_the_exact_frozen_controls(
     audit = {
         "schema_version": 1,
         "data_fingerprint": "a" * 64,
+        "authorized_smoke_data": {
+            "fingerprint": "b" * 64,
+            "train_tokens": 50_000_000,
+        },
         "audit": {
             "seeds": [141, 142],
             "batches_per_seed": 50,
@@ -129,12 +133,14 @@ def test_residual_audit_authorization_requires_the_exact_frozen_controls(
     path = tmp_path / "audit.json"
     path.write_text(json.dumps(audit), encoding="utf-8")
     assert validate_residual_audit_authorization(
-        path, fingerprint="a" * 64
+        path, fingerprint="b" * 64
     ) == audit
+    with pytest.raises(ValueError, match="different 50M smoke dataset"):
+        validate_residual_audit_authorization(path, fingerprint="c" * 64)
     audit["audit"]["batches_per_seed"] = 49
     path.write_text(json.dumps(audit), encoding="utf-8")
     with pytest.raises(ValueError, match="frozen 100-batch"):
-        validate_residual_audit_authorization(path, fingerprint="a" * 64)
+        validate_residual_audit_authorization(path, fingerprint="b" * 64)
 
 
 def test_experiment_candidates_drop_h7_and_isolate_both_gate_initializers() -> None:

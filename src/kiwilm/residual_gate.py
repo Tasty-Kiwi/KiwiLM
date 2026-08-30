@@ -14,13 +14,23 @@ GATE_LABELS = ("gate_025", "gate_050")
 def validate_residual_audit_authorization(
     path: str | Path, *, fingerprint: str
 ) -> dict[str, Any]:
-    """Validate the exact pre-smoke audit and return its portable record."""
+    """Validate the exact pre-smoke audit and its authorized smoke subset."""
 
     audit = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(audit, dict) or audit.get("schema_version") != 1:
         raise ValueError("residual audit has an unsupported schema")
-    if audit.get("data_fingerprint") != fingerprint:
-        raise ValueError("residual audit uses a different data fingerprint")
+    smoke_data = audit.get("authorized_smoke_data")
+    if not isinstance(smoke_data, dict):
+        raise ValueError(
+            "residual audit does not identify the authorized 50M smoke dataset; "
+            "regenerate it with --smoke-data-dir"
+        )
+    expected_fingerprint = smoke_data.get("fingerprint")
+    if expected_fingerprint != fingerprint:
+        raise ValueError(
+            "residual audit authorizes a different 50M smoke dataset: "
+            f"expected {expected_fingerprint}, found {fingerprint}"
+        )
     settings = audit.get("audit")
     required = {
         "seeds": [141, 142],
