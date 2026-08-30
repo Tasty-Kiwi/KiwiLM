@@ -1,0 +1,1658 @@
+{
+  "audit": {
+    "batch_size": 2,
+    "batches_per_seed": 50,
+    "context_length": 512,
+    "device": "cpu",
+    "fixed_validation_batches": 200,
+    "fixed_validation_seed": 143,
+    "precision": "fp32",
+    "seeds": [
+      141,
+      142
+    ],
+    "total_batches": 100
+  },
+  "candidates": {
+    "gate_025": {
+      "alpha_trajectory": [],
+      "cached_generation": {
+        "atol": 0.002,
+        "direct_max_absolute_difference": 9.5367431640625e-06,
+        "direct_passed": true,
+        "passed": true,
+        "rollover_max_absolute_difference": 0.0,
+        "rollover_passed": true,
+        "rtol": 0.002
+      },
+      "effective_alphas": [
+        0.31693363189697266,
+        0.3292371332645416,
+        0.3136376738548279,
+        0.3179347813129425
+      ],
+      "generation": {
+        "maximum_consecutive_word_run": 3,
+        "repeated_four_gram_rate": 0.0017797369924763243
+      },
+      "health": {
+        "all_finite": true,
+        "all_nonzero_gradients": true,
+        "batch_count": 100,
+        "blocks": [
+          {
+            "index": 0,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.09992028027772903,
+                "median": 0.09894197806715965,
+                "p90": 0.099444367736578,
+                "p95": 0.09957957416772842
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.1708408801951244,
+                "median": 0.16735537009113466,
+                "p90": 0.16903448683134736,
+                "p95": 0.16972071523478954
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.599650502204895,
+                "median": 0.591312825679779,
+                "p90": 0.597021770477295,
+                "p95": 0.597904497385025
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.61018306016922,
+                "median": 0.6014653444290161,
+                "p90": 0.6069007873535156,
+                "p95": 0.6077703833580017
+              },
+              "residual_amplification": {
+                "maximum": 1.0177125739923443,
+                "median": 1.016819339271346,
+                "p90": 1.0172447353556309,
+                "p95": 1.0174084983752243,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.21346412599086761,
+              "median": 0.21346412599086761,
+              "minimum": 0.21346412599086761,
+              "p90": 0.21346412599086761,
+              "p95": 0.21346412599086761
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 1,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.09131290018558502,
+                "median": 0.09037334471940994,
+                "p90": 0.09101575762033463,
+                "p95": 0.09111994579434395
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.15756551850999087,
+                "median": 0.15356518809157005,
+                "p90": 0.15572962544723004,
+                "p95": 0.1560221176017743
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6008741855621338,
+                "median": 0.5889125466346741,
+                "p90": 0.5944157421588897,
+                "p95": 0.595294091105461
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6091930866241455,
+                "median": 0.5973575115203857,
+                "p90": 0.603119570016861,
+                "p95": 0.603864124417305
+              },
+              "residual_amplification": {
+                "maximum": 1.0159682008625182,
+                "median": 1.0144191528469473,
+                "p90": 1.0149570973764641,
+                "p95": 1.0151699581242766,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.19715110957622528,
+              "median": 0.19715110957622528,
+              "minimum": 0.19715110957622528,
+              "p90": 0.19715110957622528,
+              "p95": 0.19715110957622528
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 2,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.09307240694761276,
+                "median": 0.09199439734220505,
+                "p90": 0.09243942946195602,
+                "p95": 0.09269014112651348
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.1553548927382812,
+                "median": 0.1510296861577557,
+                "p90": 0.15335354095260514,
+                "p95": 0.1534925890863519
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6214795112609863,
+                "median": 0.6091690361499786,
+                "p90": 0.6153318107128143,
+                "p95": 0.6163390278816223
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6305084228515625,
+                "median": 0.6181594133377075,
+                "p90": 0.6244117319583893,
+                "p95": 0.6254424959421158
+              },
+              "residual_amplification": {
+                "maximum": 1.0158933911930499,
+                "median": 1.014814898457887,
+                "p90": 1.015197617555963,
+                "p95": 1.0152243838688877,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.19599345326423645,
+              "median": 0.19599345326423645,
+              "minimum": 0.19599345326423645,
+              "p90": 0.19599345326423645,
+              "p95": 0.19599345326423645
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 3,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.08528134226799011,
+                "median": 0.08384564518928528,
+                "p90": 0.08455349802970887,
+                "p95": 0.08491427302360535
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.13524821857926003,
+                "median": 0.12982296221116216,
+                "p90": 0.1321709693362828,
+                "p95": 0.1324964457706257
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6614466905593872,
+                "median": 0.6458440124988556,
+                "p90": 0.654216867685318,
+                "p95": 0.6567335158586503
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6683741211891174,
+                "median": 0.653163343667984,
+                "p90": 0.66111541390419,
+                "p95": 0.6639486819505692
+              },
+              "residual_amplification": {
+                "maximum": 1.0120738106988312,
+                "median": 1.0112077150369063,
+                "p90": 1.0116967766313518,
+                "p95": 1.01196087558869,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.18418553471565247,
+              "median": 0.18418553471565247,
+              "minimum": 0.18418553471565247,
+              "p90": 0.18418553471565247,
+              "p95": 0.18418553471565247
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 4,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.08433911949396133,
+                "median": 0.08330892026424408,
+                "p90": 0.08392282724380493,
+                "p95": 0.08414423502981663
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.1318458776129588,
+                "median": 0.12643541607320674,
+                "p90": 0.12848152255101725,
+                "p95": 0.1292295210668597
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6753325462341309,
+                "median": 0.6580429673194885,
+                "p90": 0.6673534154891967,
+                "p95": 0.6687338918447495
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6827548146247864,
+                "median": 0.6649811267852783,
+                "p90": 0.674319440126419,
+                "p95": 0.6757531434297561
+              },
+              "residual_amplification": {
+                "maximum": 1.0118914328024373,
+                "median": 1.010883211025916,
+                "p90": 1.0113467368056928,
+                "p95": 1.011479663723714,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.18528680503368378,
+              "median": 0.18528680503368378,
+              "minimum": 0.18528680503368378,
+              "p90": 0.18528680503368378,
+              "p95": 0.18528680503368378
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 5,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.07865895330905914,
+                "median": 0.07765807583928108,
+                "p90": 0.07836329117417336,
+                "p95": 0.07845710366964341
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.11968438692240642,
+                "median": 0.11520528128009166,
+                "p90": 0.11718071312218772,
+                "p95": 0.11773999609852212
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6936847567558289,
+                "median": 0.6735834181308746,
+                "p90": 0.6833319902420044,
+                "p95": 0.6846852988004685
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.7006489038467407,
+                "median": 0.680523693561554,
+                "p90": 0.6904309272766113,
+                "p95": 0.6918641924858093
+              },
+              "residual_amplification": {
+                "maximum": 1.0110877783476617,
+                "median": 1.0103519686636078,
+                "p90": 1.0107160872746974,
+                "p95": 1.0108495950930738,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.1730741709470749,
+              "median": 0.1730741709470749,
+              "minimum": 0.1730741709470749,
+              "p90": 0.1730741709470749,
+              "p95": 0.1730741709470749
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 6,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.2560026943683624,
+                "median": 0.23776961863040924,
+                "p90": 0.24718469828367234,
+                "p95": 0.2498833492398262
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.3578602419428147,
+                "median": 0.3366555207595443,
+                "p90": 0.3451149790996412,
+                "p95": 0.3482681138310423
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.7324194312095642,
+                "median": 0.7107898592948914,
+                "p90": 0.7228699266910553,
+                "p95": 0.7261501163244247
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.73380446434021,
+                "median": 0.7161003351211548,
+                "p90": 0.7284871518611907,
+                "p95": 0.7305976450443268
+              },
+              "residual_amplification": {
+                "maximum": 1.023031514702379,
+                "median": 1.0082619929674108,
+                "p90": 1.0162024312505118,
+                "p95": 1.0177674890524253,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.31693363189697266,
+              "median": 0.31693363189697266,
+              "minimum": 0.31693363189697266,
+              "p90": 0.31693363189697266,
+              "p95": 0.31693363189697266
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 7,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.2760738730430603,
+                "median": 0.25953570008277893,
+                "p90": 0.2675420820713043,
+                "p95": 0.27018021941184994
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.3766297614167765,
+                "median": 0.3490693918876011,
+                "p90": 0.36005999590013155,
+                "p95": 0.3616103218706397
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.7629503011703491,
+                "median": 0.7397091686725616,
+                "p90": 0.7562214016914368,
+                "p95": 0.7579396814107895
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.8207047581672668,
+                "median": 0.8025070130825043,
+                "p90": 0.8162001848220826,
+                "p95": 0.817935836315155
+              },
+              "residual_amplification": {
+                "maximum": 1.094877869399735,
+                "median": 1.082336926894321,
+                "p90": 1.0892559142528668,
+                "p95": 1.0908919253820026,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.3292371332645416,
+              "median": 0.3292371332645416,
+              "minimum": 0.3292371332645416,
+              "p90": 0.3292371332645416,
+              "p95": 0.3292371332645416
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 8,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.3194143772125244,
+                "median": 0.29490333795547485,
+                "p90": 0.31004904508590697,
+                "p95": 0.3138442203402519
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.37044394674666165,
+                "median": 0.343527256862461,
+                "p90": 0.3589644236856557,
+                "p95": 0.36428309424387334
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.8805137872695923,
+                "median": 0.8578008413314819,
+                "p90": 0.8719315707683564,
+                "p95": 0.8744202077388763
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 1.0093247890472412,
+                "median": 0.9722331464290619,
+                "p90": 0.989740639925003,
+                "p95": 0.9957834750413894
+              },
+              "residual_amplification": {
+                "maximum": 1.1582290347357969,
+                "median": 1.1340525346841324,
+                "p90": 1.1463452543447932,
+                "p95": 1.1506289159481076,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.3136376738548279,
+              "median": 0.3136376738548279,
+              "minimum": 0.3136376738548279,
+              "p90": 0.3136376738548279,
+              "p95": 0.3136376738548279
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 9,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.6642798781394958,
+                "median": 0.6049204170703888,
+                "p90": 0.6459430277347564,
+                "p95": 0.6524212568998338
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.6006731807097044,
+                "median": 0.5300665247615785,
+                "p90": 0.568306684951348,
+                "p95": 0.5738053671726139
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 1.1969350576400757,
+                "median": 1.1402745246887207,
+                "p90": 1.1725174546241761,
+                "p95": 1.1787418723106384
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 1.5461912155151367,
+                "median": 1.4402086734771729,
+                "p90": 1.48427916765213,
+                "p95": 1.5132050216197968
+              },
+              "residual_amplification": {
+                "maximum": 1.3171549248498862,
+                "median": 1.2633318337034591,
+                "p90": 1.292988935121069,
+                "p95": 1.3047207202128694,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.3179347813129425,
+              "median": 0.3179347813129425,
+              "minimum": 0.3179347813129425,
+              "p90": 0.3179347813129425,
+              "p95": 0.3179347813129425
+            },
+            "mlp_type": "swiglu"
+          }
+        ],
+        "health_pass_count": 100,
+        "minimum_mlp_family_gradient_ratios": {
+          "hadamard": 0.16538434614032038,
+          "swiglu": 1.153458308075788
+        },
+        "minimum_mlp_family_output_rms_ratios": {
+          "hadamard": 0.7724645380603655,
+          "swiglu": 2.233143800864553
+        }
+      },
+      "model_config": {
+        "architecture": "kiwilm2_slim_v3",
+        "bigram_buckets": 16384,
+        "context_length": 512,
+        "conv_kernel_sizes": [
+          31,
+          63,
+          31,
+          63,
+          31,
+          63
+        ],
+        "d_model": 512,
+        "dropout": 0.0,
+        "hadamard_variant": "gated_v2",
+        "mixer_schedule": [
+          "gqa",
+          "conv",
+          "conv",
+          "gqa",
+          "conv",
+          "conv",
+          "gqa",
+          "conv",
+          "conv",
+          "gqa"
+        ],
+        "num_kv_heads": 2,
+        "num_query_heads": 8,
+        "rms_norm_eps": 1e-06,
+        "rope_base": 10000.0,
+        "swiglu_dim": 1536,
+        "swiglu_residual_gate_init": 0.25,
+        "tie_embeddings": true,
+        "trigram_buckets": 16384,
+        "upper_swiglu_blocks": 4,
+        "vocab_size": 32000
+      },
+      "peak_memory_bytes": 3209290240,
+      "tokens_per_second": 23632.50019779081,
+      "validation_loss": 4.848141753673554,
+      "validation_perplexity": 127.50323714816572
+    },
+    "gate_050": {
+      "alpha_trajectory": [],
+      "cached_generation": {
+        "atol": 0.002,
+        "direct_max_absolute_difference": 7.62939453125e-06,
+        "direct_passed": true,
+        "passed": true,
+        "rollover_max_absolute_difference": 0.0,
+        "rollover_passed": true,
+        "rtol": 0.002
+      },
+      "effective_alphas": [
+        0.5637192726135254,
+        0.5809609889984131,
+        0.5629316568374634,
+        0.5740299820899963
+      ],
+      "generation": {
+        "maximum_consecutive_word_run": 3,
+        "repeated_four_gram_rate": 0.00297377805965972
+      },
+      "health": {
+        "all_finite": true,
+        "all_nonzero_gradients": true,
+        "batch_count": 100,
+        "blocks": [
+          {
+            "index": 0,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.08891240507364273,
+                "median": 0.08763711899518967,
+                "p90": 0.08817486464977264,
+                "p95": 0.08828481808304786
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.15044545990212888,
+                "median": 0.14763539776598145,
+                "p90": 0.1488629244688393,
+                "p95": 0.14965018992886497
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6022425293922424,
+                "median": 0.5944006145000458,
+                "p90": 0.5997098326683045,
+                "p95": 0.5999986827373505
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6104910969734192,
+                "median": 0.6023866832256317,
+                "p90": 0.6077695786952972,
+                "p95": 0.6081781446933746
+              },
+              "residual_amplification": {
+                "maximum": 1.014225308136168,
+                "median": 1.0135131507553101,
+                "p90": 1.0139272229021639,
+                "p95": 1.0140521214569516,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.1916927993297577,
+              "median": 0.1916927993297577,
+              "minimum": 0.1916927993297577,
+              "p90": 0.1916927993297577,
+              "p95": 0.1916927993297577
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 1,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.08560235798358917,
+                "median": 0.08465578034520149,
+                "p90": 0.08513507843017577,
+                "p95": 0.08529192470014095
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.1482636062707372,
+                "median": 0.14521088617768413,
+                "p90": 0.14699496772889903,
+                "p95": 0.14738439335595377
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.5951963663101196,
+                "median": 0.5835895538330078,
+                "p90": 0.5883120894432068,
+                "p95": 0.5891503363847732
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6029293537139893,
+                "median": 0.5913983285427094,
+                "p90": 0.596089506149292,
+                "p95": 0.5967864960432053
+              },
+              "residual_amplification": {
+                "maximum": 1.014771965542951,
+                "median": 1.0133253229502026,
+                "p90": 1.0137040640348056,
+                "p95": 1.0138962298486176,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.18608015775680542,
+              "median": 0.18608015775680542,
+              "minimum": 0.18608015775680542,
+              "p90": 0.18608015775680542,
+              "p95": 0.18608015775680542
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 2,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.08730269968509674,
+                "median": 0.08645504713058472,
+                "p90": 0.0868320405483246,
+                "p95": 0.0870329573750496
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.14817364427995816,
+                "median": 0.14424263049883634,
+                "p90": 0.14611745203140988,
+                "p95": 0.146637488185211
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6098707318305969,
+                "median": 0.5994170606136322,
+                "p90": 0.6049514293670654,
+                "p95": 0.6056770026683808
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6184530854225159,
+                "median": 0.607977569103241,
+                "p90": 0.6134576737880707,
+                "p95": 0.6142761290073395
+              },
+              "residual_amplification": {
+                "maximum": 1.0149272813385106,
+                "median": 1.0142312058894594,
+                "p90": 1.0147002408426453,
+                "p95": 1.0148032963543472,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.1850758194923401,
+              "median": 0.1850758194923401,
+              "minimum": 0.1850758194923401,
+              "p90": 0.1850758194923401,
+              "p95": 0.1850758194923401
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 3,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.07831785827875137,
+                "median": 0.07700800523161888,
+                "p90": 0.07762522250413895,
+                "p95": 0.0777964785695076
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.12680301058387208,
+                "median": 0.12221512542543059,
+                "p90": 0.12432515506078325,
+                "p95": 0.1247288462345103
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6418652534484863,
+                "median": 0.6299501359462738,
+                "p90": 0.6366361320018767,
+                "p95": 0.6382108002901078
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6481594443321228,
+                "median": 0.6363747119903564,
+                "p90": 0.6430636942386627,
+                "p95": 0.6448045581579208
+              },
+              "residual_amplification": {
+                "maximum": 1.0111629253584367,
+                "median": 1.0101855172608774,
+                "p90": 1.0106431648912104,
+                "p95": 1.0107469820303316,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.1700691133737564,
+              "median": 0.1700691133737564,
+              "minimum": 0.1700691133737564,
+              "p90": 0.1700691133737564,
+              "p95": 0.1700691133737564
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 4,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.07841948419809341,
+                "median": 0.07718909904360771,
+                "p90": 0.07775383815169334,
+                "p95": 0.07792126312851906
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.12475126669891123,
+                "median": 0.11986458901380906,
+                "p90": 0.12162259357359144,
+                "p95": 0.1223734579767492
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6573340892791748,
+                "median": 0.6440010368824005,
+                "p90": 0.6520882904529571,
+                "p95": 0.653208315372467
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6639052629470825,
+                "median": 0.6503673493862152,
+                "p90": 0.6585981249809265,
+                "p95": 0.659456717967987
+              },
+              "residual_amplification": {
+                "maximum": 1.0110419495627612,
+                "median": 1.0100435913009287,
+                "p90": 1.010418001959366,
+                "p95": 1.0105154734638029,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.17328335344791412,
+              "median": 0.17328335344791412,
+              "minimum": 0.17328335344791412,
+              "p90": 0.17328335344791412,
+              "p95": 0.17328335344791412
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 5,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.07165920734405518,
+                "median": 0.07077747955918312,
+                "p90": 0.07127627730369568,
+                "p95": 0.07145567014813423
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.11191633335121053,
+                "median": 0.10736437014679698,
+                "p90": 0.10903642296097253,
+                "p95": 0.10955006952766878
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.6724534630775452,
+                "median": 0.6579041182994843,
+                "p90": 0.6668380498886108,
+                "p95": 0.668322816491127
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.6784693598747253,
+                "median": 0.6637569963932037,
+                "p90": 0.6727408289909363,
+                "p95": 0.6743640750646591
+              },
+              "residual_amplification": {
+                "maximum": 1.0094498186656418,
+                "median": 1.0089883135635407,
+                "p90": 1.0092734050897905,
+                "p95": 1.009297410493737,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.1593371331691742,
+              "median": 0.1593371331691742,
+              "minimum": 0.1593371331691742,
+              "p90": 0.1593371331691742,
+              "p95": 0.1593371331691742
+            },
+            "mlp_type": "hadamard"
+          },
+          {
+            "index": 6,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.26776424050331116,
+                "median": 0.2561524361371994,
+                "p90": 0.2614554166793823,
+                "p95": 0.26349199265241624
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.38627310993663433,
+                "median": 0.37126888889260556,
+                "p90": 0.37711056859867914,
+                "p95": 0.37903570941803666
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.7075275778770447,
+                "median": 0.6907258033752441,
+                "p90": 0.7006792187690736,
+                "p95": 0.7032572597265243
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.7244717478752136,
+                "median": 0.7073095142841339,
+                "p90": 0.7177180826663971,
+                "p95": 0.7188081055879593
+              },
+              "residual_amplification": {
+                "maximum": 1.038032956676994,
+                "median": 1.023311407353395,
+                "p90": 1.030889402816587,
+                "p95": 1.0345145240774072,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.5637192726135254,
+              "median": 0.5637192726135254,
+              "minimum": 0.5637192726135254,
+              "p90": 0.5637192726135254,
+              "p95": 0.5637192726135254
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 7,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.3086223006248474,
+                "median": 0.2887469679117203,
+                "p90": 0.2994773775339126,
+                "p95": 0.3023540019989014
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.4187316267940146,
+                "median": 0.3960311465519061,
+                "p90": 0.4073004724083627,
+                "p95": 0.41071632106628125
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.7525035738945007,
+                "median": 0.7278071939945221,
+                "p90": 0.740086156129837,
+                "p95": 0.7447551697492599
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.8197619915008545,
+                "median": 0.7931771874427795,
+                "p90": 0.8074823617935181,
+                "p95": 0.8099016517400741
+              },
+              "residual_amplification": {
+                "maximum": 1.0989157431926961,
+                "median": 1.08913182075543,
+                "p90": 1.0945085685948952,
+                "p95": 1.0959169868658751,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.5809609889984131,
+              "median": 0.5809609889984131,
+              "minimum": 0.5809609889984131,
+              "p90": 0.5809609889984131,
+              "p95": 0.5809609889984131
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 8,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.35091522336006165,
+                "median": 0.3240014761686325,
+                "p90": 0.3399550259113312,
+                "p95": 0.341318991780281
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.4153209524379253,
+                "median": 0.3887918338383546,
+                "p90": 0.405106782127474,
+                "p95": 0.4092799799016218
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 0.8578835725784302,
+                "median": 0.8329286873340607,
+                "p90": 0.8502386152744293,
+                "p95": 0.8517652422189712
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 0.9843546748161316,
+                "median": 0.9560422301292419,
+                "p90": 0.9750575184822082,
+                "p95": 0.976807889342308
+              },
+              "residual_amplification": {
+                "maximum": 1.1676808195954598,
+                "median": 1.1459965254609603,
+                "p90": 1.1587281529097813,
+                "p95": 1.1599827431818561,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "conv",
+            "mlp_residual_scale": {
+              "maximum": 0.5629316568374634,
+              "median": 0.5629316568374634,
+              "minimum": 0.5629316568374634,
+              "p90": 0.5629316568374634,
+              "p95": 0.5629316568374634
+            },
+            "mlp_type": "swiglu"
+          },
+          {
+            "index": 9,
+            "metrics": {
+              "mlp_output_rms": {
+                "maximum": 0.7730004787445068,
+                "median": 0.7031472027301788,
+                "p90": 0.7368157088756562,
+                "p95": 0.7485465645790099
+              },
+              "mlp_update_to_residual_rms": {
+                "maximum": 0.6825563680535521,
+                "median": 0.6126021208088549,
+                "p90": 0.6489332030091159,
+                "p95": 0.6666671921727516
+              },
+              "post_mixer_residual_rms": {
+                "maximum": 1.1975599527359009,
+                "median": 1.1441795229911804,
+                "p90": 1.178898274898529,
+                "p95": 1.184174394607544
+              },
+              "post_mlp_residual_rms": {
+                "maximum": 1.6165212392807007,
+                "median": 1.5049991011619568,
+                "p90": 1.5449281692504884,
+                "p95": 1.5764144241809845
+              },
+              "residual_amplification": {
+                "maximum": 1.3740093974551775,
+                "median": 1.315544657531746,
+                "p90": 1.3458049946991504,
+                "p95": 1.3633223883361982,
+                "threshold": 1.5,
+                "threshold_failure_count": 0,
+                "threshold_failure_rate": 0.0
+              }
+            },
+            "mixer": "gqa",
+            "mlp_residual_scale": {
+              "maximum": 0.5740299820899963,
+              "median": 0.5740299820899963,
+              "minimum": 0.5740299820899963,
+              "p90": 0.5740299820899963,
+              "p95": 0.5740299820899963
+            },
+            "mlp_type": "swiglu"
+          }
+        ],
+        "health_pass_count": 100,
+        "minimum_mlp_family_gradient_ratios": {
+          "hadamard": 0.1686515111499967,
+          "swiglu": 1.0856206219123212
+        },
+        "minimum_mlp_family_output_rms_ratios": {
+          "hadamard": 0.7979810609701631,
+          "swiglu": 2.4587053158923835
+        }
+      },
+      "model_config": {
+        "architecture": "kiwilm2_slim_v3",
+        "bigram_buckets": 16384,
+        "context_length": 512,
+        "conv_kernel_sizes": [
+          31,
+          63,
+          31,
+          63,
+          31,
+          63
+        ],
+        "d_model": 512,
+        "dropout": 0.0,
+        "hadamard_variant": "gated_v2",
+        "mixer_schedule": [
+          "gqa",
+          "conv",
+          "conv",
+          "gqa",
+          "conv",
+          "conv",
+          "gqa",
+          "conv",
+          "conv",
+          "gqa"
+        ],
+        "num_kv_heads": 2,
+        "num_query_heads": 8,
+        "rms_norm_eps": 1e-06,
+        "rope_base": 10000.0,
+        "swiglu_dim": 1536,
+        "swiglu_residual_gate_init": 0.5,
+        "tie_embeddings": true,
+        "trigram_buckets": 16384,
+        "upper_swiglu_blocks": 4,
+        "vocab_size": 32000
+      },
+      "peak_memory_bytes": 3622320640,
+      "tokens_per_second": 26659.40302072898,
+      "validation_loss": 4.812447134256363,
+      "validation_perplexity": 123.03232604984093
+    }
+  },
+  "control": {
+    "alpha_trajectory": [],
+    "cached_generation": {
+      "atol": 0.002,
+      "direct_max_absolute_difference": 9.5367431640625e-06,
+      "direct_passed": true,
+      "passed": true,
+      "rollover_max_absolute_difference": 0.0,
+      "rollover_passed": true,
+      "rtol": 0.002
+    },
+    "effective_alphas": [],
+    "generation": {
+      "maximum_consecutive_word_run": 3,
+      "repeated_four_gram_rate": 0.0028491867544088514
+    },
+    "health": {
+      "all_finite": true,
+      "all_nonzero_gradients": true,
+      "batch_count": 100,
+      "blocks": [
+        {
+          "index": 0,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.08072569966316223,
+              "median": 0.07974264770746231,
+              "p90": 0.0802558146417141,
+              "p95": 0.08028937950730324
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.1375437113124954,
+              "median": 0.13493176550741587,
+              "p90": 0.13640610503535236,
+              "p95": 0.1370838413824477
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.5993348360061646,
+              "median": 0.5916236042976379,
+              "p90": 0.5966221392154694,
+              "p95": 0.5971801966428757
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.6064737439155579,
+              "median": 0.5985015034675598,
+              "p90": 0.6035571336746216,
+              "p95": 0.6041093528270722
+            },
+            "residual_amplification": {
+              "maximum": 1.0124774002208705,
+              "median": 1.0116477668821398,
+              "p90": 1.0119917761259687,
+              "p95": 1.0120941769100913,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "gqa",
+          "mlp_residual_scale": {
+            "maximum": 0.17516489326953888,
+            "median": 0.17516489326953888,
+            "minimum": 0.17516489326953888,
+            "p90": 0.17516489326953888,
+            "p95": 0.17516489326953888
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 1,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.08017314970493317,
+              "median": 0.07933938503265381,
+              "p90": 0.07978979349136353,
+              "p95": 0.0799102645367384
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.14074965075188894,
+              "median": 0.13781679361320115,
+              "p90": 0.13927008267784768,
+              "p95": 0.13984621429642255
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.5878496170043945,
+              "median": 0.5761736035346985,
+              "p90": 0.5806552171707153,
+              "p95": 0.5818523168563843
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.5946820378303528,
+              "median": 0.583300769329071,
+              "p90": 0.5874813795089722,
+              "p95": 0.5889552950859069
+            },
+            "residual_amplification": {
+              "maximum": 1.01319606856487,
+              "median": 1.0121585352494247,
+              "p90": 1.0125693835425162,
+              "p95": 1.0127239298809845,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": {
+            "maximum": 0.17522400617599487,
+            "median": 0.17522400617599487,
+            "minimum": 0.17522400617599487,
+            "p90": 0.17522400617599487,
+            "p95": 0.17522400617599487
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 2,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.0812145248055458,
+              "median": 0.0804772824048996,
+              "p90": 0.08078226447105408,
+              "p95": 0.08091243728995323
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.14005206848916715,
+              "median": 0.13662666820828545,
+              "p90": 0.13828110800103965,
+              "p95": 0.1389636169707522
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.5997638702392578,
+              "median": 0.5887070596218109,
+              "p90": 0.5942922472953797,
+              "p95": 0.5949031293392181
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.6074807643890381,
+              "median": 0.5964097678661346,
+              "p90": 0.6021957993507385,
+              "p95": 0.602680465579033
+            },
+            "residual_amplification": {
+              "maximum": 1.013701311450732,
+              "median": 1.0131498704637218,
+              "p90": 1.0134707883122185,
+              "p95": 1.013564585140227,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": {
+            "maximum": 0.17335832118988037,
+            "median": 0.17335832118988037,
+            "minimum": 0.17335832118988037,
+            "p90": 0.17335832118988037,
+            "p95": 0.17335832118988037
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 3,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.07419559359550476,
+              "median": 0.07280030846595764,
+              "p90": 0.0733670487999916,
+              "p95": 0.07361136190593243
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.1214663881096252,
+              "median": 0.11792149604499513,
+              "p90": 0.11991806487153675,
+              "p95": 0.1201066517204153
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.6332501173019409,
+              "median": 0.6178576350212097,
+              "p90": 0.6239962995052337,
+              "p95": 0.6262282580137253
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.6390340328216553,
+              "median": 0.6236924529075623,
+              "p90": 0.6300773561000824,
+              "p95": 0.632436528801918
+            },
+            "residual_amplification": {
+              "maximum": 1.010531815426646,
+              "median": 1.0096868331388125,
+              "p90": 1.0100674942450176,
+              "p95": 1.01017606882314,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "gqa",
+          "mlp_residual_scale": {
+            "maximum": 0.16166745126247406,
+            "median": 0.16166745126247406,
+            "minimum": 0.16166745126247406,
+            "p90": 0.16166745126247406,
+            "p95": 0.16166745126247406
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 4,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.07108722627162933,
+              "median": 0.07017873600125313,
+              "p90": 0.07075509577989579,
+              "p95": 0.07089793384075165
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.11503211361059368,
+              "median": 0.11167073012454956,
+              "p90": 0.11310686299639204,
+              "p95": 0.11356217451371318
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.645337700843811,
+              "median": 0.6289463937282562,
+              "p90": 0.6366657316684723,
+              "p95": 0.6386900484561919
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.6509795188903809,
+              "median": 0.6346724927425385,
+              "p90": 0.6422013700008393,
+              "p95": 0.644376015663147
+            },
+            "residual_amplification": {
+              "maximum": 1.0096252656399756,
+              "median": 1.0089491727209992,
+              "p90": 1.009256198588624,
+              "p95": 1.0093334361898274,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": {
+            "maximum": 0.15873517096042633,
+            "median": 0.15873517096042633,
+            "minimum": 0.15873517096042633,
+            "p90": 0.15873517096042633,
+            "p95": 0.15873517096042633
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 5,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.06616926938295364,
+              "median": 0.06535366550087929,
+              "p90": 0.0658155046403408,
+              "p95": 0.06588271707296371
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.10493464199340073,
+              "median": 0.10216405081789062,
+              "p90": 0.10383819073535354,
+              "p95": 0.10405001584003899
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.6548845767974854,
+              "median": 0.6391773819923401,
+              "p90": 0.6474203765392303,
+              "p95": 0.6485965967178345
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.6600576043128967,
+              "median": 0.6445276141166687,
+              "p90": 0.6528760254383088,
+              "p95": 0.6539160370826722
+            },
+            "residual_amplification": {
+              "maximum": 1.0087597086848683,
+              "median": 1.0082503292290883,
+              "p90": 1.008622896207924,
+              "p95": 1.0087018861660608,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": {
+            "maximum": 0.14852268993854523,
+            "median": 0.14852268993854523,
+            "minimum": 0.14852268993854523,
+            "p90": 0.14852268993854523,
+            "p95": 0.14852268993854523
+          },
+          "mlp_type": "hadamard"
+        },
+        {
+          "index": 6,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.28254279494285583,
+              "median": 0.2717384696006775,
+              "p90": 0.2775920808315277,
+              "p95": 0.27916224747896196
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.4241611369420442,
+              "median": 0.409194744022661,
+              "p90": 0.4160623905809506,
+              "p95": 0.41774784743821336
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.6804096102714539,
+              "median": 0.6648740172386169,
+              "p90": 0.6739218831062317,
+              "p95": 0.676973482966423
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.7140868306159973,
+              "median": 0.6951836943626404,
+              "p90": 0.7045686542987823,
+              "p95": 0.7068437457084655
+            },
+            "residual_amplification": {
+              "maximum": 1.0610342612697838,
+              "median": 1.045806785057614,
+              "p90": 1.0524266217594818,
+              "p95": 1.0534321989799875,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "gqa",
+          "mlp_residual_scale": null,
+          "mlp_type": "swiglu"
+        },
+        {
+          "index": 7,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.3411175310611725,
+              "median": 0.3254307955503464,
+              "p90": 0.3339442521333695,
+              "p95": 0.33783686608076097
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.485476884337452,
+              "median": 0.45543732468729137,
+              "p90": 0.4684263782090853,
+              "p95": 0.4710119978109784
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.7362144589424133,
+              "median": 0.7127844393253326,
+              "p90": 0.7242523789405824,
+              "p95": 0.7290249437093735
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 0.8183012008666992,
+              "median": 0.7951869368553162,
+              "p90": 0.8082510471343993,
+              "p95": 0.8097368061542511
+            },
+            "residual_amplification": {
+              "maximum": 1.1288898529708005,
+              "median": 1.1146224774392486,
+              "p90": 1.120449400787901,
+              "p95": 1.122165569604782,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": null,
+          "mlp_type": "swiglu"
+        },
+        {
+          "index": 8,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.4115232825279236,
+              "median": 0.3840446174144745,
+              "p90": 0.40034677982330324,
+              "p95": 0.40740666389465335
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.48933783395956437,
+              "median": 0.46104413713134335,
+              "p90": 0.4790094824724032,
+              "p95": 0.48328899402640885
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 0.8589668869972229,
+              "median": 0.834235668182373,
+              "p90": 0.8501220405101776,
+              "p95": 0.8524080187082291
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 1.0108906030654907,
+              "median": 0.9848827719688416,
+              "p90": 1.0023922085762025,
+              "p95": 1.0055500209331514
+            },
+            "residual_amplification": {
+              "maximum": 1.2033321738627458,
+              "median": 1.1780632594576232,
+              "p90": 1.193060754238212,
+              "p95": 1.194990732576068,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "conv",
+          "mlp_residual_scale": null,
+          "mlp_type": "swiglu"
+        },
+        {
+          "index": 9,
+          "metrics": {
+            "mlp_output_rms": {
+              "maximum": 0.8743110299110413,
+              "median": 0.7935993075370789,
+              "p90": 0.8316320538520813,
+              "p95": 0.8370626002550126
+            },
+            "mlp_update_to_residual_rms": {
+              "maximum": 0.7566940569923039,
+              "median": 0.6739797291294729,
+              "p90": 0.7142640058318179,
+              "p95": 0.7304270025790427
+            },
+            "post_mixer_residual_rms": {
+              "maximum": 1.229318380355835,
+              "median": 1.171347975730896,
+              "p90": 1.2009877800941469,
+              "p95": 1.2110848546028137
+            },
+            "post_mlp_residual_rms": {
+              "maximum": 1.703897476196289,
+              "median": 1.5971132516860962,
+              "p90": 1.6450137019157411,
+              "p95": 1.6676600515842437
+            },
+            "residual_amplification": {
+              "maximum": 1.4277434046254902,
+              "median": 1.3660284871140949,
+              "p90": 1.3996737701218265,
+              "p95": 1.4207012808046906,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mixer": "gqa",
+          "mlp_residual_scale": null,
+          "mlp_type": "swiglu"
+        }
+      ],
+      "health_pass_count": 100,
+      "minimum_mlp_family_gradient_ratios": {
+        "hadamard": 0.17289977954093408,
+        "swiglu": 1.0598855133360363
+      },
+      "minimum_mlp_family_output_rms_ratios": {
+        "hadamard": 0.8089463662329419,
+        "swiglu": 2.6520090812882926
+      }
+    },
+    "model_config": {
+      "architecture": "kiwilm2_slim_v3",
+      "bigram_buckets": 16384,
+      "context_length": 512,
+      "conv_kernel_sizes": [
+        31,
+        63,
+        31,
+        63,
+        31,
+        63
+      ],
+      "d_model": 512,
+      "dropout": 0.0,
+      "hadamard_variant": "gated_v2",
+      "mixer_schedule": [
+        "gqa",
+        "conv",
+        "conv",
+        "gqa",
+        "conv",
+        "conv",
+        "gqa",
+        "conv",
+        "conv",
+        "gqa"
+      ],
+      "num_kv_heads": 2,
+      "num_query_heads": 8,
+      "rms_norm_eps": 1e-06,
+      "rope_base": 10000.0,
+      "swiglu_dim": 1536,
+      "swiglu_residual_gate_init": null,
+      "tie_embeddings": true,
+      "trigram_buckets": 16384,
+      "upper_swiglu_blocks": 4,
+      "vocab_size": 32000
+    },
+    "peak_memory_bytes": 3718857728,
+    "tokens_per_second": 28125.359796138328,
+    "validation_loss": 4.7828912818431855,
+    "validation_perplexity": 119.44921259672003
+  },
+  "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+  "provenance": {
+    "control": {
+      "checkpoint": "runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h6-s4-adamw/latest.pt",
+      "step": 3052,
+      "tokens_seen": 50000000
+    },
+    "gate_025": {
+      "checkpoint": "runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-025-adamw/latest.pt",
+      "step": 3052,
+      "tokens_seen": 50000000
+    },
+    "gate_050": {
+      "checkpoint": "runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt",
+      "step": 3052,
+      "tokens_seen": 50000000
+    }
+  },
+  "schema_version": 1
+}

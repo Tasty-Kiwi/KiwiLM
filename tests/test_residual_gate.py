@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from kiwilm.config import KiwiLM2Config, KiwiLM2SlimV3Config
 from kiwilm.residual_gate import (
     select_residual_gate_candidate,
     validate_residual_audit_authorization,
@@ -151,3 +152,15 @@ def test_experiment_candidates_drop_h7_and_isolate_both_gate_initializers() -> N
     assert "slim-v3-h7s3" not in candidates
     assert "slim-v3-h6s4-gate-025" in candidates
     assert "slim-v3-h6s4-gate-050" in candidates
+    uses_residual_gate = namespace["_uses_residual_gate"]
+    assert not uses_residual_gate(KiwiLM2Config(vocab_size=256))
+    assert not uses_residual_gate(
+        KiwiLM2SlimV3Config(vocab_size=256, upper_swiglu_blocks=4)
+    )
+    assert uses_residual_gate(
+        KiwiLM2SlimV3Config(
+            vocab_size=256,
+            upper_swiglu_blocks=4,
+            swiglu_residual_gate_init=0.5,
+        )
+    )

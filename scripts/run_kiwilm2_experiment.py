@@ -42,6 +42,13 @@ GATED_CANDIDATES = {
 }
 
 
+def _uses_residual_gate(config: Any) -> bool:
+    return (
+        isinstance(config, KiwiLM2SlimV3Config)
+        and config.swiglu_residual_gate_init is not None
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--data-dir", type=Path, required=True)
@@ -240,7 +247,7 @@ def main() -> int:
                 and args.slim_compile_mode == "compiled"
             ),
             validation_diagnostic_fn=(
-                validation_diagnostic if label in GATED_CANDIDATES else None
+                validation_diagnostic if _uses_residual_gate(config) else None
             ),
         )
         trained, _ = load_trained_model(

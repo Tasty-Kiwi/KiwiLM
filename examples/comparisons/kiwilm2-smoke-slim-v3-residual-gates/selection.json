@@ -1,0 +1,22 @@
+{
+  "candidates": {
+    "gate_025": {
+      "eligible": false,
+      "reasons": [
+        "all recorded alpha trajectories must remain within (0, 1)",
+        "validation loss is more than 0.03 above ungated H6/S4",
+        "throughput is below 95% of ungated H6/S4"
+      ]
+    },
+    "gate_050": {
+      "eligible": false,
+      "reasons": [
+        "all recorded alpha trajectories must remain within (0, 1)",
+        "throughput is below 95% of ungated H6/S4"
+      ]
+    }
+  },
+  "next_stage": null,
+  "reason": "neither gated candidate passed every promotion rule",
+  "selected": null
+}

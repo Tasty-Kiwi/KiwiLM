@@ -1,0 +1,33 @@
+{
+  "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+  "device": "cpu",
+  "generation": {
+    "control": {
+      "maximum_consecutive_word_run": 3,
+      "repeated_four_gram_rate": 0.0028491867544088514
+    },
+    "gate_025": {
+      "maximum_consecutive_word_run": 3,
+      "repeated_four_gram_rate": 0.0017797369924763243
+    },
+    "gate_050": {
+      "maximum_consecutive_word_run": 3,
+      "repeated_four_gram_rate": 0.00297377805965972
+    }
+  },
+  "generation_count": 90,
+  "prompt_count": 6,
+  "report_path": "examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/generation/report.md",
+  "results_path": "examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/generation/results.jsonl",
+  "sampling_profile_count": 5,
+  "sampling_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "suite_path": "eval/residual-gate-prompts.json",
+  "suite_version": 1,
+  "summary_path": "examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/generation/summary.json"
+}
