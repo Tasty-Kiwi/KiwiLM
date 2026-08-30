@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import torch
@@ -23,6 +23,19 @@ def _gradient_norm(parameters: Any) -> float:
         if parameter.grad is not None:
             squared += float(parameter.grad.detach().float().square().sum())
     return math.sqrt(squared)
+
+
+def _mlp_residual_scale(module: Any) -> float | None:
+    if isinstance(module, GatedHadamardMLP):
+        return float(module.residual_scale.detach())
+    if isinstance(module, SwiGLU):
+        scale = module.effective_residual_scale
+        return float(scale.detach()) if scale is not None else None
+    return None
+
+
+def _ratio(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator > 0 else math.inf
 
 
 def model_health_report(
@@ -75,11 +88,10 @@ def model_health_report(
         total_hashes = input_ids.numel()
         block_health = []
         for index, block in enumerate(model.blocks):
-            residual_scale = (
-                float(block.mlp.residual_scale.detach())
-                if isinstance(block.mlp, GatedHadamardMLP)
-                else None
-            )
+            residual_scale = _mlp_residual_scale(block.mlp)
+            post_mixer_rms = residuals[f"{index}.post_mixer"]
+            post_mlp_rms = residuals[f"{index}.output"]
+            mlp_output_rms = activations[f"{index}.mlp"]
             block_health.append(
                 {
                     "index": index,
@@ -92,10 +104,16 @@ def model_health_report(
                         else type(block.mlp).__name__
                     ),
                     "residual_input_rms": residuals[f"{index}.input"],
-                    "post_mixer_residual_rms": residuals[f"{index}.post_mixer"],
-                    "post_mlp_residual_rms": residuals[f"{index}.output"],
+                    "post_mixer_residual_rms": post_mixer_rms,
+                    "post_mlp_residual_rms": post_mlp_rms,
                     "mixer_output_rms": activations[f"{index}.mixer"],
-                    "mlp_output_rms": activations[f"{index}.mlp"],
+                    "mlp_output_rms": mlp_output_rms,
+                    "mlp_update_to_residual_rms": _ratio(
+                        mlp_output_rms, post_mixer_rms
+                    ),
+                    "residual_amplification": _ratio(
+                        post_mlp_rms, post_mixer_rms
+                    ),
                     "mlp_residual_scale": residual_scale,
                     "mixer_gradient_norm": _gradient_norm(block.mixer.parameters()),
                     "mlp_gradient_norm": _gradient_norm(block.mlp.parameters()),
@@ -113,8 +131,7 @@ def model_health_report(
             for gradient in ("mixer_gradient_norm", "mlp_gradient_norm")
         )
         bounded_residual_steps = all(
-            block["post_mlp_residual_rms"] <= 1.5 * block["post_mixer_residual_rms"]
-            for block in block_health
+            block["residual_amplification"] <= 1.5 for block in block_health
         )
         family_gradient_ratios: dict[str, float] = {}
         family_output_rms_ratios: dict[str, float] = {}
@@ -189,6 +206,216 @@ def model_health_report(
         model.train(was_training)
 
 
+def model_residual_report(model: KiwiLM2LM, input_ids: Tensor) -> dict[str, Any]:
+    """Capture forward-only block residual contributions for training telemetry."""
+
+    if not isinstance(model, KiwiLM2LM):
+        raise TypeError("model_residual_report requires a KiwiLM2LM")
+    activations: dict[str, float] = {}
+    residuals: dict[str, float] = {}
+    handles = []
+
+    def capture(name: str) -> Callable[..., None]:
+        def hook(_module: Any, _inputs: Any, output: Tensor) -> None:
+            activations[name] = _rms(output)
+
+        return hook
+
+    def capture_input(name: str) -> Callable[..., None]:
+        def hook(_module: Any, inputs: tuple[Tensor, ...]) -> None:
+            residuals[name] = _rms(inputs[0])
+
+        return hook
+
+    def capture_output(name: str) -> Callable[..., None]:
+        def hook(_module: Any, _inputs: Any, output: Tensor) -> None:
+            residuals[name] = _rms(output)
+
+        return hook
+
+    for index, block in enumerate(model.blocks):
+        handles.append(
+            block.mlp_norm.register_forward_pre_hook(
+                capture_input(f"{index}.post_mixer")
+            )
+        )
+        handles.append(block.mlp.register_forward_hook(capture(f"{index}.mlp")))
+        handles.append(block.register_forward_hook(capture_output(f"{index}.output")))
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            logits = model(input_ids)
+        blocks = []
+        for index, block in enumerate(model.blocks):
+            post_mixer_rms = residuals[f"{index}.post_mixer"]
+            post_mlp_rms = residuals[f"{index}.output"]
+            mlp_output_rms = activations[f"{index}.mlp"]
+            blocks.append(
+                {
+                    "index": index,
+                    "mlp_type": (
+                        "hadamard"
+                        if isinstance(block.mlp, (HadamardMLP, GatedHadamardMLP))
+                        else "swiglu"
+                    ),
+                    "post_mixer_residual_rms": post_mixer_rms,
+                    "mlp_output_rms": mlp_output_rms,
+                    "post_mlp_residual_rms": post_mlp_rms,
+                    "mlp_update_to_residual_rms": _ratio(
+                        mlp_output_rms, post_mixer_rms
+                    ),
+                    "residual_amplification": _ratio(
+                        post_mlp_rms, post_mixer_rms
+                    ),
+                    "mlp_residual_scale": _mlp_residual_scale(block.mlp),
+                }
+            )
+        return {
+            "logits_finite": bool(torch.isfinite(logits).all()),
+            "logits_rms": _rms(logits),
+            "blocks": blocks,
+        }
+    finally:
+        for handle in handles:
+            handle.remove()
+        model.train(was_training)
+
+
+def _quantile(values: Sequence[float], probability: float) -> float:
+    if not values:
+        raise ValueError("cannot calculate a quantile of an empty sequence")
+    ordered = sorted(float(value) for value in values)
+    position = probability * (len(ordered) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
+def aggregate_health_reports(
+    reports: Sequence[Mapping[str, Any]], *, residual_threshold: float = 1.5
+) -> dict[str, Any]:
+    """Aggregate deterministic multi-batch health reports by block."""
+
+    if not reports:
+        raise ValueError("reports cannot be empty")
+    first_blocks = reports[0].get("blocks")
+    if not isinstance(first_blocks, list) or not first_blocks:
+        raise ValueError("each report must contain block diagnostics")
+    block_count = len(first_blocks)
+    if any(len(report.get("blocks", [])) != block_count for report in reports):
+        raise ValueError("health reports must contain the same block count")
+    metric_names = (
+        "post_mixer_residual_rms",
+        "mlp_output_rms",
+        "post_mlp_residual_rms",
+        "mlp_update_to_residual_rms",
+        "residual_amplification",
+    )
+    blocks = []
+    for index in range(block_count):
+        source_blocks = [report["blocks"][index] for report in reports]
+        metrics: dict[str, Any] = {}
+        for name in metric_names:
+            values = [float(block[name]) for block in source_blocks]
+            entry = {
+                "median": _quantile(values, 0.5),
+                "p90": _quantile(values, 0.9),
+                "p95": _quantile(values, 0.95),
+                "maximum": max(values),
+            }
+            if name == "residual_amplification":
+                failures = sum(value > residual_threshold for value in values)
+                entry["threshold"] = residual_threshold
+                entry["threshold_failure_count"] = failures
+                entry["threshold_failure_rate"] = failures / len(values)
+            metrics[name] = entry
+        scales = [
+            float(block["mlp_residual_scale"])
+            for block in source_blocks
+            if block.get("mlp_residual_scale") is not None
+        ]
+        blocks.append(
+            {
+                "index": index,
+                "mixer": source_blocks[0]["mixer"],
+                "mlp_type": source_blocks[0]["mlp_type"],
+                "metrics": metrics,
+                "mlp_residual_scale": (
+                    {
+                        "median": _quantile(scales, 0.5),
+                        "p90": _quantile(scales, 0.9),
+                        "p95": _quantile(scales, 0.95),
+                        "minimum": min(scales),
+                        "maximum": max(scales),
+                    }
+                    if scales
+                    else None
+                ),
+            }
+        )
+    family_names = sorted(
+        {
+            str(name)
+            for report in reports
+            for name in report.get("mlp_family_gradient_ratios", {})
+        }
+    )
+    family_gradient_minimum = {
+        name: min(
+            float(report["mlp_family_gradient_ratios"][name])
+            for report in reports
+            if name in report.get("mlp_family_gradient_ratios", {})
+        )
+        for name in family_names
+    }
+    family_output_rms_minimum = {
+        name: min(
+            float(report["mlp_family_output_rms_ratios"][name])
+            for report in reports
+            if name in report.get("mlp_family_output_rms_ratios", {})
+        )
+        for name in family_names
+    }
+    return {
+        "batch_count": len(reports),
+        "health_pass_count": sum(bool(report.get("health_passed")) for report in reports),
+        "all_finite": all(
+            bool(report.get("health_checks", {}).get("finite"))
+            for report in reports
+        ),
+        "all_nonzero_gradients": all(
+            bool(report.get("health_checks", {}).get("nonzero_gradients"))
+            for report in reports
+        ),
+        "minimum_mlp_family_gradient_ratios": family_gradient_minimum,
+        "minimum_mlp_family_output_rms_ratios": family_output_rms_minimum,
+        "blocks": blocks,
+    }
+
+
+def residual_growth_reproduced(
+    aggregate: Mapping[str, Any],
+    *,
+    block_index: int = 9,
+    threshold: float = 1.5,
+    minimum_failures: int = 10,
+) -> bool:
+    """Apply the frozen pre-smoke residual-growth audit gate."""
+
+    blocks = aggregate.get("blocks")
+    if not isinstance(blocks, list) or block_index >= len(blocks):
+        raise ValueError("aggregate does not contain the requested block")
+    amplification = blocks[block_index]["metrics"]["residual_amplification"]
+    return bool(
+        float(amplification["p90"]) > threshold
+        and int(amplification["threshold_failure_count"]) >= minimum_failures
+    )
+
+
 def cached_generation_parity_report(
     model: KiwiLM2LM,
     input_ids: Tensor,
@@ -244,4 +471,10 @@ def cached_generation_parity_report(
         model.train(was_training)
 
 
-__all__ = ["cached_generation_parity_report", "model_health_report"]
+__all__ = [
+    "aggregate_health_reports",
+    "cached_generation_parity_report",
+    "model_health_report",
+    "model_residual_report",
+    "residual_growth_reproduced",
+]

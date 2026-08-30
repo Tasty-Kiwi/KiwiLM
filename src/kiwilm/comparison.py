@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -101,6 +102,12 @@ def compare_checkpoints(
                     device=device,
                     cache="off",
                 )
+                continuation = (
+                    text[len(prompt_case["prompt"]) :]
+                    if text.startswith(prompt_case["prompt"])
+                    else text
+                )
+                quality = generation_quality_metrics(continuation)
                 rows.append(
                     {
                         "suite_version": suite["suite_version"],
@@ -121,6 +128,7 @@ def compare_checkpoints(
                         "top_k": top_k,
                         "seed": profile["seed"],
                         "text": text,
+                        **quality,
                     }
                 )
 
@@ -128,17 +136,64 @@ def compare_checkpoints(
     destination.mkdir(parents=True, exist_ok=True)
     results_path = destination / "results.jsonl"
     report_path = destination / "report.md"
+    summary_path = destination / "summary.json"
     _atomic_write(
         results_path,
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
     )
     _atomic_write(report_path, _render_report(rows, models))
-    return {
+    quality_by_model = {}
+    for label in model_labels:
+        model_rows = [row for row in rows if row["model_label"] == label]
+        quality_by_model[label] = {
+            "maximum_consecutive_word_run": max(
+                row["maximum_consecutive_word_run"] for row in model_rows
+            ),
+            "repeated_four_gram_rate": sum(
+                row["repeated_four_gram_rate"] for row in model_rows
+            )
+            / len(model_rows),
+        }
+    summary = {
         "data_fingerprint": data.fingerprint,
         "device": str(device),
+        "suite_path": str(suite_path),
+        "suite_version": suite["suite_version"],
+        "prompt_count": len(suite["prompts"]),
+        "sampling_profile_count": len(suite["sampling_profiles"]),
+        "sampling_seeds": sorted(
+            {int(profile["seed"]) for profile in suite["sampling_profiles"]}
+        ),
         "generation_count": len(rows),
-        "results_path": str(results_path.resolve()),
-        "report_path": str(report_path.resolve()),
+        "results_path": str(results_path),
+        "report_path": str(report_path),
+        "summary_path": str(summary_path),
+        "generation": quality_by_model,
+    }
+    _atomic_write(summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    return summary
+
+
+def generation_quality_metrics(text: str) -> dict[str, float | int]:
+    """Measure repetition used by the residual-gate promotion rules."""
+
+    words = re.findall(r"[\w']+", text.casefold())
+    longest = 0
+    current = 0
+    previous = None
+    for word in words:
+        current = current + 1 if word == previous else 1
+        longest = max(longest, current)
+        previous = word
+    four_grams = [tuple(words[index : index + 4]) for index in range(len(words) - 3)]
+    repeated_rate = (
+        (len(four_grams) - len(set(four_grams))) / len(four_grams)
+        if four_grams
+        else 0.0
+    )
+    return {
+        "maximum_consecutive_word_run": longest,
+        "repeated_four_gram_rate": repeated_rate,
     }
 
 

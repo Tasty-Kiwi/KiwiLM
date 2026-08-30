@@ -37,11 +37,17 @@ the field load as `minimal_v1`, preserving the original negative-baseline
 checkpoint shape. Slim remains intentionally unmatched in depth and parameters.
 
 Slim v3 keeps the same gated Hadamard block in the lower network and restores
-the unchanged Dense SwiGLU in a contiguous upper suffix. The two smoke
-ablations are `H H H H H H H S S S` and `H H H H H H S S S S`, serialized as
-`upper_swiglu_blocks=3` and `4`. Upper SwiGLU down projections use the same
-depth-scaled residual initialization as Dense; all candidates start from random
-initialization and use AdamW.
+the unchanged Dense SwiGLU in a contiguous upper suffix. H6/S4 uses
+`H H H H H H S S S S` and is serialized as `upper_swiglu_blocks=4`.
+`upper_swiglu_blocks=3` remains supported only so historical H7/S3 checkpoints
+load exactly; active launchers no longer train it. Upper SwiGLU down projections
+use the same depth-scaled residual initialization as Dense.
+
+The residual-gate smoke adds one optional bounded scalar to each of the four
+upper SwiGLUs: `alpha = sigmoid(logit_alpha)` and
+`update = alpha * swiglu(values)`. `swiglu_residual_gate_init=None` preserves
+the exact ungated state-dict shape. New candidates initialize alpha exactly to
+0.25 or 0.5 and otherwise leave H6/S4 unchanged.
 
 ## Architecture diagrams
 
@@ -77,6 +83,7 @@ n-gram hash at position `t` uses only tokens at or before `t`.
 | KiwiLM 2 Slim gated v2 | 40,690,186 | 7,528,970 | 16,384,000 | 16,777,216 | 52,243,456 |
 | Slim v3 H7/S3 | 47,758,855 | 14,597,639 | 16,384,000 | 16,777,216 | 66,305,536 |
 | Slim v3 H6/S4 | 50,115,078 | 16,953,862 | 16,384,000 | 16,777,216 | 70,992,896 |
+| Slim v3 H6/S4 gated | 50,115,082 | 16,953,866 | 16,384,000 | 16,777,216 | 70,994,944 |
 
 All three architectures use 1,048,576 bytes of fp16 KV cache per sequence at context
 512. FLOPs are a static estimate with multiply-add counted as two operations;
@@ -89,6 +96,8 @@ uv run kiwilm profile-kiwilm2 --architecture kiwilm2
 uv run kiwilm profile-kiwilm2 --architecture kiwilm2_slim
 uv run kiwilm profile-kiwilm2 --architecture kiwilm2_slim_v3 --upper-swiglu-blocks 3
 uv run kiwilm profile-kiwilm2 --architecture kiwilm2_slim_v3 --upper-swiglu-blocks 4
+uv run kiwilm profile-kiwilm2 --architecture kiwilm2_slim_v3 \
+  --upper-swiglu-blocks 4 --swiglu-residual-gate-init 0.25
 ```
 
 ## Prepare the controlled corpus
@@ -150,8 +159,7 @@ uv run python scripts/run_kiwilm2_experiment.py \
 ```
 
 The smoke phase is an implementation/stability gate only. Do not select the
-overall Dense-vs-Slim winner from it. The Slim v3 smoke run does select which
-of its two internal schedules may advance. Metrics include validation
+overall Dense-vs-Slim winner from it. Metrics include validation
 loss/perplexity, valid and model
 tokens/second, padding fraction, current accelerator memory, and peak memory in
 the final summary. Cached decoding is tested against uncached decoding across
@@ -165,24 +173,40 @@ nonzero mixer/MLP gradients in every block, no MLP residual RMS jump above 1.5x,
 a deepest/first MLP-gradient ratio of at least 0.10, and learned residual scales
 whose absolute values remain at most 1.
 
-Run both Slim v3 schedules without retraining Dense or Slim v2:
+H7/S3 has been dropped. Existing ungated H6/S4 checkpoints remain unchanged;
+do not retrain them for the residual-gate experiment.
+
+Complete and analyze Dense Muon 0.01 first. Then run the exact 250M checkpoint
+audit over seeds 141 and 142, 50 validation batches per seed:
 
 ```bash
-uv run python scripts/run_kiwilm2_experiment.py \
-  --phase smoke \
-  --data-dir data/smollm-smoke \
-  --output-dir runs/kiwilm2-slim-v3-smoke \
-  --candidates slim-v3-h7s3 slim-v3-h6s4 \
-  --device cuda \
-  --precision bf16
+uv run --locked python scripts/audit_kiwilm2_residual_growth.py \
+  --data-dir data/smollm-architecture \
+  --dense runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt \
+  --h6s4 runs/kiwilm2-slim-v3-architecture2/latest.pt \
+  --output examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
+  --seeds 141 142 --batches-per-seed 50 --batch-size 2 \
+  --context-length 512 --device cuda --precision bf16
 ```
 
-Before combining those checkpoints with existing controls, run the strict
-provenance validator documented in
-`examples/comparisons/kiwilm2-smoke-slim-v3-ablation/README.md`. H6/S4 is
-selected only when it improves fixed validation loss by at least 0.03 over
-H7/S3 and sustains at least 1.10x Dense throughput. Otherwise H7/S3 is selected;
-missing measurements or failed health/parity checks produce no winner.
+The audit authorizes gated training only when H6/S4 block 9 has p90 residual
+amplification above 1.5 and at least 10 of 100 batches exceed 1.5. If it does
+not, stop: the original result was a single-batch threshold artifact.
+
+When authorized, run only the two fresh gated smoke candidates:
+
+```bash
+uv run --locked python scripts/run_kiwilm2_experiment.py \
+  --phase smoke --data-dir data/smollm-smoke \
+  --output-dir runs/kiwilm2-slim-v3-residual-gates-smoke \
+  --candidates slim-v3-h6s4-gate-025 slim-v3-h6s4-gate-050 \
+  --residual-audit examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
+  --device cuda --precision bf16 --batch-size 8 --grad-accum-steps 4
+```
+
+At validation steps divisible by 500 (and the final step), gated runs record
+per-block MLP-update/residual RMS, residual amplification, and learned alpha
+without writing extra checkpoints.
 
 After both AdamW baselines, run the optional KiwiLM 2-only Muon sweep:
 
@@ -225,11 +249,14 @@ Run only the gated Slim v2 smoke without repeating Dense training:
 scripts/run_colab_kiwilm2_slim_smoke.sh
 ```
 
-Run both Slim v3 smoke schedules in separate resumable sessions and Drive
+The historical Slim v3 launcher now runs only ungated H6/S4. After an authorized
+audit, run both gated candidates sequentially in distinct sessions and Drive
 folders:
 
 ```bash
 scripts/run_colab_kiwilm2_slim_v3_smoke.sh
+KIWILM2_RESIDUAL_AUDIT=examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
+  scripts/run_colab_kiwilm2_slim_v3_residual_gates_smoke.sh
 ```
 
 The generic Colab default remains fp16 for T4 compatibility. When reusing
@@ -288,20 +315,42 @@ successfully compile the 50M Slim run; eager mode is slower but checkpoint
 compatible. `--resume-existing` is safe on the first invocation and resumes
 each candidate from its own `latest.pt` after an interruption.
 
-For the two 50M Slim v3 smoke candidates on Windows PowerShell:
+For the two gated 50M Slim v3 smoke candidates on Windows PowerShell, after the
+audit JSON says `gated_smoke_authorized: true`:
 
 ```powershell
 uv run --locked python scripts\run_kiwilm2_experiment.py `
   --phase smoke `
   --data-dir "data\smollm-smoke" `
-  --output-dir "runs\kiwilm2-slim-v3-smoke" `
-  --candidates slim-v3-h7s3 slim-v3-h6s4 `
+  --output-dir "runs\kiwilm2-slim-v3-residual-gates-smoke" `
+  --candidates slim-v3-h6s4-gate-025 slim-v3-h6s4-gate-050 `
+  --residual-audit "examples\comparisons\kiwilm2-slim-v3-residual-audit\audit.json" `
   --device cuda `
   --precision bf16 `
   --batch-size 8 `
   --grad-accum-steps 4 `
   --resume-existing
 ```
+
+Create that audit JSON on Windows with:
+
+```powershell
+uv run --locked python scripts\audit_kiwilm2_residual_growth.py `
+  --data-dir "data\smollm-architecture" `
+  --dense "runs\kiwilm2-architecture\kiwilm2-adamw\latest.pt" `
+  --h6s4 "runs\kiwilm2-slim-v3-architecture2\latest.pt" `
+  --output "examples\comparisons\kiwilm2-slim-v3-residual-audit\audit.json" `
+  --seeds 141 142 --batches-per-seed 50 --batch-size 2 `
+  --context-length 512 --device cuda --precision bf16
+```
+
+The comparison workflow in
+`examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/README.md` runs the
+generation suite over seeds 42 through 46, aligned validation, both 100-batch
+health distributions, cached direct/rollover parity, and full-context retrieval.
+The selector enforces every loss, throughput, memory, gradient, residual,
+alpha, parity, and repetition threshold. A winner advances to a fresh 250M
+confirmation and never directly to 500M.
 
 Run the dense KiwiLM 2 Muon sweep at `0.01 / 0.02 / 0.04`:
 
@@ -321,8 +370,9 @@ scripts/run_colab_kiwilm2.sh
 
 Useful overrides are `KIWILM2_BATCH_SIZE`, `KIWILM2_GRAD_ACCUM_STEPS`,
 `KIWILM2_PRECISION`, `COLAB_TIMEOUT_SECONDS`, `COLAB_SESSION_NAME`, and
-`KIWILM_RESULT_DIR`. Slim v3 also accepts `KIWILM2_UPPER_SWIGLU_BLOCKS=3` or
-`4`. T4 and fp16 are the defaults.
+`KIWILM_RESULT_DIR`. Slim v3 accepts `KIWILM2_UPPER_SWIGLU_BLOCKS=4` for new
+runs and `KIWILM2_SWIGLU_RESIDUAL_GATE_INIT=0.25` or `0.5` for the gated
+candidates. T4 and fp16 are the defaults.
 
 After allocating the VM, the launcher opens the interactive Google Drive mount
 flow. Complete that prompt once for each fresh Colab session. The remote worker

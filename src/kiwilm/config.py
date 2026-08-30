@@ -189,6 +189,7 @@ class KiwiLM2SlimV3Config(KiwiLM2Config):
     architecture: str = "kiwilm2_slim_v3"
     hadamard_variant: str = "gated_v2"
     upper_swiglu_blocks: int = 4
+    swiglu_residual_gate_init: float | None = None
 
     def __post_init__(self) -> None:
         ModelConfig.__post_init__(self)
@@ -207,6 +208,17 @@ class KiwiLM2SlimV3Config(KiwiLM2Config):
             or self.upper_swiglu_blocks not in {3, 4}
         ):
             raise ValueError("upper_swiglu_blocks must be 3 or 4")
+        if self.swiglu_residual_gate_init is not None:
+            value = self.swiglu_residual_gate_init
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0.0 < value < 1.0
+            ):
+                raise ValueError(
+                    "swiglu_residual_gate_init must be finite and in (0, 1)"
+                )
 
     @property
     def mlp_schedule(self) -> tuple[str, ...]:

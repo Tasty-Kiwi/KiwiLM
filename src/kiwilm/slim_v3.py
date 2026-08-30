@@ -90,6 +90,8 @@ def validate_slim_v3_smoke_checkpoints(
                 raise ValueError(
                     f"{role} checkpoint must use {expected_upper} upper SwiGLU blocks"
                 )
+            if config.swiglu_residual_gate_init is not None:
+                raise ValueError(f"{role} checkpoint must be the ungated Slim v3 ablation")
         train_config = payload.get("train_config")
         if not isinstance(train_config, dict):
             raise ValueError(f"{role} checkpoint lacks train_config")

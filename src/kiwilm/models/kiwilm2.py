@@ -181,15 +181,37 @@ class XXLCausalGatedConv(nn.Module):
 
 
 class SwiGLU(nn.Module):
-    def __init__(self, d_model: int, hidden_dim: int, *, dropout: float) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        hidden_dim: int,
+        *,
+        dropout: float,
+        residual_gate_init: float | None = None,
+    ) -> None:
         super().__init__()
         self.gate = nn.Linear(d_model, hidden_dim, bias=False)
         self.up = nn.Linear(d_model, hidden_dim, bias=False)
         self.down = nn.Linear(hidden_dim, d_model, bias=False)
         self.dropout = nn.Dropout(dropout)
+        if residual_gate_init is None:
+            self.register_parameter("residual_logit", None)
+        else:
+            logit = math.log(residual_gate_init / (1.0 - residual_gate_init))
+            self.residual_logit = nn.Parameter(torch.tensor(logit))
+
+    @property
+    def effective_residual_scale(self) -> Tensor | None:
+        """Return the bounded scalar applied to this branch, when enabled."""
+
+        if self.residual_logit is None:
+            return None
+        return torch.sigmoid(self.residual_logit)
 
     def forward(self, values: Tensor) -> Tensor:
-        return self.dropout(self.down(F.silu(self.gate(values)) * self.up(values)))
+        output = self.dropout(self.down(F.silu(self.gate(values)) * self.up(values)))
+        scale = self.effective_residual_scale
+        return output if scale is None else output * scale
 
 
 def fast_walsh_hadamard(values: Tensor) -> Tensor:
@@ -310,7 +332,17 @@ class KiwiLM2Block(nn.Module):
                 else HadamardMLP(config.d_model, dropout=config.dropout)
             )
         elif mlp_kind == "swiglu":
-            self.mlp = SwiGLU(config.d_model, config.swiglu_dim, dropout=config.dropout)
+            residual_gate_init = (
+                config.swiglu_residual_gate_init
+                if isinstance(config, KiwiLM2SlimV3Config)
+                else None
+            )
+            self.mlp = SwiGLU(
+                config.d_model,
+                config.swiglu_dim,
+                dropout=config.dropout,
+                residual_gate_init=residual_gate_init,
+            )
         else:
             raise ValueError("mlp_kind must be 'hadamard' or 'swiglu'")
 

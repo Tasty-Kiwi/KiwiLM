@@ -9,7 +9,8 @@ hashed bigram/trigram embeddings. The repository contains three active variants:
   Hadamard MLPs with independent signed diagonals and depth-scaled learned
   residual gains.
 - `kiwilm2_slim_v3`: a hybrid ablation with gated Hadamard lower blocks and a
-  contiguous upper SwiGLU suffix. H7/S3 and H6/S4 are the controlled schedules.
+  contiguous upper SwiGLU suffix. H6/S4 is active; H7/S3 remains loadable only
+  for historical checkpoint compatibility.
 
 Both use a 32K tokenizer, 512-token context, tied token embeddings and LM head,
 8 query heads, 2 KV heads, cached RoPE on attention blocks, and the fixed mixer
@@ -111,17 +112,21 @@ Use `--architecture kiwilm2_slim` for gated Slim v2. Add `--compile-mode
 compiled` to force `torch.compile`; eager remains the portable local default.
 Muon is deliberately restricted to Dense; AdamW is the shared baseline.
 
-Run only the two Slim v3 smoke candidates without repeating the controls:
+After the Dense Muon 0.01 analysis, audit the existing 250M Dense-AdamW and
+ungated H6/S4 checkpoints before changing the model:
 
 ```bash
-uv run python scripts/run_kiwilm2_experiment.py \
-  --phase smoke \
-  --data-dir data/smollm-smoke \
-  --output-dir runs/kiwilm2-slim-v3-smoke \
-  --candidates slim-v3-h7s3 slim-v3-h6s4 \
-  --device cuda \
-  --precision bf16
+uv run --locked python scripts/audit_kiwilm2_residual_growth.py \
+  --data-dir data/smollm-architecture \
+  --dense runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt \
+  --h6s4 runs/kiwilm2-slim-v3-architecture2/latest.pt \
+  --output examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
+  --device cuda --precision bf16
 ```
+
+Only an exact 100-batch audit that reproduces block-9 growth authorizes the
+alpha=0.25 and alpha=0.5 smoke launchers. See the runbook for Windows and Colab
+commands and the complete promotion rules.
 
 ## Colab
 
@@ -132,6 +137,7 @@ checkpoints to Google Drive:
 scripts/run_colab_kiwilm2_smoke.sh
 scripts/run_colab_kiwilm2_slim_smoke.sh
 scripts/run_colab_kiwilm2_slim_v3_smoke.sh
+scripts/run_colab_kiwilm2_slim_v3_residual_gates_smoke.sh
 scripts/run_colab_kiwilm2_architecture.sh
 scripts/run_colab_kiwilm2_muon_sweep.sh
 ```

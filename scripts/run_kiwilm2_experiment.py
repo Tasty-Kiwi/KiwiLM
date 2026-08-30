@@ -12,10 +12,15 @@ from typing import Any
 
 from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
 from kiwilm.data import PreparedTokenData
-from kiwilm.diagnostics import cached_generation_parity_report, model_health_report
+from kiwilm.diagnostics import (
+    cached_generation_parity_report,
+    model_health_report,
+    model_residual_report,
+)
 from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import KiwiLM2LM, build_model
+from kiwilm.residual_gate import validate_residual_audit_authorization
 from kiwilm.training import TrainConfig, choose_device, train
 
 PHASE_TOKENS = {
@@ -24,7 +29,17 @@ PHASE_TOKENS = {
     "final-500m": 500_000_000,
     "final-1b": 1_000_000_000,
 }
-CANDIDATES = ("dense", "slim-v2", "slim-v3-h7s3", "slim-v3-h6s4")
+CANDIDATES = (
+    "dense",
+    "slim-v2",
+    "slim-v3-h6s4",
+    "slim-v3-h6s4-gate-025",
+    "slim-v3-h6s4-gate-050",
+)
+GATED_CANDIDATES = {
+    "slim-v3-h6s4-gate-025",
+    "slim-v3-h6s4-gate-050",
+}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -71,6 +86,11 @@ def parser() -> argparse.ArgumentParser:
         help="AdamW candidates to train; v3-only runs can omit existing controls",
     )
     result.add_argument(
+        "--residual-audit",
+        type=Path,
+        help="required authorization JSON for either residual-gated candidate",
+    )
+    result.add_argument(
         "--resume-existing",
         action="store_true",
         help="resume each candidate from its output directory's latest.pt",
@@ -109,6 +129,14 @@ def main() -> int:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     source = PreparedTokenData(args.data_dir, seed=args.seed)
+    gated_requested = bool(set(args.candidates) & GATED_CANDIDATES)
+    residual_audit = None
+    if gated_requested:
+        if args.residual_audit is None:
+            raise ValueError("gated candidates require --residual-audit")
+        residual_audit = validate_residual_audit_authorization(
+            args.residual_audit, fingerprint=source.fingerprint
+        )
     common: dict[str, Any] = {
         "vocab_size": source.tokenizer.vocab_size,
         "context_length": 512,
@@ -122,13 +150,25 @@ def main() -> int:
             "kiwilm2-slim-gated-v2-adamw",
             KiwiLM2SlimConfig(**common),
         ),
-        "slim-v3-h7s3": (
-            "kiwilm2-slim-v3-h7-s3-adamw",
-            KiwiLM2SlimV3Config(**common, upper_swiglu_blocks=3),
-        ),
         "slim-v3-h6s4": (
             "kiwilm2-slim-v3-h6-s4-adamw",
             KiwiLM2SlimV3Config(**common, upper_swiglu_blocks=4),
+        ),
+        "slim-v3-h6s4-gate-025": (
+            "kiwilm2-slim-v3-h6-s4-gate-025-adamw",
+            KiwiLM2SlimV3Config(
+                **common,
+                upper_swiglu_blocks=4,
+                swiglu_residual_gate_init=0.25,
+            ),
+        ),
+        "slim-v3-h6s4-gate-050": (
+            "kiwilm2-slim-v3-h6-s4-gate-050-adamw",
+            KiwiLM2SlimV3Config(
+                **common,
+                upper_swiglu_blocks=4,
+                swiglu_residual_gate_init=0.5,
+            ),
         ),
     }
     configs = dict(available_configs[candidate] for candidate in args.candidates)
@@ -155,6 +195,7 @@ def main() -> int:
         "slim_compile_mode": args.slim_compile_mode,
         "candidates": list(args.candidates),
         "resume_existing": args.resume_existing,
+        "residual_audit": residual_audit,
         "shared_train_config": settings.to_dict(),
         "runs": {},
     }
@@ -167,6 +208,26 @@ def main() -> int:
         resume_from = run_dir / "latest.pt" if args.resume_existing else None
         if resume_from is not None and not resume_from.is_file():
             resume_from = None
+        diagnostic_data = PreparedTokenData(args.data_dir, seed=141)
+        diagnostic_inputs, _ = diagnostic_data.get_batch(
+            "validation",
+            batch_size=2,
+            context_length=config.context_length,
+            device=resolved_device,
+        )
+
+        def validation_diagnostic(
+            network: Any,
+            step: int,
+            tokens_seen: int,
+            diagnostic_batch: Any = diagnostic_inputs,
+        ) -> dict[str, Any] | None:
+            if step % 500 and tokens_seen < max_tokens:
+                return None
+            if not isinstance(network, KiwiLM2LM):
+                raise TypeError("residual telemetry requires KiwiLM2LM")
+            return model_residual_report(network, diagnostic_batch)
+
         summary = train(
             config,
             PreparedTokenData(args.data_dir, seed=args.seed),
@@ -177,6 +238,9 @@ def main() -> int:
             compile_model=(
                 isinstance(config, (KiwiLM2SlimConfig, KiwiLM2SlimV3Config))
                 and args.slim_compile_mode == "compiled"
+            ),
+            validation_diagnostic_fn=(
+                validation_diagnostic if label in GATED_CANDIDATES else None
             ),
         )
         trained, _ = load_trained_model(
@@ -196,13 +260,18 @@ def main() -> int:
         health = model_health_report(trained, diagnostic_inputs, diagnostic_targets)
         cached_generation = cached_generation_parity_report(trained, diagnostic_inputs)
         del trained
-        manifest["runs"][label] = {
+        run_record = {
             "config": config.to_dict(),
             "profile": profile,
             "summary": summary,
             "health": health,
             "cached_generation": cached_generation,
         }
+        manifest["runs"][label] = run_record
+        (run_dir / "summary.json").write_text(
+            json.dumps(run_record, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     for muon_lr in args.muon_lrs:
         label = f"kiwilm2-muon-{muon_lr:g}"
         config = KiwiLM2Config(**common)
@@ -241,12 +310,17 @@ def main() -> int:
         assert isinstance(trained, KiwiLM2LM)
         health = model_health_report(trained, diagnostic_inputs, diagnostic_targets)
         del trained
-        manifest["runs"][label] = {
+        run_record = {
             "config": config.to_dict(),
             "optimizer": muon_settings.to_dict(),
             "summary": summary,
             "health": health,
         }
+        manifest["runs"][label] = run_record
+        (run_dir / "summary.json").write_text(
+            json.dumps(run_record, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     manifest_path = args.output_dir / "experiment.json"
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

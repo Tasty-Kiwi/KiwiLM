@@ -47,6 +47,9 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
     locked = {name: job.get(name) for name in locked_names}
     if job.get("architecture") == "kiwilm2_slim_v3":
         locked["upper_swiglu_blocks"] = job.get("upper_swiglu_blocks")
+        locked["swiglu_residual_gate_init"] = job.get(
+            "swiglu_residual_gate_init"
+        )
     # Smoke historically used 50 evaluation batches without serializing the
     # value into the job. Preserve those backup keys while separating the more
     # robust architecture/final evaluation profile.
@@ -61,6 +64,9 @@ def checkpoint_backup_key(job: dict[str, Any]) -> str:
     if job.get("architecture") == "kiwilm2_slim_v3":
         upper = int(job.get("upper_swiglu_blocks") or 4)
         prefix += f"-h{10 - upper}-s{upper}"
+        gate = job.get("swiglu_residual_gate_init")
+        if gate is not None:
+            prefix += f"-gate{round(float(gate) * 100):03d}"
     if job.get("optimizer") == "muon":
         prefix += f"-{job.get('muon_lr')}"
     return f"{prefix}-{digest}".replace(".", "p")
@@ -81,6 +87,7 @@ def build_colab_job(
     precision: str = "fp16",
     compile_policy: str = "auto",
     upper_swiglu_blocks: int | None = None,
+    swiglu_residual_gate_init: float | None = None,
     seed: int = 42,
     allow_data_token_mismatch: bool = False,
     drive_backups: bool = True,
@@ -105,8 +112,19 @@ def build_colab_job(
             or upper_swiglu_blocks not in {3, 4}
         ):
             raise ValueError("upper_swiglu_blocks must be 3 or 4 for Slim v3")
+        if swiglu_residual_gate_init is not None and (
+            isinstance(swiglu_residual_gate_init, bool)
+            or not isinstance(swiglu_residual_gate_init, (int, float))
+            or not math.isfinite(swiglu_residual_gate_init)
+            or not 0 < swiglu_residual_gate_init < 1
+        ):
+            raise ValueError("swiglu_residual_gate_init must be between 0 and 1")
     elif upper_swiglu_blocks is not None:
         raise ValueError("upper_swiglu_blocks is valid only for kiwilm2_slim_v3")
+    elif swiglu_residual_gate_init is not None:
+        raise ValueError(
+            "swiglu_residual_gate_init is valid only for kiwilm2_slim_v3"
+        )
     if precision not in {"fp16", "bf16", "fp32"}:
         raise ValueError("Colab precision must be fp16, bf16, or fp32")
     if compile_policy not in {"auto", "eager", "compiled"}:
@@ -175,13 +193,14 @@ def build_colab_job(
     warmup_tokens = min(max(1, resolved_tokens // 50), resolved_tokens)
     eval_batches = 50 if phase == "smoke" else 200
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "phase": phase,
         "architecture": architecture,
         "hadamard_variant": (
             "gated_v2" if architecture in {"kiwilm2_slim", "kiwilm2_slim_v3"} else None
         ),
         "upper_swiglu_blocks": upper_swiglu_blocks,
+        "swiglu_residual_gate_init": swiglu_residual_gate_init,
         "optimizer": optimizer,
         "muon_lr": muon_lr,
         "max_tokens": resolved_tokens,
@@ -229,6 +248,7 @@ def build_colab_model_config(
             vocab_size=vocab_size,
             hadamard_variant=str(job.get("hadamard_variant")),
             upper_swiglu_blocks=job.get("upper_swiglu_blocks"),
+            swiglu_residual_gate_init=job.get("swiglu_residual_gate_init"),
         )
     raise ValueError(f"unknown KiwiLM 2 architecture: {architecture}")
 

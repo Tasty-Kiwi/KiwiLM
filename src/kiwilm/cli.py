@@ -261,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(3, 4),
         help="upper SwiGLU suffix for kiwilm2_slim_v3 (defaults to 4)",
     )
+    train_parser.add_argument(
+        "--swiglu-residual-gate-init",
+        type=float,
+        help="bounded upper-SwiGLU residual gate for kiwilm2_slim_v3",
+    )
     train_parser.add_argument("--untie-embeddings", action="store_true")
     train_parser.add_argument("--max-steps", type=int, default=2_000)
     train_parser.add_argument("--batch-size", type=int, default=32)
@@ -318,6 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_parser.add_argument(
         "--upper-swiglu-blocks", type=int, choices=(3, 4)
     )
+    profile_parser.add_argument("--swiglu-residual-gate-init", type=float)
     profile_parser.add_argument("--cache-dtype-bytes", type=int, default=2)
     profile_parser.set_defaults(handler=_profile_kiwilm2_command)
 
@@ -615,6 +621,13 @@ def _prepare_smollm_command(args: argparse.Namespace) -> int:
 def _profile_kiwilm2_command(args: argparse.Namespace) -> int:
     if args.upper_swiglu_blocks is not None and args.architecture != "kiwilm2_slim_v3":
         raise ValueError("--upper-swiglu-blocks is valid only for kiwilm2_slim_v3")
+    if (
+        args.swiglu_residual_gate_init is not None
+        and args.architecture != "kiwilm2_slim_v3"
+    ):
+        raise ValueError(
+            "--swiglu-residual-gate-init is valid only for kiwilm2_slim_v3"
+        )
     config_types = {
         "kiwilm2": KiwiLM2Config,
         "kiwilm2_slim": KiwiLM2SlimConfig,
@@ -623,6 +636,9 @@ def _profile_kiwilm2_command(args: argparse.Namespace) -> int:
     config_kwargs: dict[str, Any] = {}
     if args.architecture == "kiwilm2_slim_v3":
         config_kwargs["upper_swiglu_blocks"] = args.upper_swiglu_blocks or 4
+        config_kwargs["swiglu_residual_gate_init"] = (
+            args.swiglu_residual_gate_init
+        )
     config = config_types[args.architecture](
         vocab_size=args.vocab_size,
         num_kv_heads=args.kv_heads,
@@ -757,6 +773,13 @@ def _train_command(args: argparse.Namespace) -> int:
         raise ValueError("the KiwiLM 2.0 Muon experiment is restricted to kiwilm2")
     if args.upper_swiglu_blocks is not None and args.architecture != "kiwilm2_slim_v3":
         raise ValueError("--upper-swiglu-blocks is valid only for kiwilm2_slim_v3")
+    if (
+        args.swiglu_residual_gate_init is not None
+        and args.architecture != "kiwilm2_slim_v3"
+    ):
+        raise ValueError(
+            "--swiglu-residual-gate-init is valid only for kiwilm2_slim_v3"
+        )
     config_types = {
         "kiwilm2": KiwiLM2Config,
         "kiwilm2_slim": KiwiLM2SlimConfig,
@@ -765,6 +788,9 @@ def _train_command(args: argparse.Namespace) -> int:
     config_kwargs: dict[str, Any] = {}
     if args.architecture == "kiwilm2_slim_v3":
         config_kwargs["upper_swiglu_blocks"] = args.upper_swiglu_blocks or 4
+        config_kwargs["swiglu_residual_gate_init"] = (
+            args.swiglu_residual_gate_init
+        )
     model_config = config_types[args.architecture](
         vocab_size=data.tokenizer.vocab_size,
         context_length=args.context_length,

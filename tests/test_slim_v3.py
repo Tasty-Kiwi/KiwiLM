@@ -167,12 +167,19 @@ def test_slim_v3_selection_applies_both_gates() -> None:
     assert blocked["selected"] is None
 
 
-@pytest.mark.parametrize("upper_swiglu_blocks", [3, 4])
+@pytest.mark.parametrize(
+    ("upper_swiglu_blocks", "gate_init"),
+    [(3, None), (4, None), (4, 0.25), (4, 0.5)],
+)
 def test_slim_v3_tiny_training_and_resume(
-    tmp_path: Path, upper_swiglu_blocks: int
+    tmp_path: Path,
+    upper_swiglu_blocks: int,
+    gate_init: float | None,
 ) -> None:
     config = _config(
-        KiwiLM2SlimV3Config, upper_swiglu_blocks=upper_swiglu_blocks
+        KiwiLM2SlimV3Config,
+        upper_swiglu_blocks=upper_swiglu_blocks,
+        swiglu_residual_gate_init=gate_init,
     )
     settings = TrainConfig(
         max_steps=1,

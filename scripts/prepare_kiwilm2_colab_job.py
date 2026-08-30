@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     parser.add_argument("--upper-swiglu-blocks", type=int, choices=(3, 4))
+    parser.add_argument("--swiglu-residual-gate-init", type=float)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--allow-data-token-mismatch", action="store_true")
     parser.add_argument("--drive-root", default="/content/drive/MyDrive/KiwiLM2")
@@ -53,6 +54,7 @@ def main() -> int:
         precision=args.precision,
         compile_policy=args.compile_policy,
         upper_swiglu_blocks=args.upper_swiglu_blocks,
+        swiglu_residual_gate_init=args.swiglu_residual_gate_init,
         seed=args.seed,
         allow_data_token_mismatch=args.allow_data_token_mismatch,
         drive_backups=not args.no_drive_backups,

@@ -35,7 +35,7 @@ def install_package() -> None:
 
 
 job = json.loads(JOB_PATH.read_text(encoding="utf-8"))
-if job.get("schema_version") != 3:
+if job.get("schema_version") != 4:
     raise RuntimeError("unsupported KiwiLM 2 Colab job schema")
 install_package()
 
@@ -62,6 +62,7 @@ from kiwilm.data import (  # noqa: E402
 from kiwilm.diagnostics import (  # noqa: E402
     cached_generation_parity_report,
     model_health_report,
+    model_residual_report,
 )
 from kiwilm.generation import generate  # noqa: E402
 from kiwilm.inference import load_trained_model  # noqa: E402
@@ -266,6 +267,25 @@ backup = (
 if backup is not None:
     backup.start()
 
+telemetry_generator = torch.Generator(device="cpu").manual_seed(141)
+telemetry_inputs, _ = data.get_batch(
+    "validation",
+    batch_size=2,
+    context_length=model_config.context_length,
+    device=device,
+    generator=telemetry_generator,
+)
+
+
+def validation_diagnostic(
+    network: torch.nn.Module, step: int, tokens_seen: int
+) -> dict[str, object] | None:
+    if step % 500 and tokens_seen < job["max_tokens"]:
+        return None
+    if not isinstance(network, KiwiLM2LM):
+        raise TypeError("residual telemetry requires KiwiLM2LM")
+    return model_residual_report(network, telemetry_inputs)
+
 try:
     torch.cuda.reset_peak_memory_stats(device)
     started = time.perf_counter()
@@ -277,6 +297,11 @@ try:
         device=device,
         resume_from=resume_path,
         compile_model=compile_model,
+        validation_diagnostic_fn=(
+            validation_diagnostic
+            if job.get("swiglu_residual_gate_init") is not None
+            else None
+        ),
     )
     elapsed = time.perf_counter() - started
 

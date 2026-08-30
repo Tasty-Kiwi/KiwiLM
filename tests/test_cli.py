@@ -48,6 +48,8 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
             "kiwilm2_slim_v3",
             "--upper-swiglu-blocks",
             "3",
+            "--swiglu-residual-gate-init",
+            "0.25",
         ]
     )
 
@@ -67,6 +69,7 @@ def test_cli_exposes_only_active_architectures_and_clean_model_flags() -> None:
     assert slim.compile_mode == "eager"
     assert slim_v3.architecture == "kiwilm2_slim_v3"
     assert slim_v3.upper_swiglu_blocks == 3
+    assert slim_v3.swiglu_residual_gate_init == 0.25
 
     with pytest.raises(SystemExit):
         parser.parse_args(["train", "--architecture", "historical_model"])
@@ -186,6 +189,26 @@ def test_upper_swiglu_flag_is_restricted_to_slim_v3(
     monkeypatch.setattr(cli, "PreparedTokenData", lambda *_args, **_kwargs: fake_data)
     with pytest.raises(ValueError, match="valid only for kiwilm2_slim_v3"):
         cli.main(["train", "--architecture", "kiwilm2", "--upper-swiglu-blocks", "3"])
+    with pytest.raises(ValueError, match="valid only for kiwilm2_slim_v3"):
+        cli.main(
+            [
+                "train",
+                "--architecture",
+                "kiwilm2_slim",
+                "--swiglu-residual-gate-init",
+                "0.25",
+            ]
+        )
+    with pytest.raises(ValueError, match="valid only for kiwilm2_slim_v3"):
+        cli.main(
+            [
+                "profile-kiwilm2",
+                "--architecture",
+                "kiwilm2",
+                "--swiglu-residual-gate-init",
+                "0.5",
+            ]
+        )
 
 
 def test_muon_remains_dense_only(monkeypatch: pytest.MonkeyPatch) -> None:

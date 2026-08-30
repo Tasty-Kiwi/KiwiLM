@@ -25,10 +25,26 @@ from kiwilm.safetensors_io import (
 
 
 @pytest.mark.parametrize(
-    "config_type", [KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config]
+    ("config_type", "config_overrides"),
+    [
+        (KiwiLM2Config, {}),
+        (KiwiLM2SlimConfig, {}),
+        (KiwiLM2SlimV3Config, {"upper_swiglu_blocks": 3}),
+        (KiwiLM2SlimV3Config, {"upper_swiglu_blocks": 4}),
+        (
+            KiwiLM2SlimV3Config,
+            {"upper_swiglu_blocks": 4, "swiglu_residual_gate_init": 0.25},
+        ),
+        (
+            KiwiLM2SlimV3Config,
+            {"upper_swiglu_blocks": 4, "swiglu_residual_gate_init": 0.5},
+        ),
+    ],
 )
 def test_safetensors_export_round_trip_and_manifest(
-    tmp_path: Path, config_type: type[KiwiLM2Config]
+    tmp_path: Path,
+    config_type: type[KiwiLM2Config],
+    config_overrides: dict[str, object],
 ) -> None:
     data_dir = tmp_path / "data"
     metadata = prepare_from_stories(
@@ -49,6 +65,7 @@ def test_safetensors_export_round_trip_and_manifest(
         swiglu_dim=32,
         bigram_buckets=16,
         trigram_buckets=16,
+        **config_overrides,
     )
     model = build_model(config).eval()
     checkpoint = save_checkpoint(

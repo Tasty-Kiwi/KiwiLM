@@ -262,6 +262,49 @@ def test_evaluate_and_short_training_run(tmp_path) -> None:
     assert all("step" in event for event in events)
 
 
+def test_validation_diagnostic_callback_records_selected_evaluations(
+    tmp_path: Path,
+) -> None:
+    config = tiny_config()
+
+    def diagnostic(
+        _model: nn.Module, step: int, tokens_seen: int
+    ) -> dict[str, object] | None:
+        return {"probe": tokens_seen} if step == 2 else None
+
+    train(
+        config,
+        TinyData(config.vocab_size),
+        tmp_path,
+        TrainConfig(
+            max_steps=2,
+            batch_size=1,
+            eval_interval=1,
+            eval_batches=1,
+            checkpoint_interval=0,
+            log_interval=0,
+            sample_tokens=0,
+        ),
+        device="cpu",
+        model=TinyLM(config),
+        log_fn=None,
+        validation_diagnostic_fn=diagnostic,
+    )
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "metrics.jsonl").read_text().splitlines()
+    ]
+    diagnostics = [event for event in events if event["event"] == "validation_diagnostic"]
+    assert diagnostics == [
+        {
+            "event": "validation_diagnostic",
+            "step": 2,
+            "tokens_seen": 8,
+            "probe": 8,
+        }
+    ]
+
+
 def test_compiled_training_preserves_checkpoint_state_keys(tmp_path: Path) -> None:
     config = tiny_config()
     model = TinyLM(config)

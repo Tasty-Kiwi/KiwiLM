@@ -81,12 +81,23 @@ def profile_kiwilm2(
         elif isinstance(block.mlp, SwiGLU):
             mlp_schedule.append("swiglu")
             mlp_flops += 2 * 3 * d_model * config.swiglu_dim
+            if block.mlp.residual_logit is not None:
+                mlp_flops += d_model
         else:
             raise TypeError(f"unsupported KiwiLM 2 MLP: {type(block.mlp).__name__}")
     lm_head_flops = 2 * d_model * config.vocab_size
     flops_per_token = (
         projection_flops + attention_flops + convolution_flops + mlp_flops + lm_head_flops
     )
+    effective_gate_alphas = [
+        {
+            "block": index,
+            "alpha": float(block.mlp.effective_residual_scale.detach()),
+        }
+        for index, block in enumerate(model.blocks)
+        if isinstance(block.mlp, SwiGLU)
+        and block.mlp.effective_residual_scale is not None
+    ]
     return {
         "architecture": config.architecture,
         "hadamard_variant": (
@@ -99,6 +110,16 @@ def profile_kiwilm2(
             if isinstance(config, KiwiLM2SlimV3Config)
             else None
         ),
+        "swiglu_residual_gate_init": (
+            config.swiglu_residual_gate_init
+            if isinstance(config, KiwiLM2SlimV3Config)
+            else None
+        ),
+        "swiglu_residual_gate_count": sum(
+            isinstance(block.mlp, SwiGLU) and block.mlp.residual_logit is not None
+            for block in model.blocks
+        ),
+        "effective_swiglu_residual_alphas": effective_gate_alphas,
         "mlp_schedule": mlp_schedule,
         "mlp_counts": {
             "hadamard": mlp_schedule.count("hadamard"),

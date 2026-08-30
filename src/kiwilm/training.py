@@ -291,6 +291,9 @@ def train(
     compile_model: bool = False,
     compile_backend: str | None = None,
     log_fn: Callable[[str], None] | None = print,
+    validation_diagnostic_fn: (
+        Callable[[nn.Module, int, int], Mapping[str, Any] | None] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Train a model and return a JSON-serializable run summary."""
 
@@ -571,6 +574,20 @@ def train(
                     **latest_validation,
                 }
                 _write_metric(metric_stream, evaluation_metrics)
+                if validation_diagnostic_fn is not None:
+                    diagnostic = validation_diagnostic_fn(
+                        network, completed_step, tokens_seen
+                    )
+                    if diagnostic is not None:
+                        _write_metric(
+                            metric_stream,
+                            {
+                                "event": "validation_diagnostic",
+                                "step": completed_step,
+                                "tokens_seen": tokens_seen,
+                                **dict(diagnostic),
+                            },
+                        )
                 if log_fn is not None:
                     log_fn(
                         f"validation step {completed_step} "

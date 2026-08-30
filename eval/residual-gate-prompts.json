@@ -1,0 +1,34 @@
+{
+  "suite_version": 1,
+  "max_new_tokens": 160,
+  "sampling_profiles": [
+    {"id": "seed-42", "temperature": 0.8, "top_k": 40, "seed": 42},
+    {"id": "seed-43", "temperature": 0.8, "top_k": 40, "seed": 43},
+    {"id": "seed-44", "temperature": 0.8, "top_k": 40, "seed": 44},
+    {"id": "seed-45", "temperature": 0.8, "top_k": 40, "seed": 45},
+    {"id": "seed-46", "temperature": 0.8, "top_k": 40, "seed": 46}
+  ],
+  "prompts": [
+    {"id": "open-story", "prompt": "Once upon a time"},
+    {
+      "id": "named-entity",
+      "prompt": "Once upon a time, there was a little bird named Fluffy. Fluffy loved"
+    },
+    {
+      "id": "object-ownership",
+      "prompt": "Lily gave Ben a red ball. Ben put the red ball in his"
+    },
+    {
+      "id": "two-characters",
+      "prompt": "Mia had a blue kite, and Tom had a red boat. Mia asked Tom"
+    },
+    {
+      "id": "persistent-goal",
+      "prompt": "The fox promised the rabbit that it would bring food before sunset. When sunset came"
+    },
+    {
+      "id": "dialogue-location",
+      "prompt": "Emma said, \"I will wait by the old oak tree.\" Noah replied, \"I will meet you there.\" The next morning"
+    }
+  ]
+}

@@ -23,7 +23,13 @@ from kiwilm.config import (
     ModelConfig,
 )
 from kiwilm.data import PreparedTokenData, prepare_smollm_corpus
-from kiwilm.diagnostics import cached_generation_parity_report, model_health_report
+from kiwilm.diagnostics import (
+    aggregate_health_reports,
+    cached_generation_parity_report,
+    model_health_report,
+    model_residual_report,
+    residual_growth_reproduced,
+)
 from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import (
@@ -57,10 +63,15 @@ def small_config(*, slim: bool = False, **overrides: object) -> KiwiLM2Config:
     return config_type(**values)
 
 
-def small_v3_config(*, upper_swiglu_blocks: int = 4) -> KiwiLM2SlimV3Config:
+def small_v3_config(
+    *,
+    upper_swiglu_blocks: int = 4,
+    swiglu_residual_gate_init: float | None = None,
+) -> KiwiLM2SlimV3Config:
     values = small_config().to_dict()
     values["architecture"] = "kiwilm2_slim_v3"
     values["upper_swiglu_blocks"] = upper_swiglu_blocks
+    values["swiglu_residual_gate_init"] = swiglu_residual_gate_init
     return KiwiLM2SlimV3Config.from_dict(values)
 
 
@@ -134,6 +145,45 @@ def test_slim_v3_uses_a_contiguous_upper_swiglu_suffix(
         )
 
 
+@pytest.mark.parametrize("gate_init", [0.25, 0.5])
+def test_slim_v3_gates_all_four_upper_swiglus_with_exact_sigmoid_init(
+    gate_init: float,
+) -> None:
+    config = small_v3_config(swiglu_residual_gate_init=gate_init)
+    model = KiwiLM2LM(config)
+    upper = [block.mlp for block in model.blocks[6:]]
+    assert all(isinstance(mlp, SwiGLU) for mlp in upper)
+    assert all(
+        float(mlp.effective_residual_scale.detach()) == pytest.approx(gate_init)
+        for mlp in upper
+    )
+    inputs = torch.randn(2, 3, config.d_model, requires_grad=True)
+    sum(mlp(inputs).sum() for mlp in upper).backward()
+    assert all(mlp.residual_logit.grad is not None for mlp in upper)
+    with torch.no_grad():
+        for mlp in upper:
+            mlp.residual_logit.fill_(100)
+            assert 0 < float(mlp.effective_residual_scale) <= 1
+
+
+@pytest.mark.parametrize("gate_init", [0.25, 0.5])
+def test_gated_slim_v3_forward_backward_and_cached_rollover(
+    gate_init: float,
+) -> None:
+    config = small_v3_config(swiglu_residual_gate_init=gate_init)
+    model = KiwiLM2LM(config)
+    inputs = torch.randint(config.vocab_size, (1, config.context_length))
+    model(inputs).float().mean().backward()
+    assert all(
+        parameter.grad is not None and bool(torch.isfinite(parameter.grad).all())
+        for name, parameter in model.named_parameters()
+        if "residual_logit" in name
+    )
+    parity = cached_generation_parity_report(model, inputs)
+    assert parity["direct_passed"] is True
+    assert parity["rollover_passed"] is True
+
+
 @pytest.mark.parametrize("upper_swiglu_blocks", [3, 4])
 def test_slim_v3_cached_generation_matches_full_forward(
     upper_swiglu_blocks: int,
@@ -187,6 +237,8 @@ def test_config_round_trip_and_validation() -> None:
         small_config(slim=True),
         small_v3_config(upper_swiglu_blocks=3),
         small_v3_config(upper_swiglu_blocks=4),
+        small_v3_config(swiglu_residual_gate_init=0.25),
+        small_v3_config(swiglu_residual_gate_init=0.5),
     ):
         serialized = config.to_dict()
         assert json.loads(json.dumps(serialized)) == serialized
@@ -201,6 +253,9 @@ def test_config_round_trip_and_validation() -> None:
         small_v3_config(upper_swiglu_blocks=2)
     with pytest.raises(ValueError, match="requires hadamard_variant"):
         KiwiLM2SlimV3Config(hadamard_variant="minimal_v1")
+    for invalid in (0.0, 1.0, -0.1, float("inf"), float("nan"), True):
+        with pytest.raises(ValueError, match="swiglu_residual_gate_init"):
+            KiwiLM2SlimV3Config(swiglu_residual_gate_init=invalid)
 
 
 def test_pre_v2_slim_config_loads_the_minimal_negative_baseline() -> None:
@@ -256,6 +311,22 @@ def test_slim_v3_checkpoint_round_trip(
         torch.testing.assert_close(loaded.state_dict()[name], tensor)
 
 
+def test_ungated_slim_v3_checkpoint_keeps_the_historical_state_shape(
+    tmp_path: Path,
+) -> None:
+    config = small_v3_config()
+    source = KiwiLM2LM(config)
+    assert not any("residual_logit" in name for name in source.state_dict())
+    checkpoint = save_checkpoint(
+        tmp_path / "ungated.pt", model=source, step=1, model_config=config
+    )
+    loaded, loaded_config = load_trained_model(
+        checkpoint, data_fingerprint=None, device=torch.device("cpu")
+    )
+    assert loaded_config.swiglu_residual_gate_init is None
+    assert tuple(loaded.state_dict()) == tuple(source.state_dict())
+
+
 def test_compile_benchmark_checks_parity_and_runtime_selection() -> None:
     for slim_config in (small_config(slim=True), small_v3_config()):
         result = benchmark_slim_runtime(
@@ -296,6 +367,10 @@ def test_profile_separates_memory_dense_and_cache_costs() -> None:
     h6s4_profile = profile_kiwilm2(
         KiwiLM2LM(small_v3_config(upper_swiglu_blocks=4)), sequence_length=8
     )
+    gated_profile = profile_kiwilm2(
+        KiwiLM2LM(small_v3_config(swiglu_residual_gate_init=0.25)),
+        sequence_length=8,
+    )
     assert dense_profile["parameters"]["ngram"] == (17 + 19) * 8
     assert dense_profile["parameters"]["token_embedding"] == 71 * 8
     assert (
@@ -308,6 +383,23 @@ def test_profile_separates_memory_dense_and_cache_costs() -> None:
     assert minimal_profile["hadamard_variant"] == "minimal_v1"
     assert h7s3_profile["mlp_counts"] == {"hadamard": 7, "swiglu": 3}
     assert h6s4_profile["mlp_counts"] == {"hadamard": 6, "swiglu": 4}
+    assert gated_profile["swiglu_residual_gate_count"] == 4
+    assert gated_profile["swiglu_residual_gate_init"] == 0.25
+    assert [
+        item["block"] for item in gated_profile["effective_swiglu_residual_alphas"]
+    ] == [6, 7, 8, 9]
+    assert all(
+        item["alpha"] == pytest.approx(0.25)
+        for item in gated_profile["effective_swiglu_residual_alphas"]
+    )
+    assert (
+        gated_profile["parameters"]["total"]
+        == h6s4_profile["parameters"]["total"] + 4
+    )
+    assert (
+        gated_profile["estimated_flops_per_token"]["mlp"]
+        == h6s4_profile["estimated_flops_per_token"]["mlp"] + 4 * 8
+    )
     parameter_totals = [
         slim_profile["parameters"]["total"],
         h7s3_profile["parameters"]["total"],
@@ -360,6 +452,31 @@ def test_slim_v3_health_report_separates_mlp_families() -> None:
     parity = cached_generation_parity_report(model, inputs)
     assert parity["passed"] is True
     assert parity["rollover_passed"] is True
+
+
+def test_residual_diagnostics_aggregate_quantiles_and_growth_decision() -> None:
+    model = KiwiLM2LM(small_v3_config(swiglu_residual_gate_init=0.25))
+    inputs = torch.randint(71, (2, 8))
+    targets = torch.roll(inputs, -1, dims=1)
+    report = model_health_report(model, inputs, targets)
+    assert all("mlp_update_to_residual_rms" in block for block in report["blocks"])
+    assert all("residual_amplification" in block for block in report["blocks"])
+    telemetry = model_residual_report(model, inputs)
+    assert len(telemetry["blocks"]) == 10
+
+    reports = []
+    for value in range(100):
+        copied = json.loads(json.dumps(report))
+        amplification = 1.6 if value >= 89 else 1.4
+        copied["blocks"][9]["residual_amplification"] = amplification
+        copied["health_passed"] = amplification <= 1.5
+        reports.append(copied)
+    aggregate = aggregate_health_reports(reports)
+    block9 = aggregate["blocks"][9]["metrics"]["residual_amplification"]
+    assert block9["threshold_failure_count"] == 11
+    assert block9["threshold_failure_rate"] == pytest.approx(0.11)
+    assert block9["p95"] == pytest.approx(1.6)
+    assert residual_growth_reproduced(aggregate) is True
 
 
 def test_muon_split_uses_linear_matrices_but_not_tables_or_depthwise() -> None:
@@ -526,7 +643,7 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
     )
     assert slim["hadamard_variant"] == "gated_v2"
     assert slim["compile_policy"] == "auto"
-    assert slim["schema_version"] == 3
+    assert slim["schema_version"] == 4
     assert "gated_v2" in checkpoint_backup_key(slim)
     assert checkpoint_backup_key(
         {name: value for name, value in slim.items() if name != "upper_swiglu_blocks"}
@@ -559,6 +676,22 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
     assert "h7-s3" in checkpoint_backup_key(h7s3)
     assert "h6-s4" in checkpoint_backup_key(h6s4)
     assert checkpoint_backup_key(h7s3) != checkpoint_backup_key(h6s4)
+    gate025 = build_colab_job(
+        None,
+        phase="smoke",
+        architecture="kiwilm2_slim_v3",
+        upper_swiglu_blocks=4,
+        swiglu_residual_gate_init=0.25,
+        max_tokens=120,
+        batch_size=1,
+        grad_accum_steps=1,
+    )
+    gate050 = {**gate025, "swiglu_residual_gate_init": 0.5}
+    assert "gate025" in checkpoint_backup_key(gate025)
+    assert "gate050" in checkpoint_backup_key(gate050)
+    assert checkpoint_backup_key(gate025) != checkpoint_backup_key(gate050)
+    gated_config = build_colab_model_config(gate025, vocab_size=32_000)
+    assert gated_config.swiglu_residual_gate_init == 0.25
     assert build_colab_model_config(h7s3, vocab_size=32_000).mlp_schedule == (
         "hadamard",
     ) * 7 + ("swiglu",) * 3
@@ -571,6 +704,13 @@ def test_colab_job_can_prepare_data_in_vm_and_has_stable_backup_key() -> None:
             phase="smoke",
             architecture="kiwilm2_slim",
             upper_swiglu_blocks=3,
+        )
+    with pytest.raises(ValueError, match="valid only for kiwilm2_slim_v3"):
+        build_colab_job(
+            None,
+            phase="smoke",
+            architecture="kiwilm2",
+            swiglu_residual_gate_init=0.25,
         )
     with pytest.raises(ValueError, match="compile_policy"):
         build_colab_job(

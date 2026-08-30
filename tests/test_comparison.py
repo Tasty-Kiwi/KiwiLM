@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 
 from kiwilm.checkpoint import save_checkpoint
-from kiwilm.comparison import compare_checkpoints
+from kiwilm.comparison import compare_checkpoints, generation_quality_metrics
 from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.models import build_model
@@ -114,12 +114,16 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
     ]
     report = Path(summary["report_path"]).read_text(encoding="utf-8")
     assert summary["generation_count"] == 2
+    assert summary["sampling_seeds"] == [9]
+    assert summary["prompt_count"] == 1
     assert [row["architecture"] for row in rows] == [
         "kiwilm2",
         "kiwilm2_slim",
     ]
     assert "| KiwiLM 2 Dense | KiwiLM 2 Slim |" in report
     assert "opening / greedy" in report
+    assert Path(summary["summary_path"]).is_file()
+    assert set(summary["generation"]) == {"KiwiLM 2 Dense", "KiwiLM 2 Slim"}
 
     n_way_summary = compare_checkpoints(
         [checkpoint_a, checkpoint_b, checkpoint_c],
@@ -144,3 +148,11 @@ def test_compare_checkpoints_writes_reproducible_machine_and_human_reports(
         "kiwilm2",
     ]
     assert "| Dense A | Slim | Dense B |" in n_way_report
+
+
+def test_generation_quality_metrics_detect_repetition() -> None:
+    metrics = generation_quality_metrics(
+        "yes yes yes yes yes one two three four one two three four"
+    )
+    assert metrics["maximum_consecutive_word_run"] == 5
+    assert metrics["repeated_four_gram_rate"] > 0
