@@ -183,7 +183,7 @@ audit over seeds 141 and 142, 50 validation batches per seed:
 uv run --locked python scripts/audit_kiwilm2_residual_growth.py \
   --data-dir data/smollm-architecture \
   --dense runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt \
-  --h6s4 runs/kiwilm2-slim-v3-architecture2/latest.pt \
+  --h6s4 runs/kiwilm2-slim-v3-architecture2/kiwilm2-slim-v3-h6-s4-adamw/latest.pt \
   --output examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
   --seeds 141 142 --batches-per-seed 50 --batch-size 2 \
   --context-length 512 --device cuda --precision bf16
@@ -338,7 +338,7 @@ Create that audit JSON on Windows with:
 uv run --locked python scripts\audit_kiwilm2_residual_growth.py `
   --data-dir "data\smollm-architecture" `
   --dense "runs\kiwilm2-architecture\kiwilm2-adamw\latest.pt" `
-  --h6s4 "runs\kiwilm2-slim-v3-architecture2\latest.pt" `
+  --h6s4 "runs\kiwilm2-slim-v3-architecture2\kiwilm2-slim-v3-h6-s4-adamw\latest.pt" `
   --output "examples\comparisons\kiwilm2-slim-v3-residual-audit\audit.json" `
   --seeds 141 142 --batches-per-seed 50 --batch-size 2 `
   --context-length 512 --device cuda --precision bf16
