@@ -5,30 +5,51 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 GATE_LABELS = ("gate_025", "gate_050")
 
 
+def _canonical_json_sha256(path: str | Path) -> str:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
+
+
 def validate_residual_audit_authorization(
-    path: str | Path, *, fingerprint: str
+    path: str | Path, *, fingerprint: str, phase: str = "smoke"
 ) -> dict[str, Any]:
     """Validate the exact pre-smoke audit and its authorized smoke subset."""
 
     audit = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(audit, dict) or audit.get("schema_version") != 1:
         raise ValueError("residual audit has an unsupported schema")
-    smoke_data = audit.get("authorized_smoke_data")
-    if not isinstance(smoke_data, dict):
+    if phase == "smoke":
+        smoke_data = audit.get("authorized_smoke_data")
+        if not isinstance(smoke_data, dict):
+            raise ValueError(
+                "residual audit does not identify the authorized 50M smoke dataset; "
+                "regenerate it with --smoke-data-dir"
+            )
+        expected_fingerprint = smoke_data.get("fingerprint")
+        dataset_label = "50M smoke dataset"
+    elif phase == "architecture":
+        expected_fingerprint = audit.get("data_fingerprint")
+        dataset_label = "250M architecture dataset"
+    else:
         raise ValueError(
-            "residual audit does not identify the authorized 50M smoke dataset; "
-            "regenerate it with --smoke-data-dir"
+            "residual-gated runs are authorized only for smoke or architecture phases"
         )
-    expected_fingerprint = smoke_data.get("fingerprint")
     if expected_fingerprint != fingerprint:
         raise ValueError(
-            "residual audit authorizes a different 50M smoke dataset: "
+            f"residual audit authorizes a different {dataset_label}: "
             f"expected {expected_fingerprint}, found {fingerprint}"
         )
     settings = audit.get("audit")
@@ -50,6 +71,41 @@ def validate_residual_audit_authorization(
     if audit.get("gated_smoke_authorized") is not True:
         raise ValueError("residual audit does not authorize gated smoke training")
     return audit
+
+
+def validate_residual_gate_promotion_override(
+    path: str | Path, *, fingerprint: str, candidate: str
+) -> dict[str, Any]:
+    """Validate a manual 250M promotion bound to exact smoke artifacts."""
+
+    override = json.loads(Path(path).read_text(encoding="utf-8"))
+    required = {
+        "schema_version": 1,
+        "decision": "manual_promotion_override",
+        "target_phase": "architecture",
+        "selected_candidate": candidate,
+        "data_fingerprint": fingerprint,
+        "waived_requirements": ["peak_memory"],
+    }
+    if not isinstance(override, dict) or any(
+        override.get(name) != value for name, value in required.items()
+    ):
+        raise ValueError(
+            "promotion override does not authorize this exact architecture run"
+        )
+    artifacts = override.get("source_artifacts")
+    if not isinstance(artifacts, dict) or set(artifacts) != {"selection", "summary"}:
+        raise ValueError("promotion override must bind the smoke summary and selection")
+    for label, record in artifacts.items():
+        if not isinstance(record, dict):
+            raise ValueError(f"promotion override has an invalid {label} artifact")
+        artifact_path = record.get("path")
+        expected_sha256 = record.get("sha256")
+        if not isinstance(artifact_path, str) or not isinstance(expected_sha256, str):
+            raise ValueError(f"promotion override has an invalid {label} artifact")
+        if _canonical_json_sha256(artifact_path) != expected_sha256:
+            raise ValueError(f"promotion override {label} artifact checksum mismatch")
+    return override
 
 
 def _positive_finite(value: Any) -> bool:
@@ -213,4 +269,5 @@ __all__ = [
     "GATE_LABELS",
     "select_residual_gate_candidate",
     "validate_residual_audit_authorization",
+    "validate_residual_gate_promotion_override",
 ]

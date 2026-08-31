@@ -139,6 +139,7 @@ scripts/run_colab_kiwilm2_smoke.sh
 scripts/run_colab_kiwilm2_slim_smoke.sh
 scripts/run_colab_kiwilm2_slim_v3_smoke.sh
 scripts/run_colab_kiwilm2_slim_v3_residual_gates_smoke.sh
+scripts/run_colab_kiwilm2_slim_v3_gate050_architecture.sh
 scripts/run_colab_kiwilm2_architecture.sh
 scripts/run_colab_kiwilm2_muon_sweep.sh
 ```

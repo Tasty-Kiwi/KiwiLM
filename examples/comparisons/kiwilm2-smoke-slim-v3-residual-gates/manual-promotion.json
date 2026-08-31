@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "decision": "manual_promotion_override",
+  "target_phase": "architecture",
+  "selected_candidate": "slim-v3-h6s4-gate-050",
+  "data_fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+  "waived_requirements": [
+    "peak_memory"
+  ],
+  "rationale": "User explicitly accepted the measured 5.42% peak-memory increase because the model adds only four scalar parameters and the run peak is confounded by compiled validation and diagnostic graphs.",
+  "source_artifacts": {
+    "summary": {
+      "path": "examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/summary.json",
+      "sha256": "c3224391ee55013f75fbaa66b67dac3888dd9e8b1cb9ab48c602677053d8c8b9"
+    },
+    "selection": {
+      "path": "examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/selection.json",
+      "sha256": "b3fc63b5357b23a255960cb7f750860d368ab4b4bf66f47a8f76919209874de1"
+    }
+  }
+}

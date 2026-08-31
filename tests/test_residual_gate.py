@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import runpy
 from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from kiwilm.config import KiwiLM2Config, KiwiLM2SlimV3Config
 from kiwilm.residual_gate import (
     select_residual_gate_candidate,
     validate_residual_audit_authorization,
+    validate_residual_gate_promotion_override,
 )
 
 
@@ -138,10 +140,62 @@ def test_residual_audit_authorization_requires_the_exact_frozen_controls(
     ) == audit
     with pytest.raises(ValueError, match="different 50M smoke dataset"):
         validate_residual_audit_authorization(path, fingerprint="c" * 64)
+    assert validate_residual_audit_authorization(
+        path, fingerprint="a" * 64, phase="architecture"
+    ) == audit
     audit["audit"]["batches_per_seed"] = 49
     path.write_text(json.dumps(audit), encoding="utf-8")
     with pytest.raises(ValueError, match="frozen 100-batch"):
         validate_residual_audit_authorization(path, fingerprint="b" * 64)
+
+
+def test_manual_promotion_override_is_bound_to_exact_smoke_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    summary = Path("summary.json")
+    selection = Path("selection.json")
+    summary.write_text('{"result":"memory-only failure"}\n', encoding="utf-8")
+    selection.write_text('{"selected":null}\n', encoding="utf-8")
+    def canonical_hash(path: Path) -> str:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        canonical = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        return sha256(canonical).hexdigest()
+
+    override = {
+        "schema_version": 1,
+        "decision": "manual_promotion_override",
+        "target_phase": "architecture",
+        "selected_candidate": "slim-v3-h6s4-gate-050",
+        "data_fingerprint": "a" * 64,
+        "waived_requirements": ["peak_memory"],
+        "source_artifacts": {
+            "summary": {
+                "path": str(summary),
+                "sha256": canonical_hash(summary),
+            },
+            "selection": {
+                "path": str(selection),
+                "sha256": canonical_hash(selection),
+            },
+        },
+    }
+    path = Path("override.json")
+    path.write_text(json.dumps(override), encoding="utf-8")
+    assert validate_residual_gate_promotion_override(
+        path,
+        fingerprint="a" * 64,
+        candidate="slim-v3-h6s4-gate-050",
+    ) == override
+    summary.write_text('{"result":"changed"}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="summary artifact checksum mismatch"):
+        validate_residual_gate_promotion_override(
+            path,
+            fingerprint="a" * 64,
+            candidate="slim-v3-h6s4-gate-050",
+        )
 
 
 def test_experiment_candidates_drop_h7_and_isolate_both_gate_initializers() -> None:

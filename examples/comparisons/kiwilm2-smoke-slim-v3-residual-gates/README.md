@@ -6,9 +6,11 @@ passes trajectory, health, residual, loss, throughput, cache-parity, and
 generation thresholds; its sole failure is peak memory at 105.42% of control
 versus the allowed 102%.
 
-Do not launch a 250M gated run under this experiment. See
-[analysis.md](analysis.md), [summary.json](summary.json), and
-[selection.json](selection.json).
+The frozen selector remains unchanged, but the user explicitly waived the
+memory-only failure and promoted alpha 0.5 to a fresh 250M confirmation. The
+override is bound to the exact summary and selector checksums in
+[manual-promotion.json](manual-promotion.json). See [analysis.md](analysis.md),
+[summary.json](summary.json), and [selection.json](selection.json).
 
 Generate the complete prompt suite (six prompts, seeds 42 through 46):
 

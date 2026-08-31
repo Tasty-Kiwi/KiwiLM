@@ -20,7 +20,10 @@ from kiwilm.diagnostics import (
 from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import KiwiLM2LM, build_model
-from kiwilm.residual_gate import validate_residual_audit_authorization
+from kiwilm.residual_gate import (
+    validate_residual_audit_authorization,
+    validate_residual_gate_promotion_override,
+)
 from kiwilm.training import TrainConfig, choose_device, train
 
 PHASE_TOKENS = {
@@ -98,6 +101,11 @@ def parser() -> argparse.ArgumentParser:
         help="required authorization JSON for either residual-gated candidate",
     )
     result.add_argument(
+        "--promotion-override",
+        type=Path,
+        help="required manual decision record for a gated 250M confirmation",
+    )
+    result.add_argument(
         "--resume-existing",
         action="store_true",
         help="resume each candidate from its output directory's latest.pt",
@@ -138,12 +146,30 @@ def main() -> int:
     source = PreparedTokenData(args.data_dir, seed=args.seed)
     gated_requested = bool(set(args.candidates) & GATED_CANDIDATES)
     residual_audit = None
+    promotion_override = None
     if gated_requested:
         if args.residual_audit is None:
             raise ValueError("gated candidates require --residual-audit")
         residual_audit = validate_residual_audit_authorization(
-            args.residual_audit, fingerprint=source.fingerprint
+            args.residual_audit,
+            fingerprint=source.fingerprint,
+            phase=args.phase,
         )
+        if args.phase == "architecture":
+            gated_candidates = set(args.candidates) & GATED_CANDIDATES
+            if gated_candidates != {"slim-v3-h6s4-gate-050"}:
+                raise ValueError(
+                    "the manual 250M promotion authorizes only slim-v3-h6s4-gate-050"
+                )
+            if args.promotion_override is None:
+                raise ValueError(
+                    "gated architecture runs require --promotion-override"
+                )
+            promotion_override = validate_residual_gate_promotion_override(
+                args.promotion_override,
+                fingerprint=source.fingerprint,
+                candidate="slim-v3-h6s4-gate-050",
+            )
     common: dict[str, Any] = {
         "vocab_size": source.tokenizer.vocab_size,
         "context_length": 512,
@@ -203,6 +229,7 @@ def main() -> int:
         "candidates": list(args.candidates),
         "resume_existing": args.resume_existing,
         "residual_audit": residual_audit,
+        "promotion_override": promotion_override,
         "shared_train_config": settings.to_dict(),
         "runs": {},
     }

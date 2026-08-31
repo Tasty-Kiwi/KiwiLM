@@ -354,6 +354,28 @@ The selector enforces every loss, throughput, memory, gradient, residual,
 alpha, parity, and repetition threshold. A winner advances to a fresh 250M
 confirmation and never directly to 500M.
 
+The corrected alpha=0.5 smoke passed every criterion except the peak-memory
+measurement. A user-authorized override preserves that selector result while
+allowing one fresh 250M confirmation. On Windows PowerShell:
+
+```powershell
+uv run --locked python scripts\run_kiwilm2_experiment.py `
+  --phase architecture `
+  --data-dir "data\smollm-architecture" `
+  --output-dir "runs\kiwilm2-slim-v3-gate050-architecture" `
+  --candidates slim-v3-h6s4-gate-050 `
+  --residual-audit "examples\comparisons\kiwilm2-slim-v3-residual-audit\audit.json" `
+  --promotion-override "examples\comparisons\kiwilm2-smoke-slim-v3-residual-gates\manual-promotion.json" `
+  --device cuda --precision bf16 --batch-size 8 --grad-accum-steps 4 `
+  --slim-compile-mode compiled --resume-existing
+```
+
+For Colab:
+
+```bash
+COLAB_GPU=L4 scripts/run_colab_kiwilm2_slim_v3_gate050_architecture.sh
+```
+
 Run the dense KiwiLM 2 Muon sweep at `0.01 / 0.02 / 0.04`:
 
 ```bash

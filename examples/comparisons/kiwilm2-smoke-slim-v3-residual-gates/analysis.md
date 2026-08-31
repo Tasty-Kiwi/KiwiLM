@@ -3,8 +3,9 @@
 ## Verdict
 
 The corrected alpha-0.5 run passes every frozen promotion criterion except peak
-memory. The unchanged selector therefore records no canonical winner, and the
-gated model does not advance to 250M under the predeclared rules.
+memory. The unchanged selector therefore records no canonical winner. The user
+subsequently made an explicit manual decision to waive that single measurement
+and promote alpha 0.5 to a fresh 250M confirmation.
 
 Scientifically, alpha 0.5 is otherwise a successful intervention. It reproduces
 the original model's loss, lowers block-9 residual amplification, records a
@@ -119,12 +120,11 @@ The unchanged selector records:
 - selected candidate: none;
 - next stage: none.
 
-Do not repeat another 50M training run and do not start a 250M gated run under
-this experiment. If the memory ambiguity is worth resolving, declare a new
-same-process CUDA benchmark protocol that loads control and alpha 0.5 under the
-same runtime, resets peak statistics between models, and measures identical
-training steps without validation hooks. That would be a new measurement, not
-a retroactive change to this selector result.
+Do not repeat another 50M training run. The manual promotion is recorded in
+[manual-promotion.json](manual-promotion.json), bound to the exact summary and
+selection checksums, and authorizes only alpha 0.5 on the 250M architecture
+dataset. The frozen selector remains a no-winner result; the override does not
+rewrite or relax it retroactively.
 
 Machine-readable evidence is in [summary.json](summary.json) and the frozen
 decision is in [selection.json](selection.json).

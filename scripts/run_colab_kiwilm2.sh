@@ -43,9 +43,23 @@ if [[ "${variant}" == "kiwilm2_slim_v3" ]]; then
       echo "Gated Slim v3 requires KIWILM2_RESIDUAL_AUDIT" >&2
       exit 1
     fi
-    uv run --locked python -c \
-      'import json,sys; a=json.load(open(sys.argv[1])); assert a.get("gated_smoke_authorized") is True and a.get("residual_growth_reproduced") is True, "audit does not authorize gated smoke"' \
-      "${residual_audit}"
+    if [[ "${phase}" == "architecture" ]]; then
+      promotion_override="${KIWILM2_PROMOTION_OVERRIDE:-}"
+      if [[ -z "${promotion_override}" || ! -f "${promotion_override}" ]]; then
+        echo "Gated architecture runs require KIWILM2_PROMOTION_OVERRIDE" >&2
+        exit 1
+      fi
+      uv run --locked python -c \
+        'import json,sys; from kiwilm.residual_gate import validate_residual_audit_authorization,validate_residual_gate_promotion_override; a=json.load(open(sys.argv[1])); f=a["data_fingerprint"]; validate_residual_audit_authorization(sys.argv[1], fingerprint=f, phase="architecture"); validate_residual_gate_promotion_override(sys.argv[2], fingerprint=f, candidate="slim-v3-h6s4-gate-050")' \
+        "${residual_audit}" "${promotion_override}"
+    elif [[ "${phase}" == "smoke" ]]; then
+      uv run --locked python -c \
+        'import json,sys; from kiwilm.residual_gate import validate_residual_audit_authorization; a=json.load(open(sys.argv[1])); validate_residual_audit_authorization(sys.argv[1], fingerprint=a["authorized_smoke_data"]["fingerprint"], phase="smoke")' \
+        "${residual_audit}"
+    else
+      echo "Residual-gated Colab runs are authorized only for smoke or architecture" >&2
+      exit 1
+    fi
   fi
 elif [[ -n "${upper_swiglu_blocks}" ]]; then
   echo "KIWILM2_UPPER_SWIGLU_BLOCKS is valid only for kiwilm2_slim_v3" >&2
