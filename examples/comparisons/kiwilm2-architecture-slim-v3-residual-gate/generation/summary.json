@@ -1,0 +1,33 @@
+{
+  "data_fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+  "device": "cpu",
+  "generation": {
+    "dense": {
+      "maximum_consecutive_word_run": 2,
+      "repeated_four_gram_rate": 0.031171592824130803
+    },
+    "h6s4_gate050": {
+      "maximum_consecutive_word_run": 118,
+      "repeated_four_gram_rate": 0.08524532032466656
+    },
+    "h6s4_ungated": {
+      "maximum_consecutive_word_run": 147,
+      "repeated_four_gram_rate": 0.13581559407781693
+    }
+  },
+  "generation_count": 90,
+  "prompt_count": 6,
+  "report_path": "examples/comparisons/kiwilm2-architecture-slim-v3-residual-gate/generation/report.md",
+  "results_path": "examples/comparisons/kiwilm2-architecture-slim-v3-residual-gate/generation/results.jsonl",
+  "sampling_profile_count": 5,
+  "sampling_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "suite_path": "eval/residual-gate-prompts.json",
+  "suite_version": 1,
+  "summary_path": "examples/comparisons/kiwilm2-architecture-slim-v3-residual-gate/generation/summary.json"
+}

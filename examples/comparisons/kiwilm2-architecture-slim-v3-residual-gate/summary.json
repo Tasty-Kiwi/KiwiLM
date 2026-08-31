@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "title": "KiwiLM 2 Slim v3 H6/S4 residual gate: 250M confirmation",
+  "data": {
+    "fingerprint": "d71d246e9af91a538515509c91df9ec1031e541fa51ef7009d0732e0a825c018",
+    "train_tokens": 250000000,
+    "validation_tokens": 2000000,
+    "context_length": 512,
+    "vocab_size": 32000
+  },
+  "provenance": {
+    "comparable": true,
+    "seed": 42,
+    "optimizer": "adamw",
+    "precision": "bf16",
+    "batch_size": 8,
+    "grad_accum_steps": 4,
+    "checkpoint_policy": "latest checkpoints at exactly 250M tokens",
+    "candidate_checkpoint": "runs/kiwilm2-slim-v3-gate050-architecture/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt"
+  },
+  "aligned_validation": {
+    "seed": 143,
+    "batches": 200,
+    "batch_size": 2,
+    "precision": "fp32",
+    "valid_targets": 204800,
+    "models": {
+      "dense_adamw": {
+        "validation_loss": 3.7425286781787874,
+        "validation_perplexity": 42.20457713938109
+      },
+      "dense_muon_001": {
+        "validation_loss": 3.6459088945388793,
+        "validation_perplexity": 38.31758367202182
+      },
+      "h6s4_ungated": {
+        "validation_loss": 3.8350516760349276,
+        "validation_perplexity": 46.29581999054786
+      },
+      "h6s4_gate050": {
+        "validation_loss": 3.828351595401764,
+        "validation_perplexity": 45.9866710814436
+      }
+    },
+    "gate050_minus_ungated_loss": -0.00670008063316363,
+    "gate050_minus_dense_adamw_loss": 0.08582291722297652,
+    "gate050_minus_dense_muon_001_loss": 0.1824427008628848
+  },
+  "training_log": {
+    "models": {
+      "dense_adamw": {
+        "final_validation_loss": 3.775666124820709,
+        "median_tokens_per_second": 27736.141870501124,
+        "peak_accelerator_memory_bytes": 4053881344
+      },
+      "dense_muon_001": {
+        "final_validation_loss": 3.681991642713547,
+        "median_tokens_per_second": 22048.817163182055,
+        "peak_accelerator_memory_bytes": 3929362944
+      },
+      "h6s4_ungated": {
+        "final_validation_loss": 3.8685765171051028,
+        "median_tokens_per_second": 39090.64900569736,
+        "peak_accelerator_memory_bytes": 3719234560
+      },
+      "h6s4_gate050": {
+        "final_validation_loss": 3.8625889337062835,
+        "median_tokens_per_second": 29641.232894376022,
+        "peak_accelerator_memory_bytes": 3675482624
+      }
+    },
+    "gate050_throughput_vs_dense_adamw": 1.068853694020252,
+    "gate050_throughput_vs_ungated": 0.7587196912596554,
+    "gate050_peak_memory_vs_dense_adamw": 0.9074535258348941,
+    "note": "Throughput is taken from each run's recorded host and is sensitive to competing system load."
+  },
+  "health": {
+    "audit_path": "examples/comparisons/kiwilm2-architecture-slim-v3-residual-gate/health.json",
+    "seeds": [141, 142],
+    "batches_per_seed": 50,
+    "total_batches": 100,
+    "gate050": {
+      "health_pass_count": 46,
+      "all_finite": true,
+      "all_nonzero_gradients": true,
+      "minimum_family_gradient_ratios": {
+        "hadamard": 0.4347825949800898,
+        "swiglu": 1.2400211493109816
+      },
+      "block9_residual_amplification": {
+        "median": 1.5016252588997219,
+        "p90": 1.581524766724092,
+        "p95": 1.5935506396904295,
+        "maximum": 1.6248584565634037,
+        "threshold_failure_count": 54
+      },
+      "effective_alphas": [
+        0.6833788156509399,
+        0.7089089155197144,
+        0.6542666554450989,
+        0.7020660638809204
+      ],
+      "cached_generation_parity": true
+    },
+    "ungated_reference": {
+      "audit_path": "examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json",
+      "health_pass_count": 37,
+      "block9_p90": 1.597603366345365,
+      "block9_maximum": 1.6539681197989973,
+      "block9_threshold_failure_count": 63
+    }
+  },
+  "generation": {
+    "suite": "eval/residual-gate-prompts.json",
+    "sampling_seeds": [42, 43, 44, 45, 46],
+    "generation_count": 90,
+    "models": {
+      "dense_adamw": {
+        "maximum_consecutive_word_run": 2,
+        "repeated_four_gram_rate": 0.031171592824130803
+      },
+      "h6s4_ungated": {
+        "maximum_consecutive_word_run": 147,
+        "repeated_four_gram_rate": 0.13581559407781693
+      },
+      "h6s4_gate050": {
+        "maximum_consecutive_word_run": 118,
+        "repeated_four_gram_rate": 0.08524532032466656
+      }
+    }
+  },
+  "retrieval": {
+    "context_length": 512,
+    "pairs_per_distance": 32,
+    "models": {
+      "dense_adamw": {
+        "candidate_accuracy": 0.2625,
+        "paired_flip_accuracy": 0.0,
+        "mean_contextual_logit_lift": 0.8097955251112581
+      },
+      "h6s4_ungated": {
+        "candidate_accuracy": 0.375,
+        "paired_flip_accuracy": 0.1,
+        "mean_contextual_logit_lift": 1.2969571201130747
+      },
+      "h6s4_gate050": {
+        "candidate_accuracy": 0.3,
+        "paired_flip_accuracy": 0.0375,
+        "mean_contextual_logit_lift": 0.8033899347065017
+      }
+    }
+  },
+  "promotion_checks": {
+    "finite_and_nonzero": true,
+    "family_gradient_ratios_at_least_01": true,
+    "health_passes_at_least_95": false,
+    "block9_p90_at_most_15": false,
+    "block9_maximum_at_most_165": true,
+    "alphas_strictly_bounded": true,
+    "cached_generation_parity": true,
+    "within_01_loss_of_dense_adamw": true,
+    "within_01_loss_of_dense_muon_001": false,
+    "at_least_10_percent_faster_than_dense_adamw": false,
+    "maximum_word_run_below_20": false
+  },
+  "decision": {
+    "promote_gate050_to_final_run": false,
+    "canonical_slim_candidate": null,
+    "final_run_baseline": "dense",
+    "reason": "The gate marginally improves H6/S4 loss and residual statistics, but fails the 100-batch health distribution, severe-repetition, and recorded-throughput requirements."
+  }
+}
