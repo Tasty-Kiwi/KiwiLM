@@ -1,14 +1,14 @@
 # Slim v3 H6/S4 residual-gate smoke
 
-The experiment is complete, but the frozen selector records no canonical
-winner. Alpha 0.25 fails loss and throughput. Alpha 0.5 passes health, residual,
-loss, memory, cache-parity, and generation thresholds, but reaches 94.79% of
-control throughput rather than the required 95% and has no recorded alpha
-trajectory because of a runner-label bug.
+The corrected experiment is complete, but the frozen selector records no
+canonical winner. Alpha 0.25 fails loss and throughput. Corrected alpha 0.5
+passes trajectory, health, residual, loss, throughput, cache-parity, and
+generation thresholds; its sole failure is peak memory at 105.42% of control
+versus the allowed 102%.
 
-The model evidence favors alpha 0.5 strongly enough to justify one corrected
-alpha-0.5 rerun, not a 250M promotion. See [analysis.md](analysis.md),
-[summary.json](summary.json), and [selection.json](selection.json).
+Do not launch a 250M gated run under this experiment. See
+[analysis.md](analysis.md), [summary.json](summary.json), and
+[selection.json](selection.json).
 
 Generate the complete prompt suite (six prompts, seeds 42 through 46):
 
@@ -18,7 +18,7 @@ uv run --locked kiwilm compare \
   --checkpoints \
     runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h6-s4-adamw/latest.pt \
     runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-025-adamw/latest.pt \
-    runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
+    runs/kiwilm2-slim-v3-residual-gate-050-smoke-rerun/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
   --labels control gate_025 gate_050 \
   --suite eval/residual-gate-prompts.json \
   --output-dir examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/generation \
@@ -32,7 +32,7 @@ uv run --locked python scripts/evaluate_kiwilm2_residual_gate_smoke.py \
   --data-dir data/smollm-smoke \
   --control runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h6-s4-adamw/latest.pt \
   --gate-025 runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-025-adamw/latest.pt \
-  --gate-050 runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
+  --gate-050 runs/kiwilm2-slim-v3-residual-gate-050-smoke-rerun/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
   --generation-summary examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/generation/summary.json \
   --output examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/summary.json \
   --device cuda --precision bf16
@@ -53,7 +53,7 @@ uv run --locked python scripts/evaluate_context_retrieval.py \
   --data-dir data/smollm-smoke \
   --checkpoint runs/kiwilm2-slim-v3-smoke/kiwilm2-slim-v3-h6-s4-adamw/latest.pt \
   --checkpoint runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-025-adamw/latest.pt \
-  --checkpoint runs/kiwilm2-slim-v3-residual-gates-smoke/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
+  --checkpoint runs/kiwilm2-slim-v3-residual-gate-050-smoke-rerun/kiwilm2-slim-v3-h6-s4-gate-050-adamw/latest.pt \
   --label control --label gate_025 --label gate_050 \
   --context-length 512 \
   --output-dir examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/retrieval \

@@ -11,8 +11,7 @@
     "gate_050": {
       "eligible": false,
       "reasons": [
-        "all recorded alpha trajectories must remain within (0, 1)",
-        "throughput is below 95% of ungated H6/S4"
+        "peak memory is more than 2% above ungated H6/S4"
       ]
     }
   },
