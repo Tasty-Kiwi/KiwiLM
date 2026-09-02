@@ -92,6 +92,7 @@ def build_colab_job(
     allow_data_token_mismatch: bool = False,
     drive_backups: bool = True,
     drive_root: str = "/content/drive/MyDrive/KiwiLM2",
+    require_resume: bool = False,
 ) -> dict[str, Any]:
     """Return a JSON-compatible job, optionally validating local prepared data."""
 
@@ -148,6 +149,8 @@ def build_colab_job(
         raise TypeError("seed must be an integer")
     if not isinstance(drive_backups, bool):
         raise TypeError("drive_backups must be a boolean")
+    if not isinstance(require_resume, bool):
+        raise TypeError("require_resume must be a boolean")
     drive_path = PurePosixPath(drive_root) if isinstance(drive_root, str) else None
     if (
         drive_path is None
@@ -226,6 +229,9 @@ def build_colab_job(
         "fineweb_probability": 0.7,
         "drive_backups": drive_backups,
         "drive_root": drive_root,
+        # Recovery policy is deliberately excluded from checkpoint_backup_key:
+        # requiring a resume must still locate backups created by older jobs.
+        "require_resume": require_resume,
         "data_cache_key": f"{phase}-{resolved_tokens}-seed{seed}",
     }
 

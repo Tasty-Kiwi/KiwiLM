@@ -35,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-data-token-mismatch", action="store_true")
     parser.add_argument("--drive-root", default="/content/drive/MyDrive/KiwiLM2")
     parser.add_argument("--no-drive-backups", action="store_true")
+    parser.add_argument(
+        "--require-resume", action="store_true",
+        help="Refuse to start from scratch; require an uploaded or Drive checkpoint",
+    )
     return parser
 
 
@@ -59,6 +63,7 @@ def main() -> int:
         allow_data_token_mismatch=args.allow_data_token_mismatch,
         drive_backups=not args.no_drive_backups,
         drive_root=args.drive_root,
+        require_resume=args.require_resume,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(job, indent=2, sort_keys=True) + "\n", encoding="utf-8")

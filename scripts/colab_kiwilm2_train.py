@@ -102,7 +102,11 @@ def prepare_data(drive_root: Path | None) -> PreparedTokenData:
         if drive_root is not None
         else None
     )
-    if cache_dir is not None and restore_prepared_data(cache_dir, DATA_DIR):
+    if cache_dir is not None and restore_prepared_data(
+        cache_dir, DATA_DIR,
+        required=job.get("require_resume", False),
+        storage_root=drive_root,
+    ):
         print(f"Restored prepared SmolLM data from {cache_dir}", flush=True)
     else:
         DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
@@ -158,8 +162,17 @@ def stage_resume(backup_dir: Path | None) -> Path | None:
         print("Resuming from the explicitly uploaded checkpoint", flush=True)
         return explicit
     if backup_dir is None:
+        if job.get("require_resume", False):
+            raise RuntimeError(
+                "Resume is required but no uploaded checkpoint or Drive backup is available; "
+                "refusing to train from scratch"
+            )
         return None
-    restored = restore_checkpoint_backup(backup_dir, RUN_DIR)
+    restored = restore_checkpoint_backup(
+        backup_dir, RUN_DIR,
+        required=job.get("require_resume", False),
+        storage_root=Path(job["drive_root"]),
+    )
     if restored is not None:
         print(f"Resuming from Google Drive checkpoint {backup_dir / 'latest.pt'}", flush=True)
     return restored
@@ -177,13 +190,14 @@ if job["drive_backups"]:
     drive_root.mkdir(parents=True, exist_ok=True)
     backup_dir = drive_root / "checkpoints" / checkpoint_backup_key(job)
 
+# Fail closed before expensive data restoration/preparation or any backup writes.
+resume_path = stage_resume(backup_dir)
 data = prepare_data(drive_root)
 tokenizer_metadata = data.metadata["tokenizer"]
 job["data_fingerprint"] = data.fingerprint
 job["tokenizer_sha256"] = tokenizer_metadata["sha256"]
 job["resolved_dataset_revision"] = data.metadata["dataset"]["resolved_revision"]
 JOB_PATH.write_text(json.dumps(job, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-resume_path = stage_resume(backup_dir)
 
 if not torch.cuda.is_available():
     raise RuntimeError("KiwiLM 2 Colab training requires a CUDA GPU")

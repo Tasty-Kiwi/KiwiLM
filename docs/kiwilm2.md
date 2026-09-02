@@ -447,6 +447,40 @@ the exit trap attempts to download `emergency-latest.pt`, `emergency-best.pt`,
 and `emergency-metrics.jsonl` before releasing the VM; the last completed
 periodic checkpoint should also remain in Drive.
 
+For an interrupted job, set `KIWILM2_REQUIRE_RESUME=1`. The worker checks for
+an uploaded or Drive `latest.pt` before restoring the dataset and refuses to
+start from scratch if it is missing or inaccessible. With Drive enabled, this
+mode also requires the existing complete data cache instead of regenerating it.
+Explicit `KIWILM2_RESUME_FROM` automatically enables required-resume mode.
+The recovery flag does not change the Drive backup key or training budget.
+
+For example, resume the FP16/T4 Dense Muon 0.01 500M job:
+
+```bash
+KIWILM2_REQUIRE_RESUME=1 \
+KIWILM2_PHASE=final-500m KIWILM2_VARIANT=kiwilm2 \
+KIWILM2_OPTIMIZER=muon KIWILM2_MUON_LR=0.01 \
+KIWILM2_PRECISION=fp16 KIWILM2_COMPILE_POLICY=eager \
+KIWILM2_BATCH_SIZE=8 KIWILM2_GRAD_ACCUM_STEPS=4 \
+KIWILM2_SEED=42 COLAB_GPU=T4 \
+bash scripts/run_colab_kiwilm2.sh
+```
+
+Use the original job's settings; 500M remains the **total** token target, not
+another 500M tokens. The checkpoint's saved step is authoritative: a copied
+metrics file can include later steps that must be replayed after resuming.
+
+Drive restoration makes up to three attempts on transient filesystem errors,
+with five seconds between attempts. Dataset copies are staged locally and verified against
+the cache fingerprint and tokenizer/split SHA-256 hashes before replacing local
+data. Failed copies leave existing local data and Drive sources untouched.
+Integrity failures stop startup rather than silently rebuilding the dataset.
+If `Transport endpoint is not connected` persists, check Drive in the browser
+and remount it interactively on the next launch; retries cannot repair a dead
+Drive mount. Subsequent `No such file` messages alone do not prove cloud data
+was deleted. Required-resume mode protects against a silent fresh run, but
+cannot recover steps that were never checkpointed and backed up.
+
 ## External evaluation
 
 Prepare TinyStories and SimpleStories with the frozen SmolLM tokenizer, then

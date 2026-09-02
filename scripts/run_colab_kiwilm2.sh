@@ -18,6 +18,7 @@ swiglu_residual_gate_init="${KIWILM2_SWIGLU_RESIDUAL_GATE_INIT:-}"
 seed="${KIWILM2_SEED:-42}"
 timeout_seconds="${COLAB_TIMEOUT_SECONDS:-82800}"
 resume_from="${KIWILM2_RESUME_FROM:-}"
+require_resume="${KIWILM2_REQUIRE_RESUME:-0}"
 drive_backups="${KIWILM2_DRIVE_BACKUPS:-1}"
 drive_root="${KIWILM2_DRIVE_ROOT:-/content/drive/MyDrive/KiwiLM2}"
 schedule_suffix=""
@@ -91,6 +92,18 @@ case "${drive_backups}" in
     ;;
 esac
 
+case "${require_resume}" in
+  0|1) ;;
+  *)
+    echo "KIWILM2_REQUIRE_RESUME must be 0 or 1; found '${require_resume}'" >&2
+    exit 1
+    ;;
+esac
+if [[ "${require_resume}" == "1" && "${drive_backups}" == "0" && -z "${resume_from}" ]]; then
+  echo "Required resume needs Drive backups or KIWILM2_RESUME_FROM" >&2
+  exit 1
+fi
+
 mkdir -p "${result_dir}"
 
 if [[ -n "${resume_from}" && ! -f "${resume_from}" ]]; then
@@ -158,6 +171,9 @@ if [[ "${KIWILM2_ALLOW_DATA_TOKEN_MISMATCH:-0}" == "1" ]]; then
 fi
 if [[ "${drive_backups}" == "0" ]]; then
   job_command+=(--no-drive-backups)
+fi
+if [[ "${require_resume}" == "1" || -n "${resume_from}" ]]; then
+  job_command+=(--require-resume)
 fi
 "${job_command[@]}"
 
