@@ -1,5 +1,7 @@
 # KiwiLM 2
 
+Experimental hardware qualification: [single-chip Colab TPU smoke](docs/tpu-smoke.md).
+
 KiwiLM 2 is a controlled language-model architecture experiment combining
 periodic grouped-query attention, large-kernel causal gated convolutions, and
 hashed bigram/trigram embeddings. The repository contains three active variants:

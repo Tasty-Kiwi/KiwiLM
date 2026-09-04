@@ -177,7 +177,14 @@ def save_checkpoint(
     os.close(file_descriptor)
     temporary_path = Path(temporary_name)
     try:
-        torch.save(payload, temporary_path)
+        if any(parameter.device.type == "xla" for parameter in model.parameters()):
+            # XLA tensors need explicit CPU materialization for portable checkpoints.
+            # Import lazily so GPU/Windows installations do not require torch_xla.
+            import torch_xla.core.xla_model as xm
+
+            xm.save(payload, temporary_path)
+        else:
+            torch.save(payload, temporary_path)
         os.replace(temporary_path, destination)
     finally:
         temporary_path.unlink(missing_ok=True)

@@ -748,6 +748,12 @@ def _validate_resume_settings(
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if not isinstance(payload, Mapping):
         raise ValueError("resume checkpoint must contain a mapping")
+    training_state = payload.get("training_state")
+    if isinstance(training_state, Mapping) and training_state.get("smoke_contract"):
+        raise CheckpointCompatibilityError(
+            "experimental hardware smoke checkpoints must resume with "
+            "python -m kiwilm.tpu_smoke, not the production trainer"
+        )
     saved = payload.get("train_config")
     if not isinstance(saved, Mapping):
         raise CheckpointCompatibilityError(
