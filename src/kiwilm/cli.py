@@ -455,6 +455,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate_parser.add_argument("--seed", type=int, default=42)
     generate_parser.add_argument(
+        "--allow-data-mismatch",
+        action="store_true",
+        help=(
+            "explicitly use a tokenizer from another prepared dataset; tokenizer "
+            "vocabulary size must still match"
+        ),
+    )
+    generate_parser.add_argument(
         "--cache",
         choices=("auto", "off"),
         default="auto",
@@ -993,7 +1001,9 @@ def _generate_command(args: argparse.Namespace) -> int:
     )
     model, config = load_trained_model(
         args.checkpoint,
-        data_fingerprint=None if data is None else data.fingerprint,
+        data_fingerprint=(
+            None if data is None or args.allow_data_mismatch else data.fingerprint
+        ),
         device=device,
     )
     tokenizer = (

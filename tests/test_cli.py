@@ -103,6 +103,25 @@ def test_cli_keeps_generic_data_training_and_evaluation_commands() -> None:
     assert set(subcommands) == expected
 
 
+def test_generate_allows_explicit_cross_budget_tokenizer_use() -> None:
+    args = build_parser().parse_args(
+        ["generate", "--checkpoint", "latest.pt", "--prompt", "Hello"]
+    )
+    assert args.allow_data_mismatch is False
+
+    args = build_parser().parse_args(
+        [
+            "generate",
+            "--checkpoint",
+            "latest.pt",
+            "--prompt",
+            "Hello",
+            "--allow-data-mismatch",
+        ]
+    )
+    assert args.allow_data_mismatch is True
+
+
 def test_cli_sft_and_cpt_keep_checkpoint_initialization_contracts() -> None:
     parser = build_parser()
     sft = parser.parse_args(["sft", "--init-from", "runs/kiwilm2/best.pt"])
