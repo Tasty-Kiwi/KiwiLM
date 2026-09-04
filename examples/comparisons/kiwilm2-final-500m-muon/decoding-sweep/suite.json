@@ -1,0 +1,114 @@
+{
+  "prompts": [
+    {
+      "id": "open_story",
+      "prompt": "Once upon a time",
+      "category": "story"
+    },
+    {
+      "id": "named_entity",
+      "prompt": "Once upon a time, there was a little bird named Fluffy. Fluffy loved",
+      "category": "story"
+    },
+    {
+      "id": "object_ownership",
+      "prompt": "Lily gave Ben a red ball. Ben put the red ball in his",
+      "category": "story"
+    },
+    {
+      "id": "two_characters",
+      "prompt": "Mia had a blue kite, and Tom had a red boat. Mia asked Tom",
+      "category": "story"
+    },
+    {
+      "id": "persistent_goal",
+      "prompt": "The fox promised the rabbit that it would bring food before sunset. When sunset came",
+      "category": "story"
+    },
+    {
+      "id": "dialogue_location",
+      "prompt": "Emma said, \"I will wait by the old oak tree.\" Noah replied, \"I will meet you there.\" The next morning",
+      "category": "story"
+    },
+    {
+      "id": "water_cycle",
+      "prompt": "Water evaporates from lakes and oceans when",
+      "category": "expository"
+    },
+    {
+      "id": "plant_science",
+      "prompt": "Plants need sunlight because",
+      "category": "expository"
+    },
+    {
+      "id": "history",
+      "prompt": "The printing press changed the way people shared information by",
+      "category": "expository"
+    },
+    {
+      "id": "technical",
+      "prompt": "A computer stores information in binary, which means",
+      "category": "expository"
+    },
+    {
+      "id": "procedure",
+      "prompt": "To make a cup of tea, first boil water. Next,",
+      "category": "expository"
+    },
+    {
+      "id": "explanation",
+      "prompt": "A map is useful when traveling to a new place because",
+      "category": "expository"
+    }
+  ],
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "max_new_tokens": 160,
+  "profiles": [
+    {
+      "id": "greedy",
+      "temperature": 0.0,
+      "top_k": null
+    },
+    {
+      "id": "t04-k20",
+      "temperature": 0.4,
+      "top_k": 20
+    },
+    {
+      "id": "t06-k20",
+      "temperature": 0.6,
+      "top_k": 20
+    },
+    {
+      "id": "t06-k40",
+      "temperature": 0.6,
+      "top_k": 40
+    },
+    {
+      "id": "t08-k40",
+      "temperature": 0.8,
+      "top_k": 40
+    },
+    {
+      "id": "t08-k80",
+      "temperature": 0.8,
+      "top_k": 80
+    },
+    {
+      "id": "t10-k40",
+      "temperature": 1.0,
+      "top_k": 40
+    },
+    {
+      "id": "t10-k80",
+      "temperature": 1.0,
+      "top_k": 80
+    }
+  ]
+}

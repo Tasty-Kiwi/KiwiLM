@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+<rect width="980" height="520" fill="white"/>
+<g font-family="sans-serif" fill="#222">
+<text x="70" y="30" font-size="19">Dense Muon 500M decoding sweep</text>
+<text x="70" y="52" font-size="12">Lower repetition and higher distinct-bigram rate are favorable metrics, but do not measure coherence.</text>
+<path d="M70 430 H930" stroke="#eee"/>
+<text x="35" y="434" font-size="11">0.0</text>
+<path d="M70 362 H930" stroke="#eee"/>
+<text x="35" y="366" font-size="11">0.2</text>
+<path d="M70 294 H930" stroke="#eee"/>
+<text x="35" y="298" font-size="11">0.4</text>
+<path d="M70 226 H930" stroke="#eee"/>
+<text x="35" y="230" font-size="11">0.6</text>
+<path d="M70 158 H930" stroke="#eee"/>
+<text x="35" y="162" font-size="11">0.8</text>
+<path d="M70 90 H930" stroke="#eee"/>
+<text x="35" y="94" font-size="11">1.0</text>
+<circle cx="90" cy="197.59852823438035" r="6" fill="#c0392b"/>
+<circle cx="90" cy="337.0417422994094" r="6" fill="#2471a3"/>
+<text x="90" y="455" text-anchor="middle" font-size="11">greedy</text>
+<circle cx="195" cy="237.86949163477632" r="6" fill="#c0392b"/>
+<circle cx="195" cy="315.19759864106175" r="6" fill="#2471a3"/>
+<text x="195" y="455" text-anchor="middle" font-size="11">t04-k20</text>
+<circle cx="300" cy="313.33812244938855" r="6" fill="#c0392b"/>
+<circle cx="300" cy="256.9651344362776" r="6" fill="#2471a3"/>
+<text x="300" y="455" text-anchor="middle" font-size="11">t06-k20</text>
+<circle cx="405" cy="338.4567389211252" r="6" fill="#c0392b"/>
+<circle cx="405" cy="237.3394090673536" r="6" fill="#2471a3"/>
+<text x="405" y="455" text-anchor="middle" font-size="11">t06-k40</text>
+<circle cx="510" cy="411.53551490119" r="6" fill="#c0392b"/>
+<circle cx="510" cy="155.99021584793104" r="6" fill="#2471a3"/>
+<text x="510" y="455" text-anchor="middle" font-size="11">t08-k40</text>
+<circle cx="615" cy="419.19581767003353" r="6" fill="#c0392b"/>
+<circle cx="615" cy="144.1628533635374" r="6" fill="#2471a3"/>
+<text x="615" y="455" text-anchor="middle" font-size="11">t08-k80</text>
+<circle cx="720" cy="422.3483307255196" r="6" fill="#c0392b"/>
+<circle cx="720" cy="130.11737872177082" r="6" fill="#2471a3"/>
+<text x="720" y="455" text-anchor="middle" font-size="11">t10-k40</text>
+<circle cx="825" cy="426.8147143078937" r="6" fill="#c0392b"/>
+<circle cx="825" cy="117.12089502478983" r="6" fill="#2471a3"/>
+<text x="825" y="455" text-anchor="middle" font-size="11">t10-k80</text>
+<circle cx="710" cy="30" r="5" fill="#c0392b"/><text x="720" y="34" font-size="12">repeated 4-grams</text>
+<circle cx="840" cy="30" r="5" fill="#2471a3"/><text x="850" y="34" font-size="12">distinct bigrams</text>
+</g></svg>
