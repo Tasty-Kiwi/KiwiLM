@@ -1,16 +1,23 @@
 # Experimental TPU hardware smoke
 
-**Qualification blocked after the completed 50M run:** throughput was 47.9k
+**Corrected v6e-1 smoke passed:** exactly 50M tokens, 67.7k weighted steady
+tokens/s, loss 4.292, 50/50 healthy batches, and aligned TPU/CPU portable reload.
+See the [completed v6e-1 report](../examples/comparisons/kiwilm2-tpu-v6e1-50m-smoke/analysis.md).
+Artifacts were downloaded and the session terminated. Fresh-VM continuation,
+on-XLA cache parity and a matched idle GPU benchmark remain required before 1B.
+
+**Previous v5e-1 smoke is not a valid Dense control:** throughput was 47.9k
 tokens/s, but XLA device transfer broke the embedding/head weight tie. The
 checkpoint therefore represents an untied model, and normal tied loading gives
 incorrect validation/generation. See the
 [50M analysis and reproducible audit](../examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md).
-Do not resume these weights as canonical Dense or launch a larger run with the
-current worker. Weight tying must be re-established after device transfer,
-before optimizer construction, and checked through portable reload. No worker
-fix or new training was performed as part of this analysis.
+Do not resume those weights as canonical Dense. The corrected worker now
+re-ties weights after device transfer, before optimizer construction; rejects
+unequal checkpoint matrices; and checks ordinary CPU reconstruction against
+the training device. The completed **v6e-1 50M smoke** started fresh;
+it is not a continuation or promotion of the v5e-1 result.
 
-The completed 200-step hardware probe sustained 53.1k tokens/s on XLA BF16,
+The historical untied 200-step probe sustained 53.1k tokens/s on XLA BF16,
 with two compiled graphs and no recorded CPU fallbacks. The launcher now runs
 the full **50,000,000-token smoke**. The
 [initial attempt report](../examples/comparisons/kiwilm2-tpu-hardware-smoke/analysis.md)
@@ -21,22 +28,70 @@ the ongoing GPU run or approval for a 1B run. Google has
 [introduced v5e-1 into Colab's free tier](https://github.com/googlecolab/colabtools/issues/5566),
 but availability varies and CLI allocations can consume compute units.
 
-## Launch
+## Prepare, then explicitly start
 
 From the repository root, with the frozen `data/smollm-smoke` present:
 
 ```bash
-bash scripts/run_colab_kiwilm2_tpu_smoke.sh
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup
 ```
 
-The launcher allocates only `v5e1`, in a separate
-`kiwilm2-tpu-v5e1-muon-smoke-50m` session. It verifies a real XLA matrix multiplication
-before uploading the validated local smoke data in checksummed 4MiB chunks;
-large single-file uploads can fail
-at the Colab proxy. It never mounts/writes Drive or accesses 500M checkpoints.
-Results go to `runs/colab/tpu-v5e1-muon-smoke-50m`, preserving the downloaded short
-probe. For repeats, set new
+Setup validates the frozen local data and any resume checkpoint before
+allocation, installs the isolated environment, runs an XLA matrix-multiply
+preflight, and prepares inputs. **It never starts training.** Omitting the
+argument also means `setup`; calling the Python bootstrap without an action
+only runs preflight. Setup mounts Drive interactively in your own terminal.
+After setup, the TPU remains allocated and **can consume compute units while idle**.
+Start training explicitly, with the same environment settings:
+
+```bash
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh train
+```
+
+Or release the default session without training:
+
+```bash
+colab stop -s kiwilm2-tpu-v6e1-muon-smoke-50m-tied-cached
+```
+
+The launcher defaults to `v6e1`, in the separate
+`kiwilm2-tpu-v6e1-muon-smoke-50m-tied-cached` session. Set `COLAB_TPU=v5e1` to test
+v5e-1; other values are rejected and no automatic substitution occurs.
+Results go to `runs/colab/tpu-v6e1-muon-smoke-50m-tied-cached`, preserving all previous
+probe and smoke artifacts. Local ownership and matching local/remote job hashes
+are required by `train`; a missing or changed lock refuses training without
+stopping an unverified session. For repeats, set new
 `KIWILM_RESULT_DIR` and `COLAB_SESSION_NAME` values, not the GPU session's name.
+
+## Avoid repeated data uploads
+
+Setup first checks a fingerprint-qualified Drive directory:
+`/content/drive/MyDrive/KiwiLM2/data/tpu-smoke-<data-fingerprint>`.
+A cache hit copies the exact tokenizer and packed splits to VM-local storage
+and validates sizes, metadata and SHA-256 checksums. It does not regenerate
+data or train from Drive. Existing mismatched, corrupt or incomplete caches fail
+setup without being overwritten; choose a new cache directory or inspect the
+existing one manually. This does not change any checkpoint backups.
+
+To reuse the already prepared GPU smoke cache, when it matches your local data:
+
+```bash
+export KIWILM2_TPU_DRIVE_CACHE=/content/drive/MyDrive/KiwiLM2/data/smoke-50000000-seed42
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup
+```
+
+On a cache miss, setup gzip-compresses the exact prepared files, uploads
+checksummed **4MiB chunks with three parallel workers**, and publishes the
+manifest last. Each upload has bounded retries. It then verifies the restored
+files and publishes a new Drive cache, writing `.complete` only after a verified
+copy. Later sessions can avoid the laptop-to-VM data upload entirely. Actual
+compression savings and transfer speed depend on the data and connection;
+the new transfer path has local tests, not a measured live speedup yet.
+
+Set `KIWILM2_UPLOAD_WORKERS=1` for a fragile connection (allowed range 1–4).
+Set `KIWILM2_USE_DRIVE=0` for compressed parallel uploads only, with no Drive
+mount or cache. Large single-file uploads remain avoided because they can fail
+at the Colab proxy. A missing/disconnected mount is an error, not a cache miss.
 
 The worker uses standalone Python 3.12 in an isolated environment, with matching
 Torch/PyTorch-XLA 2.9.0
@@ -48,6 +103,8 @@ The normal Windows CUDA environment and lockfile are unchanged. TPU uses
 ## Frozen controls and scope
 
 - Dense backbone unchanged; context 512, seed 42, batch 8, accumulation 4.
+- Embedding/head parameter identity is restored after device transfer. The
+  parameter count stays 64,252,416; the shared head is excluded from Muon.
 - Muon 0.01 plus auxiliary AdamW 0.0003; original clipping, decay and betas.
 - Fresh initialization, frozen tokenizer/data, 50M token LR schedule with 1M
   warmup. The run stops at exactly 50M tokens: 3,052 updates at the default
@@ -60,18 +117,27 @@ The normal Windows CUDA environment and lockfile are unchanged. TPU uses
   packaging, environment setup and transfers. Partial final updates are excluded from
   steady throughput.
 - The first saved checkpoint is reloaded into the model, optimizer and data
-  generator on the training device, followed by further training. This checks
+  generator on the training device, with exact pre/post-reload logits and
+  tied identity checked, followed by further training. This checks
   same-process reload; it does not establish VM-restart equivalence.
+- At the first checkpoint, five fixed batches compare training-device loss
+  against the saved ordinary CPU FP32 reconstruction. At completion, all fifty
+  batches are compared. Absolute loss difference and first-batch relative-logit
+  RMS must each be at most 0.02; otherwise the worker stops with an error.
+  Checkpoint artifacts are packaged before checking, preserving failure evidence.
 - After completion, the portable weights receive a CPU FP32 50-batch health
   audit (25 batches per seed 141/142), direct and rollover cache-parity checks,
   and a short generation sample. CPU diagnostic evidence is labeled explicitly;
   on-TPU cached generation remains unverified.
 
-The worker allows two hours; the launcher caps preflight/setup at five minutes
-and smoke execution at 125 minutes (uploads/downloads excluded). At the short
+The worker allows two hours; the launcher caps preflight at five minutes, each
+input-preparation call at fifteen minutes, and smoke execution at 125 minutes
+(uploads/downloads excluded). At the short
 probe's steady rate, 50M training alone would take about 16 minutes; compilation,
 validation, checkpoint packaging and CPU diagnostics add overhead. On failure or
-exit, the launcher attempts periodic artifact/checkpoint recovery and stops only its own session. If the
+training exit, the launcher attempts periodic artifact/checkpoint recovery and
+stops only its verified session. Failed setup stops only the session it just
+created; successful setup deliberately leaves it available for `train`. If the
 network prevents cleanup, verify and manually stop that named TPU session.
 
 ## Resume
@@ -79,18 +145,25 @@ network prevents cleanup, verify and manually stop that named TPU session.
 To resume a downloaded full-smoke checkpoint in a new VM:
 
 ```bash
-KIWILM2_RESUME_FROM=runs/colab/tpu-v5e1-muon-smoke-50m/latest.pt \
-KIWILM_RESULT_DIR=runs/colab/tpu-v5e1-muon-smoke-50m-resumed \
-COLAB_SESSION_NAME=kiwilm2-tpu-v5e1-muon-smoke-50m-resumed \
-bash scripts/run_colab_kiwilm2_tpu_smoke.sh
+export KIWILM2_RESUME_FROM="runs/colab/<interrupted-tied-smoke>/latest.pt"
+export KIWILM_RESULT_DIR=runs/colab/tpu-v6e1-muon-smoke-50m-tied-resumed
+export COLAB_SESSION_NAME=kiwilm2-tpu-v6e1-muon-smoke-50m-tied-resumed
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh train
 ```
 
-Resume uploads the checkpoint in verified chunks and requires matching model,
-data fingerprint, backend and training configuration. The earlier 200-step
-checkpoint has a different validation configuration; start the full smoke
-fresh. Local logs newer than the saved step are truncated on same-directory
-module resume. Checkpoints stay on the VM until downloaded; this launcher does
-not mirror to Drive, so recovery cannot survive a lost VM before downloading.
+Replace the placeholder with an interrupted, corrected tied-smoke checkpoint;
+a completed 50M checkpoint has no remaining training budget. Resume uploads the
+checkpoint in verified parallel chunks and requires matching model,
+data fingerprint, backend and training configuration. The corrected smoke uses
+the `single-device-smoke-v2-tied` contract: all old v1 checkpoints are rejected,
+and unequal matrices are rejected before allocation. Start the corrected smoke
+fresh. The setup job locks the uploaded checkpoint's SHA-256; a data-cache hit
+needs only the checkpoint upload. Local logs newer than the saved step are
+truncated on same-directory module resume. Checkpoints stay on the VM until
+downloaded; this launcher does
+not mirror checkpoints to Drive, so recovery cannot survive a lost VM before
+downloading. Drive caching here is for frozen data only.
 
 ## Interpretation
 

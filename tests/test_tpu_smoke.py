@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,12 +15,21 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from kiwilm.checkpoint import save_checkpoint
 from kiwilm.colab_artifacts import create_colab_artifacts
 from kiwilm.config import KiwiLM2Config
 from kiwilm.data import PreparedTokenData, prepare_from_stories
 from kiwilm.models import KiwiLM2LM
 from kiwilm.optim import MuonWithAuxAdamW, split_muon_parameters
-from kiwilm.tpu_smoke import Runtime, TensorMuon, probe
+from kiwilm.tpu_setup import job_digest
+from kiwilm.tpu_smoke import (
+    Runtime,
+    TensorMuon,
+    portable_loss_report,
+    prepare_tied_model,
+    probe,
+    validate_tied_checkpoint,
+)
 from kiwilm.training import TrainConfig, _validate_resume_settings
 
 
@@ -53,6 +63,63 @@ def test_tensor_muon_matches_reference_updates() -> None:
             optimizer.step()
         for left, right in zip(reference.parameters(), candidate.parameters(), strict=True):
             torch.testing.assert_close(left, right, rtol=2e-5, atol=2e-7)
+
+
+def test_device_transfer_retied_before_optimizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_to = KiwiLM2LM.to
+
+    def untie_on_transfer(model, *args, **kwargs):
+        original_to(model, *args, **kwargs)
+        model.lm_head.weight = torch.nn.Parameter(model.lm_head.weight.detach().clone())
+        return model
+
+    expected = sum(parameter.numel() for parameter in KiwiLM2LM(tiny_config()).parameters())
+    monkeypatch.setattr(KiwiLM2LM, "to", untie_on_transfer)
+    model = prepare_tied_model(tiny_config(), torch.device("cpu"))
+    assert model.lm_head.weight is model.token_embedding.weight
+    assert sum(parameter.numel() for parameter in model.parameters()) == expected
+    muon, auxiliary = split_muon_parameters(model)
+    assert all(parameter is not model.lm_head.weight for parameter in muon)
+    assert any(parameter is model.lm_head.weight for parameter in auxiliary)
+
+
+def test_unequal_tied_checkpoint_rejected(tmp_path: Path) -> None:
+    model = KiwiLM2LM(tiny_config())
+    state = model.state_dict()
+    state["lm_head.weight"] = state["lm_head.weight"].clone() + 1
+    path = tmp_path / "untied.pt"
+    torch.save({"model_config": model.config.to_dict(), "model_state_dict": state}, path)
+    with pytest.raises(ValueError, match="unequal tied"):
+        validate_tied_checkpoint(path)
+
+
+def test_portability_gate_checks_logits_not_just_loss(tmp_path: Path) -> None:
+    prepare_from_stories(
+        tmp_path / "data", ["A training story. " * 8], ["A validation story. " * 8],
+        vocab_size=300, min_frequency=1,
+    )
+    data = PreparedTokenData(tmp_path / "data")
+    model = prepare_tied_model(tiny_config(data.tokenizer.vocab_size), torch.device("cpu"))
+    path = tmp_path / "latest.pt"
+    save_checkpoint(path, model=model, step=0, data_fingerprint=data.fingerprint)
+    options = dict(batch_size=1, batches=1)
+    runtime = Runtime("cpu", "fp32")
+    assert portable_loss_report(model, data, path, runtime, **options)["passed"]
+    original_forward = model.lm_head.forward
+    # A uniform offset leaves cross-entropy unchanged but must fail logit parity.
+    model.lm_head.forward = lambda values: original_forward(values) + 5
+    with pytest.raises(RuntimeError, match="portability failed"):
+        portable_loss_report(model, data, path, runtime, **options)
+
+
+def test_launcher_rejects_unsupported_tpu_before_allocation() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts/run_colab_kiwilm2_tpu_smoke.sh"
+    result = subprocess.run(
+        ["bash", str(script)], env={**os.environ, "COLAB_TPU": "unsupported"},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1
+    assert "COLAB_TPU must be v5e1 or v6e1" in result.stderr
 
 
 def test_probe_checkpoint_resume_and_timing(tmp_path: Path) -> None:
@@ -130,9 +197,17 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
     (tmp_path / "kiwilm-0.1.0-py3-none-any.whl").write_bytes(b"test wheel")
     (tmp_path / "kiwilm-data-artifacts").mkdir()
     (tmp_path / "kiwilm-data-artifacts" / "artifact-manifest.json").write_text("{}")
+    job = {"schema_version": 1, "use_drive": False, "data_fingerprint": "a" * 64,
+           "tokenizer_sha256": "b" * 64}
+    (tmp_path / "kiwilm-tpu-job.json").write_text(json.dumps(job))
+    (tmp_path / "kiwilm-tpu-setup.json").write_text(json.dumps({
+        "state": "ready", "job_digest": job_digest(job),
+    }))
+    monkeypatch.setenv("KIWILM2_TPU_ACTION", "train")
     if resume:
         (tmp_path / "kiwilm-tpu-resume").mkdir()
         (tmp_path / "kiwilm-tpu-resume" / "artifact-manifest.json").write_text("{}")
+        (tmp_path / "kiwilm-tpu-resume" / "latest.pt").write_bytes(b"mock resume")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
     process = Mock(returncode=0)
     monkeypatch.setattr(module.subprocess, "run", run)
@@ -150,6 +225,7 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
     assert child_env["LD_LIBRARY_PATH"].startswith(str(tmp_path / "env" / "lib"))
     process.wait.assert_called_once_with(timeout=7200)
     worker = module.subprocess.Popen.call_args.args[0]
+    assert "--require-ready" in commands[-2]
     assert "--steps" not in worker
     assert worker[worker.index("--eval-batches") + 1] == "50"
     assert "--artifact-dir" in worker
@@ -159,6 +235,60 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
         )
     else:
         assert "--resume" not in worker
+
+
+@pytest.mark.parametrize("action", [None, "preflight", "prepare"])
+def test_bootstrap_setup_cannot_launch_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str | None,
+) -> None:
+    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    spec = importlib.util.spec_from_file_location("setup_bootstrap", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "CONTENT", tmp_path)
+    monkeypatch.setattr(module, "PYTHON", tmp_path / "python")
+    (tmp_path / "python").touch()
+    (tmp_path / "kiwilm-0.1.0-py3-none-any.whl").touch()
+    (tmp_path / "kiwilm-tpu-preflight.json").write_text("{}")
+    (tmp_path / "kiwilm-tpu-job.json").write_text("{}")
+    if action is None:
+        monkeypatch.delenv("KIWILM2_TPU_ACTION", raising=False)
+    else:
+        monkeypatch.setenv("KIWILM2_TPU_ACTION", action)
+    commands = Mock()
+    popen = Mock(side_effect=AssertionError("setup must never start a training process"))
+    monkeypatch.setattr(module, "run", commands)
+    monkeypatch.setattr(module.subprocess, "Popen", popen)
+    module.main()
+    popen.assert_not_called()
+    assert commands.call_count == (1 if action == "prepare" else 0)
+    if action == "prepare":
+        assert "kiwilm.tpu_setup" in commands.call_args.args[0]
+        assert "--require-ready" not in commands.call_args.args[0]
+
+
+def test_bootstrap_changed_job_refuses_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    spec = importlib.util.spec_from_file_location("locked_bootstrap", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "CONTENT", tmp_path)
+    monkeypatch.setattr(module, "PYTHON", tmp_path / "python")
+    monkeypatch.setenv("KIWILM2_TPU_ACTION", "train")
+    (tmp_path / "python").touch()
+    (tmp_path / "kiwilm-0.1.0-py3-none-any.whl").touch()
+    (tmp_path / "kiwilm-tpu-preflight.json").write_text("{}")
+    (tmp_path / "kiwilm-tpu-job.json").write_text('{"changed":true}')
+    (tmp_path / "kiwilm-tpu-setup.json").write_text(json.dumps({
+        "state": "ready", "job_digest": "stale",
+    }))
+    popen = Mock()
+    monkeypatch.setattr(module.subprocess, "Popen", popen)
+    with pytest.raises(RuntimeError, match="job changed"):
+        module.main()
+    popen.assert_not_called()
 
 
 def test_bootstrap_reassembles_actual_chunks(tmp_path: Path) -> None:
@@ -202,6 +332,12 @@ def test_full_smoke_exact_tokens_and_periodic_resume(tmp_path: Path) -> None:
     assert result["health"]["batch_count"] == 50
     assert result["cached_generation_parity"]["passed"]
     assert result["checkpoint_reload"]["passed"]
+    assert result["checkpoint_reload"]["logits_equal"]
+    assert result["weight_tying"]["identity_preserved"]
+    assert not result["weight_tying"]["head_in_muon"]
+    assert result["first_checkpoint_portability"]["passed"]
+    assert result["final_checkpoint_portability"]["passed"]
+    assert result["final_checkpoint_portability"]["absolute_loss_difference"] == 0
     rows = [json.loads(line) for line in (split_dir / "metrics.jsonl").read_text().splitlines()]
     assert not any(row["step"] == 99 for row in rows)
     assert [r["tokens_seen"] for r in rows if r["event"] == "train"] == [16, 32, 40]

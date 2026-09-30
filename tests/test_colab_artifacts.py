@@ -116,3 +116,31 @@ def test_creates_and_reassembles_chunked_artifacts(tmp_path: Path) -> None:
 
     assert {path.name for path in extracted} == {"latest.pt", "summary.json"}
     assert (local / "latest.pt").read_bytes() == b"checkpoint" * 100
+
+
+def test_gzip_chunks_roundtrip_and_integrity(tmp_path: Path) -> None:
+    source = tmp_path / "data.bin"
+    source.write_bytes(b"training tokens" * 10000)
+    output = tmp_path / "artifacts"
+    manifest_path = create_colab_artifacts(
+        {"data.bin": source}, output, archive_name="data.tar.gz", compression="gzip",
+        chunk_size=97,
+    )
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["archive"]["bytes"] < source.stat().st_size
+    assert (output / manifest["parts"][0]["name"]).read_bytes()[:2] == b"\x1f\x8b"
+    reassemble_colab_artifacts(manifest_path, output)
+    assert (output / "data.bin").read_bytes() == source.read_bytes()
+    (output / "data.bin").unlink()
+    part = output / manifest["parts"][0]["name"]
+    part.write_bytes(bytes([part.read_bytes()[0] ^ 1]) + part.read_bytes()[1:])
+    with pytest.raises(ValueError, match="part checksum mismatch"):
+        reassemble_colab_artifacts(manifest_path, output)
+    assert not (output / "data.bin").exists()
+
+
+def test_rejects_unknown_artifact_compression(tmp_path: Path) -> None:
+    source = tmp_path / "data.bin"
+    source.write_bytes(b"tokens")
+    with pytest.raises(ValueError, match="compression must"):
+        create_colab_artifacts({"data.bin": source}, tmp_path / "out", compression="zip")

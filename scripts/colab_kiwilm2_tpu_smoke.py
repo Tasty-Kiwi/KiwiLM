@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -30,6 +31,9 @@ def data_restore_command(python: Path, data_dir: Path) -> list[str]:
 
 
 def main() -> None:
+    action = os.environ.get("KIWILM2_TPU_ACTION", "preflight")
+    if action not in {"preflight", "prepare", "train"}:
+        raise ValueError("KIWILM2_TPU_ACTION must be preflight, prepare or train")
     wheels = list(CONTENT.glob("kiwilm-*.whl"))
     if len(wheels) != 1:
         raise RuntimeError("upload exactly one KiwiLM wheel")
@@ -65,20 +69,46 @@ def main() -> None:
             "device=str(r.device),torch=torch.__version__,"
             "torch_xla=r.xla.__version__,matmul_result=value)))",
         ], env=env)
-    data_dir = CONTENT / "kiwilm-data-artifacts"
-    if not (data_dir / "artifact-manifest.json").is_file():
+    if action == "preflight":
         print("TPU preflight complete; ready for dataset upload.", flush=True)
         return
-    run(data_restore_command(PYTHON, data_dir))
+    job_path = CONTENT / "kiwilm-tpu-job.json"
+    setup_path = CONTENT / "kiwilm-tpu-setup.json"
+    if not job_path.is_file():
+        raise RuntimeError("upload the frozen TPU setup job first")
+    if action == "train":
+        if not setup_path.is_file() or json.loads(setup_path.read_text()).get("state") != "ready":
+            raise RuntimeError("TPU setup must finish before explicit training")
+        from hashlib import sha256
+
+        job = json.loads(job_path.read_text())
+        digest = sha256(json.dumps(job, sort_keys=True).encode()).hexdigest()
+        if json.loads(setup_path.read_text())["job_digest"] != digest:
+            raise RuntimeError("TPU job changed since setup; refusing training")
+    command = [
+        str(PYTHON), "-m", "kiwilm.tpu_setup", "--job", str(job_path),
+        "--data-dir", str(CONTENT / "kiwilm-data-artifacts"),
+        "--resume-dir", str(CONTENT / "kiwilm-tpu-resume"),
+        "--drive-root", str(CONTENT / "drive"), "--report", str(setup_path),
+    ]
+    if action == "train":
+        command.append("--require-ready")
+    run(command, timeout=840)
+    if action == "prepare":
+        print("Input preparation finished; no training was started.", flush=True)
+        return
+    data_dir = CONTENT / "kiwilm-data-artifacts"
     output = CONTENT / "kiwilm-tpu-smoke"
     output.mkdir(exist_ok=True)
+    summary = output / "summary.json"
+    if summary.is_file() and json.loads(summary.read_text()).get("status") == "smoke-complete":
+        raise RuntimeError("this TPU smoke is already complete; refusing another training launch")
     resume_dir = CONTENT / "kiwilm-tpu-resume"
     resume_args = []
-    if (resume_dir / "artifact-manifest.json").is_file():
-        run(data_restore_command(PYTHON, resume_dir))
-        resume_args = ["--resume", str(resume_dir / "latest.pt")]
-    elif (output / "latest.pt").is_file():
+    if (output / "latest.pt").is_file():
         resume_args = ["--resume", str(output / "latest.pt")]
+    elif (resume_dir / "latest.pt").is_file():
+        resume_args = ["--resume", str(resume_dir / "latest.pt")]
     with (output / "worker.log").open("a") as log:
         process = subprocess.Popen([
             str(PYTHON), "-u", "-m", "kiwilm.tpu_smoke",

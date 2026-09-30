@@ -137,6 +137,94 @@ class Runtime:
         return {}
 
 
+def prepare_tied_model(config: KiwiLM2Config, device: torch.device) -> KiwiLM2LM:
+    """XLA transfer replaces shared Parameters: re-tie before optimizer creation."""
+    if not config.tie_embeddings:
+        raise ValueError("hardware smoke requires tied embeddings")
+    model = KiwiLM2LM(config)
+    expected_parameters = sum(parameter.numel() for parameter in model.parameters())
+    model.to(device)
+    model.lm_head.weight = model.token_embedding.weight
+    if model.lm_head.weight is not model.token_embedding.weight or sum(
+        parameter.numel() for parameter in model.parameters()
+    ) != expected_parameters:
+        raise RuntimeError("device transfer changed the tied model parameterization")
+    return model
+
+
+def validate_tied_checkpoint(path: Path) -> None:
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    state = payload["model_state_dict"]
+    if not payload["model_config"].get("tie_embeddings") or not torch.equal(
+        state["token_embedding.weight"], state["lm_head.weight"],
+    ):
+        raise ValueError("TPU checkpoint has unequal tied embedding/head weights; start fresh")
+
+
+def portable_loss_report(
+    model: KiwiLM2LM, data: PreparedTokenData, path: Path, runtime: Runtime,
+    *, batch_size: int, batches: int,
+) -> dict[str, Any]:
+    """Compare the saved ordinary CPU reconstruction with fixed runtime batches."""
+    validate_tied_checkpoint(path)
+    cpu_model = KiwiLM2LM(model.config)
+    load_checkpoint(
+        path, model=cpu_model, expected_model_config=model.config,
+        expected_data_fingerprint=data.fingerprint, restore_rng=False,
+    )
+    cpu_model.eval()
+    generator = torch.Generator().manual_seed(43)
+    losses: dict[str, list[float]] = {"runtime": [], "cpu": []}
+    was_training = model.training
+    model.eval()
+    logit_relative_rms = None
+    try:
+        for index in range(batches):
+            inputs, targets = data.get_batch(
+                "validation", batch_size=batch_size,
+                context_length=model.config.context_length, generator=generator,
+            )
+            with torch.no_grad(), runtime.autocast():
+                logits = model(inputs.to(runtime.device))
+                loss = F.cross_entropy(
+                    logits.float().reshape(-1, model.config.vocab_size),
+                    targets.to(runtime.device).reshape(-1),
+                )
+            runtime.sync()
+            losses["runtime"].append(float(loss.cpu()))
+            with torch.no_grad():
+                cpu_logits = cpu_model(inputs)
+                cpu_loss = F.cross_entropy(
+                    cpu_logits.float().reshape(-1, model.config.vocab_size), targets.reshape(-1),
+                )
+            losses["cpu"].append(float(cpu_loss))
+            if index == 0:
+                runtime_logits = logits.cpu().float()
+                logit_relative_rms = float(
+                    (runtime_logits - cpu_logits).square().mean().sqrt()
+                    / cpu_logits.square().mean().sqrt().clamp_min(1e-8)
+                )
+    finally:
+        model.train(was_training)
+    runtime_loss = sum(losses["runtime"]) / batches
+    cpu_loss = sum(losses["cpu"]) / batches
+    difference = abs(runtime_loss - cpu_loss)
+    report = {
+        "passed": math.isfinite(difference) and difference <= 0.02
+        and math.isfinite(logit_relative_rms) and logit_relative_rms <= 0.02,
+        "runtime_device": str(runtime.device), "runtime_precision": runtime.precision,
+        "cpu_precision": "fp32", "seed": 43, "batches": batches,
+        "batch_size": batch_size, "context_length": model.config.context_length,
+        "runtime_loss": runtime_loss, "cpu_loss": cpu_loss,
+        "absolute_loss_difference": difference, "loss_tolerance": 0.02,
+        "first_batch_logit_relative_rms": logit_relative_rms, "logit_rms_tolerance": 0.02,
+        "checkpoint_weights_equal": True,
+    }
+    if not report["passed"]:
+        raise RuntimeError(f"TPU checkpoint portability failed: {report}")
+    return report
+
+
 def probe(
     data: PreparedTokenData, output: Path, *, config: KiwiLM2Config,
     runtime: Runtime, steps: int = 200, warmup_steps: int = 20,
@@ -164,8 +252,10 @@ def probe(
     if (output / "latest.pt").exists() and resume is None:
         raise ValueError("output already has a checkpoint; use --resume or a new directory")
     torch.manual_seed(settings.seed)
-    model = KiwiLM2LM(config).to(runtime.device)
+    model = prepare_tied_model(config, runtime.device)
     muon, auxiliary = split_muon_parameters(model)
+    if any(parameter is model.lm_head.weight for parameter in muon):
+        raise RuntimeError("tied embedding/head must use auxiliary AdamW, not Muon")
     optimizer = TensorMuon(
         muon, auxiliary, muon_lr=settings.muon_lr, adamw_lr=settings.lr,
         weight_decay=settings.weight_decay, beta2=settings.beta2,
@@ -175,9 +265,10 @@ def probe(
         "cuda", enabled=runtime.device.type == "cuda" and runtime.precision == "fp16",
     )
     completed, tokens = 0, 0
-    contract = {"engine": "single-device-smoke-v1", "device": runtime.device.type,
+    contract = {"engine": "single-device-smoke-v2-tied", "device": runtime.device.type,
                 "train_config": settings.to_dict()}
     if resume is not None:
+        validate_tied_checkpoint(resume)
         saved = torch.load(resume, map_location="cpu", weights_only=True)
         if saved.get("training_state", {}).get("smoke_contract") != contract:
             raise ValueError("resume must be a matching hardware smoke, not the ongoing GPU run")
@@ -232,9 +323,12 @@ def probe(
 
     validation_loss = None
     checkpoint_reload = None
+    first_portability = None
 
     def checkpoint() -> None:
-        nonlocal checkpoint_reload
+        nonlocal checkpoint_reload, first_portability
+        if model.lm_head.weight is not model.token_embedding.weight:
+            raise RuntimeError("embedding/head identity lost during training")
         save_checkpoint(
             output / "latest.pt", model=model, optimizer=optimizer, step=completed,
             model_config=config, train_config=settings, data_fingerprint=data.fingerprint,
@@ -243,7 +337,23 @@ def probe(
             training_state={"tokens_seen": tokens, "smoke_contract": contract,
                             "scaler_state": scaler.state_dict()},
         )
+        # Preserve downloadable evidence even if a portability gate fails.
+        if artifact_dir is not None:
+            create_colab_artifacts(
+                {f.name: f for f in output.iterdir() if f.is_file() and f.name != "worker.log"},
+                artifact_dir, chunk_size=4 * 1024 * 1024,
+            )
         if verify_checkpoint_reload and checkpoint_reload is None:
+            first_portability = portable_loss_report(
+                model, data, output / "latest.pt", runtime,
+                batch_size=batch_size, batches=min(5, eval_batches),
+            )
+            inputs, _ = data.get_batch(
+                "validation", batch_size=batch_size, context_length=config.context_length,
+                generator=torch.Generator().manual_seed(43), device=runtime.device,
+            )
+            with torch.no_grad(), runtime.autocast():
+                before = model(inputs).cpu()
             restored = load_checkpoint(
                 output / "latest.pt", model=model, optimizer=optimizer,
                 expected_model_config=config, expected_data_fingerprint=data.fingerprint,
@@ -254,17 +364,21 @@ def probe(
                     if isinstance(value, torch.Tensor):
                         state[name] = value.to(parameter.device)
             runtime.sync()
+            with torch.no_grad(), runtime.autocast():
+                after = model(inputs).cpu()
+            if model.lm_head.weight is not model.token_embedding.weight or not torch.equal(
+                before, after,
+            ):
+                raise RuntimeError("same-process reload changed tied identity or logits")
             assert restored["step"] == completed
             assert restored["training_state"]["tokens_seen"] == tokens
             checkpoint_reload = {
                 "passed": True, "device": str(runtime.device), "step": completed,
-                "scope": "same-process model/optimizer/data-generator reload; not VM restart",
+                "logits_equal": True, "weight_identity_preserved": True,
+                "scope": "same-process model/optimizer/data-generator/logit reload; not VM restart",
             }
-        if artifact_dir is not None:
-            create_colab_artifacts(
-                {f.name: f for f in output.iterdir() if f.is_file() and f.name != "worker.log"},
-                artifact_dir, chunk_size=4 * 1024 * 1024,
-            )
+            print(json.dumps({"event": "checkpoint_portability", "step": completed,
+                              **first_portability}), flush=True)
 
     model.train()
     runtime.sync()
@@ -363,6 +477,12 @@ def probe(
         "validation_loss": validation_loss, "perplexity": math.exp(min(validation_loss, 80)),
         "memory": memory, "xla_after_warmup": after_warmup, "xla_after_training": training_counters,
         "checkpoint_reload": checkpoint_reload,
+        "weight_tying": {
+            "identity_preserved": model.lm_head.weight is model.token_embedding.weight,
+            "parameters": sum(parameter.numel() for parameter in model.parameters()),
+            "head_in_muon": False,
+        },
+        "first_checkpoint_portability": first_portability,
         "cached_generation_parity": "not measured; required before production promotion",
     }
     if runtime.metrics is not None:
@@ -378,6 +498,10 @@ def probe(
         from kiwilm.generation import generate
 
         torch.set_num_threads(4)
+        report["final_checkpoint_portability"] = portable_loss_report(
+            model, data, output / "latest.pt", runtime,
+            batch_size=batch_size, batches=eval_batches,
+        )
         cpu_model = KiwiLM2LM(config)
         load_checkpoint(
             output / "latest.pt", model=cpu_model, expected_model_config=config,

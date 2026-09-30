@@ -10,7 +10,7 @@ import tarfile
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 def create_colab_artifacts(
@@ -19,6 +19,7 @@ def create_colab_artifacts(
     *,
     archive_name: str = "artifacts.tar",
     chunk_size: int = 64 * 1024 * 1024,
+    compression: Literal["none", "gzip"] = "none",
 ) -> Path:
     """Create a checksummed, chunked tar archive for reliable Colab download."""
 
@@ -28,10 +29,12 @@ def create_colab_artifacts(
         raise ValueError("chunk_size must be a positive integer")
     if Path(archive_name).name != archive_name or not archive_name:
         raise ValueError("archive_name must be a safe filename")
+    if compression not in {"none", "gzip"}:
+        raise ValueError("artifact compression must be none or gzip")
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / archive_name
     file_details: dict[str, dict[str, Any]] = {}
-    with tarfile.open(archive_path, mode="w") as archive:
+    with tarfile.open(archive_path, mode="w:gz" if compression == "gzip" else "w") as archive:
         for name, path in sorted(files.items()):
             if Path(name).name != name or not name:
                 raise ValueError(f"unsafe artifact name: {name!r}")
@@ -136,7 +139,7 @@ def reassemble_colab_artifacts(manifest_path: Path, output_dir: Path) -> list[Pa
 
         expected_names = set(file_details)
         extracted: list[Path] = []
-        with tarfile.open(temporary_archive, mode="r") as archive:
+        with tarfile.open(temporary_archive, mode="r:*") as archive:
             members = archive.getmembers()
             member_names = {member.name for member in members}
             if member_names != expected_names:

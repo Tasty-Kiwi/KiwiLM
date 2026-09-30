@@ -1,0 +1,671 @@
+{
+  "status": "smoke-complete",
+  "not_a_1b_promotion": true,
+  "device": "xla:0",
+  "precision": "bf16",
+  "torch": "2.9.0+cpu",
+  "torch_xla": "2.9.0",
+  "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+  "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+  "model_config": {
+    "architecture": "kiwilm2",
+    "vocab_size": 32000,
+    "context_length": 512,
+    "d_model": 512,
+    "dropout": 0.0,
+    "tie_embeddings": true,
+    "mixer_schedule": [
+      "gqa",
+      "conv",
+      "conv",
+      "gqa",
+      "conv",
+      "conv",
+      "gqa",
+      "conv",
+      "conv",
+      "gqa"
+    ],
+    "conv_kernel_sizes": [
+      31,
+      63,
+      31,
+      63,
+      31,
+      63
+    ],
+    "num_query_heads": 8,
+    "num_kv_heads": 2,
+    "swiglu_dim": 1536,
+    "bigram_buckets": 16384,
+    "trigram_buckets": 16384,
+    "rms_norm_eps": 1e-06,
+    "rope_base": 10000.0
+  },
+  "train_config": {
+    "max_steps": 3152,
+    "batch_size": 8,
+    "grad_accum_steps": 4,
+    "lr": 0.0003,
+    "min_lr": 3e-05,
+    "warmup_steps": 100,
+    "max_tokens": 50000000,
+    "warmup_tokens": 1000000,
+    "batch_mode": "packed",
+    "eval_mode": "packed",
+    "precision": "bf16",
+    "weight_decay": 0.1,
+    "beta2": 0.95,
+    "optimizer": "muon",
+    "muon_lr": 0.01,
+    "grad_clip": 1.0,
+    "eval_interval": 500,
+    "eval_batches": 50,
+    "checkpoint_interval": 500,
+    "log_interval": 10,
+    "sample_prompt": "Once upon a time",
+    "sample_tokens": 64,
+    "seed": 42
+  },
+  "initial_step": 0,
+  "step": 3052,
+  "tokens_seen": 50000000,
+  "first_step_seconds": 102.17167313000004,
+  "warmup_steps": 20,
+  "training_seconds": 993.0670594339999,
+  "steady_tokens_per_second": 67736.29811801769,
+  "steady_tokens": 49659904,
+  "steady_seconds": 733.1357836160017,
+  "session_tokens": 50000000,
+  "training_and_periodic_io_seconds": 993.0670594339999,
+  "validation_loss": 4.291771926879883,
+  "perplexity": 73.09587436150173,
+  "memory": {
+    "bytes_used": 3252626432,
+    "bytes_limit": 33550237696,
+    "peak_bytes_used": 3777046016
+  },
+  "xla_after_warmup": {
+    "compile_count": 2,
+    "cpu_fallbacks": {}
+  },
+  "xla_after_training": {
+    "compile_count": 5,
+    "cpu_fallbacks": {}
+  },
+  "checkpoint_reload": {
+    "passed": true,
+    "device": "xla:0",
+    "step": 500,
+    "logits_equal": true,
+    "weight_identity_preserved": true,
+    "scope": "same-process model/optimizer/data-generator/logit reload; not VM restart"
+  },
+  "weight_tying": {
+    "identity_preserved": true,
+    "parameters": 64252416,
+    "head_in_muon": false
+  },
+  "first_checkpoint_portability": {
+    "passed": true,
+    "runtime_device": "xla:0",
+    "runtime_precision": "bf16",
+    "cpu_precision": "fp32",
+    "seed": 43,
+    "batches": 5,
+    "batch_size": 8,
+    "context_length": 512,
+    "runtime_loss": 5.520051097869873,
+    "cpu_loss": 5.519930744171143,
+    "absolute_loss_difference": 0.00012035369872975821,
+    "loss_tolerance": 0.02,
+    "first_batch_logit_relative_rms": 0.002722280565649271,
+    "logit_rms_tolerance": 0.02,
+    "checkpoint_weights_equal": true
+  },
+  "cached_generation_parity": {
+    "passed": true,
+    "direct_passed": true,
+    "rollover_passed": true,
+    "direct_max_absolute_difference": 3.814697265625e-06,
+    "rollover_max_absolute_difference": 0.0,
+    "rtol": 0.002,
+    "atol": 0.002
+  },
+  "final_checkpoint_portability": {
+    "passed": true,
+    "runtime_device": "xla:0",
+    "runtime_precision": "bf16",
+    "cpu_precision": "fp32",
+    "seed": 43,
+    "batches": 50,
+    "batch_size": 8,
+    "context_length": 512,
+    "runtime_loss": 4.291771926879883,
+    "cpu_loss": 4.291665105819702,
+    "absolute_loss_difference": 0.0001068210601804509,
+    "loss_tolerance": 0.02,
+    "first_batch_logit_relative_rms": 0.003448624862357974,
+    "logit_rms_tolerance": 0.02,
+    "checkpoint_weights_equal": true
+  },
+  "health": {
+    "batch_count": 50,
+    "health_pass_count": 50,
+    "all_finite": true,
+    "all_nonzero_gradients": true,
+    "minimum_mlp_family_gradient_ratios": {
+      "swiglu": 0.8005378897822837
+    },
+    "minimum_mlp_family_output_rms_ratios": {
+      "swiglu": 4.95410388826776
+    },
+    "blocks": [
+      {
+        "index": 0,
+        "mixer": "gqa",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 0.6289161443710327,
+            "p90": 0.6343132138252259,
+            "p95": 0.6361569464206696,
+            "maximum": 0.6419015526771545
+          },
+          "mlp_output_rms": {
+            "median": 0.31796254217624664,
+            "p90": 0.3272055357694626,
+            "p95": 0.3291155382990837,
+            "maximum": 0.3360861837863922
+          },
+          "post_mlp_residual_rms": {
+            "median": 0.6997902095317841,
+            "p90": 0.7030809402465821,
+            "p95": 0.703525784611702,
+            "maximum": 0.7053849101066589
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.5042527800038956,
+            "p90": 0.5219105448823514,
+            "p95": 0.5313837669386369,
+            "maximum": 0.5545965663661491
+          },
+          "residual_amplification": {
+            "median": 1.1111082479124372,
+            "p90": 1.1231284687695346,
+            "p95": 1.1288081299390544,
+            "maximum": 1.1484094689364517,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 1,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 0.7172093391418457,
+            "p90": 0.7211449623107911,
+            "p95": 0.7216706961393355,
+            "maximum": 0.72489994764328
+          },
+          "mlp_output_rms": {
+            "median": 0.24862398207187653,
+            "p90": 0.2539404273033142,
+            "p95": 0.255567142367363,
+            "maximum": 0.2565823495388031
+          },
+          "post_mlp_residual_rms": {
+            "median": 0.7981469929218292,
+            "p90": 0.8039151728153229,
+            "p95": 0.8053696244955063,
+            "maximum": 0.8070498704910278
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.34639069518068627,
+            "p90": 0.3549584378881925,
+            "p95": 0.35691986643301576,
+            "maximum": 0.3621852130405734
+          },
+          "residual_amplification": {
+            "median": 1.1144576331295406,
+            "p90": 1.11932949689494,
+            "p95": 1.1203046214634922,
+            "maximum": 1.1223797901863917,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 2,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 0.8197141885757446,
+            "p90": 0.8262495815753937,
+            "p95": 0.8278347373008728,
+            "maximum": 0.8298782706260681
+          },
+          "mlp_output_rms": {
+            "median": 0.28719188272953033,
+            "p90": 0.29284595847129824,
+            "p95": 0.29373237937688823,
+            "maximum": 0.29865244030952454
+          },
+          "post_mlp_residual_rms": {
+            "median": 0.9422970414161682,
+            "p90": 0.9493646502494811,
+            "p95": 0.950420081615448,
+            "maximum": 0.9522861242294312
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.34943583807794604,
+            "p90": 0.3585520329635912,
+            "p95": 0.3610095261967925,
+            "maximum": 0.36579786297200767
+          },
+          "residual_amplification": {
+            "median": 1.1477088578602492,
+            "p90": 1.153397137156129,
+            "p95": 1.1554032427374044,
+            "maximum": 1.1566060367605069,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 3,
+        "mixer": "gqa",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.0055674314498901,
+            "p90": 1.0135462403297424,
+            "p95": 1.0162906527519227,
+            "maximum": 1.0213532447814941
+          },
+          "mlp_output_rms": {
+            "median": 0.25038136541843414,
+            "p90": 0.25906386077404026,
+            "p95": 0.26376309245824814,
+            "maximum": 0.2652280628681183
+          },
+          "post_mlp_residual_rms": {
+            "median": 1.0605746507644653,
+            "p90": 1.0709075450897216,
+            "p95": 1.0734184741973878,
+            "maximum": 1.0799822807312012
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.2500852795764975,
+            "p90": 0.2579383854671186,
+            "p95": 0.26125643088669126,
+            "maximum": 0.2666692628793333
+          },
+          "residual_amplification": {
+            "median": 1.0568361055721813,
+            "p90": 1.0609435474993798,
+            "p95": 1.062906327704578,
+            "maximum": 1.0642056993760225,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 4,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.1076413989067078,
+            "p90": 1.11846479177475,
+            "p95": 1.121883434057236,
+            "maximum": 1.1253690719604492
+          },
+          "mlp_output_rms": {
+            "median": 0.2628377825021744,
+            "p90": 0.2724343091249466,
+            "p95": 0.2740605980157852,
+            "maximum": 0.2824942171573639
+          },
+          "post_mlp_residual_rms": {
+            "median": 1.1623108386993408,
+            "p90": 1.1771805167198182,
+            "p95": 1.178824472427368,
+            "maximum": 1.1911118030548096
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.23852973113833092,
+            "p90": 0.2454736167811472,
+            "p95": 0.24675849717250076,
+            "maximum": 0.2550232866774721
+          },
+          "residual_amplification": {
+            "median": 1.0517665524843312,
+            "p90": 1.0567147645691175,
+            "p95": 1.0588018013781797,
+            "maximum": 1.0632178112815416,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 5,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.2011608481407166,
+            "p90": 1.2122888684272766,
+            "p95": 1.21413694024086,
+            "maximum": 1.2319104671478271
+          },
+          "mlp_output_rms": {
+            "median": 0.32122547924518585,
+            "p90": 0.33641815185546875,
+            "p95": 0.3400704875588417,
+            "maximum": 0.3512856662273407
+          },
+          "post_mlp_residual_rms": {
+            "median": 1.2869205474853516,
+            "p90": 1.3108585357666016,
+            "p95": 1.317683869600296,
+            "maximum": 1.3453726768493652
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.26877521833415874,
+            "p90": 0.27820547246184496,
+            "p95": 0.28086679658217006,
+            "maximum": 0.2895412289024229
+          },
+          "residual_amplification": {
+            "median": 1.0743832230627874,
+            "p90": 1.08527256935012,
+            "p95": 1.0862409177494192,
+            "maximum": 1.095219421876081,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 6,
+        "mixer": "gqa",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.450108528137207,
+            "p90": 1.471161997318268,
+            "p95": 1.4792226791381835,
+            "maximum": 1.4954314231872559
+          },
+          "mlp_output_rms": {
+            "median": 0.46986953914165497,
+            "p90": 0.4908094465732574,
+            "p95": 0.4929116606712341,
+            "maximum": 0.4970146119594574
+          },
+          "post_mlp_residual_rms": {
+            "median": 1.5633508563041687,
+            "p90": 1.5922271013259888,
+            "p95": 1.5948562324047089,
+            "maximum": 1.606062889099121
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.3240859985311269,
+            "p90": 0.33634667411875563,
+            "p95": 0.33850187871761195,
+            "maximum": 0.34412064209857635
+          },
+          "residual_amplification": {
+            "median": 1.0778562885400338,
+            "p90": 1.0843940044854057,
+            "p95": 1.0849632163700629,
+            "maximum": 1.0900359928034764,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 7,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.6318884491920471,
+            "p90": 1.6577242732048034,
+            "p95": 1.6621344506740572,
+            "maximum": 1.678078532218933
+          },
+          "mlp_output_rms": {
+            "median": 0.5458422899246216,
+            "p90": 0.568358963727951,
+            "p95": 0.5770740330219268,
+            "maximum": 0.5897653102874756
+          },
+          "post_mlp_residual_rms": {
+            "median": 1.812930703163147,
+            "p90": 1.8436219573020936,
+            "p95": 1.850688236951828,
+            "maximum": 1.867011308670044
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.33560590842506055,
+            "p90": 0.34718250866801526,
+            "p95": 0.3518421396198349,
+            "maximum": 0.3556745552405545
+          },
+          "residual_amplification": {
+            "median": 1.109110578114017,
+            "p90": 1.1179729446531024,
+            "p95": 1.120503527227099,
+            "maximum": 1.1259536721761734,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 8,
+        "mixer": "conv",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 1.8722679615020752,
+            "p90": 1.9040069699287414,
+            "p95": 1.9148789882659911,
+            "maximum": 1.9204738140106201
+          },
+          "mlp_output_rms": {
+            "median": 0.7017684876918793,
+            "p90": 0.7322820484638214,
+            "p95": 0.7392343193292618,
+            "maximum": 0.7533444166183472
+          },
+          "post_mlp_residual_rms": {
+            "median": 2.15204656124115,
+            "p90": 2.2005120754241942,
+            "p95": 2.2070593595504757,
+            "maximum": 2.2427735328674316
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.3760142947708522,
+            "p90": 0.38828357547393294,
+            "p95": 0.3925716581240123,
+            "maximum": 0.3950039836742581
+          },
+          "residual_amplification": {
+            "median": 1.1518099604133567,
+            "p90": 1.1605427919111184,
+            "p95": 1.1625610852241834,
+            "maximum": 1.1678230218529964,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      },
+      {
+        "index": 9,
+        "mixer": "gqa",
+        "mlp_type": "swiglu",
+        "metrics": {
+          "post_mixer_residual_rms": {
+            "median": 2.441410541534424,
+            "p90": 2.4896491289138796,
+            "p95": 2.5023428201675415,
+            "maximum": 2.5331766605377197
+          },
+          "mlp_output_rms": {
+            "median": 1.6984290480613708,
+            "p90": 1.7612465381622315,
+            "p95": 1.7818875551223754,
+            "maximum": 1.8300856351852417
+          },
+          "post_mlp_residual_rms": {
+            "median": 3.3608161211013794,
+            "p90": 3.414909267425537,
+            "p95": 3.4425365686416622,
+            "maximum": 3.5084590911865234
+          },
+          "mlp_update_to_residual_rms": {
+            "median": 0.6905272813892125,
+            "p90": 0.7287579087560453,
+            "p95": 0.7330049423130784,
+            "maximum": 0.7672946120191574
+          },
+          "residual_amplification": {
+            "median": 1.3724094726677611,
+            "p90": 1.3979658592132465,
+            "p95": 1.411262317029664,
+            "maximum": 1.4355757996684493,
+            "threshold": 1.5,
+            "threshold_failure_count": 0,
+            "threshold_failure_rate": 0.0
+          }
+        },
+        "mlp_residual_scale": null
+      }
+    ]
+  },
+  "diagnostic_device": "cpu",
+  "diagnostic_precision": "fp32",
+  "xla_cached_generation_parity": "not measured",
+  "generation": "Once upon a time, in a cozy town named Harmonyville, there was a friendly little little creature called the \"Citerous Cotny.\" This thing happened to be a wise wise old creature called \"Citual Dore,\" which means you can imagine what you want to see in your favorite book or game!\n\nBut wait",
+  "session_seconds_before_final_packaging": 1162.282741896,
+  "source": "runs/colab/tpu-v6e1-muon-smoke-50m-tied",
+  "local_metrics_audit": {
+    "train_rows": 3052,
+    "unique_steps": 3052,
+    "all_finite_nonzero_gradients": true,
+    "median_steady_tokens_per_second": 78227.395110578,
+    "effective_session_tokens_per_second": 43018.79241400106,
+    "validation": [
+      {
+        "event": "validation",
+        "step": 500,
+        "tokens_seen": 8192000,
+        "validation_loss": 5.482452125549316,
+        "perplexity": 240.4355632925862
+      },
+      {
+        "event": "validation",
+        "step": 1000,
+        "tokens_seen": 16384000,
+        "validation_loss": 4.985783081054688,
+        "perplexity": 146.31810911477243
+      },
+      {
+        "event": "validation",
+        "step": 1500,
+        "tokens_seen": 24576000,
+        "validation_loss": 4.677493877410889,
+        "perplexity": 107.50032570863435
+      },
+      {
+        "event": "validation",
+        "step": 2000,
+        "tokens_seen": 32768000,
+        "validation_loss": 4.479446868896485,
+        "perplexity": 88.18588082917404
+      },
+      {
+        "event": "validation",
+        "step": 2500,
+        "tokens_seen": 40960000,
+        "validation_loss": 4.358054094314575,
+        "perplexity": 78.10500148646335
+      },
+      {
+        "event": "validation",
+        "step": 3000,
+        "tokens_seen": 49152000,
+        "validation_loss": 4.296174688339233,
+        "perplexity": 73.41840755733331
+      },
+      {
+        "event": "validation",
+        "step": 3052,
+        "tokens_seen": 50000000,
+        "validation_loss": 4.291771926879883,
+        "perplexity": 73.09587436150173
+      }
+    ]
+  },
+  "generation_quality": {
+    "maximum_consecutive_word_run": 2,
+    "repeated_four_gram_rate": 0.0
+  },
+  "checkpoint_manifest_entry": {
+    "bytes": 712928737,
+    "sha256": "c8e945ac88610a1efd06768ecbb399097d0d89bc12be52944b8696efdbfc1425"
+  },
+  "local_portable_reload": {
+    "passed": true,
+    "torch": "2.13.0",
+    "device": "cpu",
+    "precision": "fp32",
+    "manifest_integrity": {
+      "health-batches.json": true,
+      "latest.pt": true,
+      "metrics.jsonl": true,
+      "summary.json": true,
+      "worker.log": true,
+      "xla-metrics.txt": true
+    },
+    "checkpoint_weights_equal": true,
+    "parameter_identity_preserved": true,
+    "generation": "Once upon a time, in a cozy town named Harmonyville, there was a friendly little little creature called the \"Citerous Cotny.\" This thing happened to be a wise wise old creature called \"Citual Dore,\" which means you can imagine what you want to see in your favorite book or game!\n\nBut wait",
+    "generation_matches_worker": true
+  },
+  "session_cleanup": {
+    "session": "kiwilm2-tpu-v6e1-muon-smoke-50m-tied",
+    "terminated": true,
+    "server_active_sessions": 0
+  }
+}

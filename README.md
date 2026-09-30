@@ -1,8 +1,14 @@
 # KiwiLM 2
 
 Experimental hardware qualification: [50M-token single-chip Colab TPU smoke](docs/tpu-smoke.md)
-is currently blocked by embedding/head weight tying; see the
-[completed-run analysis](examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md).
+now targets v6e-1 with corrected weight tying and portable-reload checks. The
+[corrected v6e-1 smoke passed](examples/comparisons/kiwilm2-tpu-v6e1-50m-smoke/analysis.md).
+The [previous v5e-1 run](examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md)
+remains an invalid untied control; a larger TPU run is not yet qualified.
+The TPU launcher now restores fingerprint-checked Drive data, with compressed
+parallel uploads on a cache miss. `bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup`
+prepares only; `bash scripts/run_colab_kiwilm2_tpu_smoke.sh train` is a separate,
+explicit start. Setup leaves an idle, potentially billable TPU until started or stopped.
 
 KiwiLM 2 is a controlled language-model architecture experiment combining
 periodic grouped-query attention, large-kernel causal gated convolutions, and
