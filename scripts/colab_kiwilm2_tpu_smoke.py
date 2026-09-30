@@ -10,6 +10,7 @@ from pathlib import Path
 CONTENT = Path("/content")
 ENV = CONTENT / "kiwilm-tpu-env"
 PYTHON = ENV / "bin" / "python"
+WORKER_TIMEOUT = 7200
 
 
 def run(command: list[str], *, timeout: int = 300, env: dict | None = None) -> None:
@@ -71,18 +72,29 @@ def main() -> None:
     run(data_restore_command(PYTHON, data_dir))
     output = CONTENT / "kiwilm-tpu-smoke"
     output.mkdir(exist_ok=True)
-    with (output / "worker.log").open("w") as log:
+    resume_dir = CONTENT / "kiwilm-tpu-resume"
+    resume_args = []
+    if (resume_dir / "artifact-manifest.json").is_file():
+        run(data_restore_command(PYTHON, resume_dir))
+        resume_args = ["--resume", str(resume_dir / "latest.pt")]
+    elif (output / "latest.pt").is_file():
+        resume_args = ["--resume", str(output / "latest.pt")]
+    with (output / "worker.log").open("a") as log:
         process = subprocess.Popen([
             str(PYTHON), "-u", "-m", "kiwilm.tpu_smoke",
             "--data-dir", str(data_dir),
-            "--output-dir", str(output), "--steps", "200", "--warmup-steps", "20",
+            "--output-dir", str(output), "--warmup-steps", "20",
+            "--eval-batches", "50", "--eval-interval", "500",
+            "--checkpoint-interval", "500",
+            "--artifact-dir", str(CONTENT / "kiwilm-tpu-artifacts"),
+            *resume_args,
         ], env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
-            process.wait(timeout=900)
+            process.wait(timeout=WORKER_TIMEOUT)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
-            raise RuntimeError("TPU probe exceeded its 15-minute worker limit") from None
+            raise RuntimeError("TPU smoke exceeded its two-hour worker limit") from None
     print((output / "worker.log").read_text(), flush=True)
     if process.returncode:
         raise RuntimeError(f"TPU probe failed with exit code {process.returncode}")

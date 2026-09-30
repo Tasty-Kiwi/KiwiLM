@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -115,8 +116,9 @@ def test_xla_requires_one_real_tpu_and_synchronizes(monkeypatch: pytest.MonkeyPa
         Runtime("xla", "bf16")
 
 
+@pytest.mark.parametrize("resume", [False, True])
 def test_bootstrap_uses_standalone_python_and_bounded_worker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resume: bool,
 ) -> None:
     path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("tpu_bootstrap", path)
@@ -128,6 +130,9 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
     (tmp_path / "kiwilm-0.1.0-py3-none-any.whl").write_bytes(b"test wheel")
     (tmp_path / "kiwilm-data-artifacts").mkdir()
     (tmp_path / "kiwilm-data-artifacts" / "artifact-manifest.json").write_text("{}")
+    if resume:
+        (tmp_path / "kiwilm-tpu-resume").mkdir()
+        (tmp_path / "kiwilm-tpu-resume" / "artifact-manifest.json").write_text("{}")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
     process = Mock(returncode=0)
     monkeypatch.setattr(module.subprocess, "run", run)
@@ -143,7 +148,17 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
             compile(command[command.index("-c") + 1], "<bootstrap-command>", "exec")
     child_env = module.subprocess.Popen.call_args.kwargs["env"]
     assert child_env["LD_LIBRARY_PATH"].startswith(str(tmp_path / "env" / "lib"))
-    process.wait.assert_called_once_with(timeout=900)
+    process.wait.assert_called_once_with(timeout=7200)
+    worker = module.subprocess.Popen.call_args.args[0]
+    assert "--steps" not in worker
+    assert worker[worker.index("--eval-batches") + 1] == "50"
+    assert "--artifact-dir" in worker
+    if resume:
+        assert worker[worker.index("--resume") + 1] == str(
+            tmp_path / "kiwilm-tpu-resume" / "latest.pt"
+        )
+    else:
+        assert "--resume" not in worker
 
 
 def test_bootstrap_reassembles_actual_chunks(tmp_path: Path) -> None:
@@ -157,3 +172,40 @@ def test_bootstrap_reassembles_actual_chunks(tmp_path: Path) -> None:
     create_colab_artifacts({"metadata.json": source}, data_dir, chunk_size=16)
     module.run(module.data_restore_command(Path(sys.executable), data_dir))
     assert (data_dir / "metadata.json").read_bytes() == source.read_bytes()
+
+
+def test_full_smoke_exact_tokens_and_periodic_resume(tmp_path: Path) -> None:
+    prepare_from_stories(
+        tmp_path / "data", ["A tiny training story. " * 8], ["A validation story. " * 8],
+        vocab_size=300, min_frequency=1,
+    )
+    data = PreparedTokenData(tmp_path / "data")
+    config = tiny_config(data.tokenizer.vocab_size)
+    options = dict(config=config, runtime=Runtime("cpu", "fp32"), batch_size=1,
+                   accumulation=2, eval_batches=1, warmup_steps=1,
+                   max_tokens=40, checkpoint_interval=1, eval_interval=1,
+                   verify_checkpoint_reload=True)
+    split_dir = tmp_path / "split"
+    probe(data, split_dir, steps=2, **options)
+    # Simulate metrics recorded after the last saved optimizer boundary.
+    with (split_dir / "metrics.jsonl").open("a") as stream:
+        stream.write(json.dumps({"event": "train", "step": 99}) + "\n")
+    result = probe(data, split_dir, steps=4,
+                   resume=split_dir / "latest.pt", final_diagnostics=True, **options)
+    probe(data, tmp_path / "whole", steps=4, **options)
+    assert result["status"] == "smoke-complete"
+    assert result["tokens_seen"] == 40
+    assert result["step"] == 3
+    assert result["session_tokens"] == 8
+    assert result["steady_tokens"] == 0  # Partial last batch excluded from throughput.
+    assert result["diagnostic_device"] == "cpu"
+    assert result["health"]["batch_count"] == 50
+    assert result["cached_generation_parity"]["passed"]
+    assert result["checkpoint_reload"]["passed"]
+    rows = [json.loads(line) for line in (split_dir / "metrics.jsonl").read_text().splitlines()]
+    assert not any(row["step"] == 99 for row in rows)
+    assert [r["tokens_seen"] for r in rows if r["event"] == "train"] == [16, 32, 40]
+    split = torch.load(split_dir / "latest.pt", weights_only=True)
+    whole = torch.load(tmp_path / "whole" / "latest.pt", weights_only=True)
+    for key in whole["model_state_dict"]:
+        torch.testing.assert_close(split["model_state_dict"][key], whole["model_state_dict"][key])

@@ -1,0 +1,883 @@
+{
+  "schema_version": 1,
+  "decision": "do-not-promote: XLA trained untied embeddings/head",
+  "source": "runs/colab/tpu-v5e1-muon-smoke-50m",
+  "checkpoint": "runs/colab/tpu-v5e1-muon-smoke-50m/latest.pt",
+  "integrity": {
+    "health-batches.json": {
+      "sha256": "744f13dc8360b341f77f8022e6df9d8518d2858a870244180c70be9f5aaa8572",
+      "passed": true
+    },
+    "latest.pt": {
+      "sha256": "60b08fac0d61c7e1066f9db07180ff9da883f4b1b74837ff42aa5221cb7fb11e",
+      "passed": true
+    },
+    "metrics.jsonl": {
+      "sha256": "9dca3882632171c340caa8791a347cadb5eff3905831a1a001b18487e053d55b",
+      "passed": true
+    },
+    "summary.json": {
+      "sha256": "ed64522013abebc352a3ebae80a69a391708ba684454df6ae061d2366a6df4e0",
+      "passed": true
+    },
+    "worker.log": {
+      "sha256": "0effa522714274f5dcf2acf3f773bac7f7c2dc97c76a9c5e1d8b9fee3736966c",
+      "passed": true
+    },
+    "xla-metrics.txt": {
+      "sha256": "5b37b9bd1f3bbf004db83c03997ec53e766f48ebc33fbac8e7ec1c191e6e9bc3",
+      "passed": true
+    }
+  },
+  "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+  "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+  "local_runtime": {
+    "torch": "2.13.0",
+    "device": "cpu",
+    "threads": 4
+  },
+  "remote_summary": {
+    "status": "smoke-complete",
+    "not_a_1b_promotion": true,
+    "device": "xla:0",
+    "precision": "bf16",
+    "torch": "2.9.0+cpu",
+    "torch_xla": "2.9.0",
+    "data_fingerprint": "66b9899b879a5aba9eabdd4a40a54ab9ede62fdd1070f43be9b4c5b0e0e9714b",
+    "tokenizer_sha256": "4bcfc2d969a7a8c2285b364d709917d14e17a141e281fed9d7770db00329acf3",
+    "model_config": {
+      "architecture": "kiwilm2",
+      "vocab_size": 32000,
+      "context_length": 512,
+      "d_model": 512,
+      "dropout": 0.0,
+      "tie_embeddings": true,
+      "mixer_schedule": [
+        "gqa",
+        "conv",
+        "conv",
+        "gqa",
+        "conv",
+        "conv",
+        "gqa",
+        "conv",
+        "conv",
+        "gqa"
+      ],
+      "conv_kernel_sizes": [
+        31,
+        63,
+        31,
+        63,
+        31,
+        63
+      ],
+      "num_query_heads": 8,
+      "num_kv_heads": 2,
+      "swiglu_dim": 1536,
+      "bigram_buckets": 16384,
+      "trigram_buckets": 16384,
+      "rms_norm_eps": 1e-06,
+      "rope_base": 10000.0
+    },
+    "train_config": {
+      "max_steps": 3152,
+      "batch_size": 8,
+      "grad_accum_steps": 4,
+      "lr": 0.0003,
+      "min_lr": 3e-05,
+      "warmup_steps": 100,
+      "max_tokens": 50000000,
+      "warmup_tokens": 1000000,
+      "batch_mode": "packed",
+      "eval_mode": "packed",
+      "precision": "bf16",
+      "weight_decay": 0.1,
+      "beta2": 0.95,
+      "optimizer": "muon",
+      "muon_lr": 0.01,
+      "grad_clip": 1.0,
+      "eval_interval": 500,
+      "eval_batches": 50,
+      "checkpoint_interval": 500,
+      "log_interval": 10,
+      "sample_prompt": "Once upon a time",
+      "sample_tokens": 64,
+      "seed": 42
+    },
+    "initial_step": 0,
+    "step": 3052,
+    "tokens_seen": 50000000,
+    "first_step_seconds": 85.69668975399986,
+    "warmup_steps": 20,
+    "training_seconds": 1347.099669091,
+    "steady_tokens_per_second": 47871.01618983815,
+    "steady_tokens": 49659904,
+    "steady_seconds": 1037.368912392998,
+    "session_tokens": 50000000,
+    "training_and_periodic_io_seconds": 1347.099669091,
+    "validation_loss": 4.164009966850281,
+    "perplexity": 64.32896310057951,
+    "memory": {
+      "bytes_used": 3622439936,
+      "bytes_limit": 16909336576,
+      "peak_bytes_used": 4146859520
+    },
+    "xla_after_warmup": {
+      "compile_count": 2,
+      "cpu_fallbacks": {}
+    },
+    "xla_after_training": {
+      "compile_count": 4,
+      "cpu_fallbacks": {}
+    },
+    "checkpoint_reload": {
+      "passed": true,
+      "device": "xla:0",
+      "step": 500,
+      "scope": "same-process model/optimizer/data-generator reload; not VM restart"
+    },
+    "cached_generation_parity": {
+      "passed": true,
+      "direct_passed": true,
+      "rollover_passed": true,
+      "direct_max_absolute_difference": 4.291534423828125e-06,
+      "rollover_max_absolute_difference": 0.0,
+      "rtol": 0.002,
+      "atol": 0.002
+    },
+    "health": {
+      "batch_count": 50,
+      "health_pass_count": 50,
+      "all_finite": true,
+      "all_nonzero_gradients": true,
+      "minimum_mlp_family_gradient_ratios": {
+        "swiglu": 1.4341343379608151
+      },
+      "minimum_mlp_family_output_rms_ratios": {
+        "swiglu": 6.466487173174517
+      },
+      "blocks": [
+        {
+          "index": 0,
+          "mixer": "gqa",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.0670287609100342,
+              "p90": 1.0845428109169006,
+              "p95": 1.0895038187503814,
+              "maximum": 1.0972753763198853
+            },
+            "mlp_output_rms": {
+              "median": 0.1850571110844612,
+              "p90": 0.1879932522773743,
+              "p95": 0.18839635103940966,
+              "maximum": 0.18920429050922394
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.1120225191116333,
+              "p90": 1.1297306299209593,
+              "p95": 1.1328088581562041,
+              "maximum": 1.1438472270965576
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.17377043520171892,
+              "p90": 0.17720847965591394,
+              "p95": 0.17828808170557447,
+              "maximum": 0.17909823614820536
+            },
+            "residual_amplification": {
+              "median": 1.0424772755180527,
+              "p90": 1.0439541644259913,
+              "p95": 1.0443814479898166,
+              "maximum": 1.0445390439286555,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 1,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.1216378808021545,
+              "p90": 1.1411388993263245,
+              "p95": 1.142979544401169,
+              "maximum": 1.1551917791366577
+            },
+            "mlp_output_rms": {
+              "median": 0.204807348549366,
+              "p90": 0.21122789233922956,
+              "p95": 0.2119349792599678,
+              "maximum": 0.2149646282196045
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.1760536432266235,
+              "p90": 1.1928595781326294,
+              "p95": 1.195907425880432,
+              "maximum": 1.2109185457229614
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.18293649261399098,
+              "p90": 0.18879377661620958,
+              "p95": 0.189408298426348,
+              "maximum": 0.1915419225997086
+            },
+            "residual_amplification": {
+              "median": 1.0477312460703736,
+              "p90": 1.0500591746836034,
+              "p95": 1.0508728274399093,
+              "maximum": 1.0514704640514343,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 2,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.1847146153450012,
+              "p90": 1.2009732723236084,
+              "p95": 1.204101550579071,
+              "maximum": 1.2210990190505981
+            },
+            "mlp_output_rms": {
+              "median": 0.24467843770980835,
+              "p90": 0.25129938423633574,
+              "p95": 0.25181370973587036,
+              "maximum": 0.2557896077632904
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.26393324136734,
+              "p90": 1.2779947757720949,
+              "p95": 1.2829684495925904,
+              "maximum": 1.3063390254974365
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.20777861530509645,
+              "p90": 0.21230430418616159,
+              "p95": 0.21390936781001682,
+              "maximum": 0.21419355504324336
+            },
+            "residual_amplification": {
+              "median": 1.0683968862208306,
+              "p90": 1.071596027527032,
+              "p95": 1.0722260312912533,
+              "maximum": 1.0724939852268307,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 3,
+          "mixer": "gqa",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.2640354633331299,
+              "p90": 1.277116131782532,
+              "p95": 1.2809733271598815,
+              "maximum": 1.3037159442901611
+            },
+            "mlp_output_rms": {
+              "median": 0.18442393094301224,
+              "p90": 0.18833149671554567,
+              "p95": 0.18926745951175689,
+              "maximum": 0.190626859664917
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.298845887184143,
+              "p90": 1.3106725454330446,
+              "p95": 1.3134430944919586,
+              "maximum": 1.3351452350616455
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.1458305705129206,
+              "p90": 0.14897626288850993,
+              "p95": 0.14922395370800062,
+              "maximum": 0.14998944223377492
+            },
+            "residual_amplification": {
+              "median": 1.0261671528262237,
+              "p90": 1.027390918993138,
+              "p95": 1.0282102985057038,
+              "maximum": 1.0297362602082125,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 4,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.3053904175758362,
+              "p90": 1.3180926203727723,
+              "p95": 1.3207736313343048,
+              "maximum": 1.3439329862594604
+            },
+            "mlp_output_rms": {
+              "median": 0.18955807387828827,
+              "p90": 0.19253884106874466,
+              "p95": 0.19287649765610695,
+              "maximum": 0.19394557178020477
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.3484141826629639,
+              "p90": 1.3599041104316711,
+              "p95": 1.3636191248893739,
+              "maximum": 1.3838785886764526
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.1453872696384899,
+              "p90": 0.14766401885107397,
+              "p95": 0.1487294266978924,
+              "maximum": 0.14910894591330356
+            },
+            "residual_amplification": {
+              "median": 1.0322928244475222,
+              "p90": 1.0344425486237518,
+              "p95": 1.0345304512628473,
+              "maximum": 1.036982488359303,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 5,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.3619386553764343,
+              "p90": 1.3732326030731201,
+              "p95": 1.3769347608089446,
+              "maximum": 1.3988004922866821
+            },
+            "mlp_output_rms": {
+              "median": 0.22861751914024353,
+              "p90": 0.23134324401617049,
+              "p95": 0.23186155185103413,
+              "maximum": 0.23214705288410187
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.4291387796401978,
+              "p90": 1.4397946000099182,
+              "p95": 1.4439405500888824,
+              "maximum": 1.4669592380523682
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.167927903422744,
+              "p90": 0.17013712495215086,
+              "p95": 0.1712110018621627,
+              "maximum": 0.17180245491732346
+            },
+            "residual_amplification": {
+              "median": 1.049309328873356,
+              "p90": 1.0512850713818267,
+              "p95": 1.0516419351450927,
+              "maximum": 1.0543418409427816,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 6,
+          "mixer": "gqa",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.4657609462738037,
+              "p90": 1.4765455365180968,
+              "p95": 1.4818312764167785,
+              "maximum": 1.49954354763031
+            },
+            "mlp_output_rms": {
+              "median": 0.26771821081638336,
+              "p90": 0.2821348309516907,
+              "p95": 0.28489904254674914,
+              "maximum": 0.2939397692680359
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.5254536867141724,
+              "p90": 1.5360360741615295,
+              "p95": 1.5392690122127533,
+              "maximum": 1.558575987815857
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.18330532288613147,
+              "p90": 0.19178895472130997,
+              "p95": 0.19388464835857808,
+              "maximum": 0.19979311256805699
+            },
+            "residual_amplification": {
+              "median": 1.0396727415499636,
+              "p90": 1.0425945515686192,
+              "p95": 1.0428859074074877,
+              "maximum": 1.044010908016368,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 7,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.554196059703827,
+              "p90": 1.5654717922210692,
+              "p95": 1.5666665077209472,
+              "maximum": 1.5834282636642456
+            },
+            "mlp_output_rms": {
+              "median": 0.26346640288829803,
+              "p90": 0.2755143314599991,
+              "p95": 0.27662656754255294,
+              "maximum": 0.28310319781303406
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.6122211813926697,
+              "p90": 1.6272038340568542,
+              "p95": 1.6295387625694275,
+              "maximum": 1.6450501680374146
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.1700012464516375,
+              "p90": 0.17652712718744895,
+              "p95": 0.1780704402011481,
+              "maximum": 0.1810706118749369
+            },
+            "residual_amplification": {
+              "median": 1.0375069165073345,
+              "p90": 1.0401047531560212,
+              "p95": 1.0409630512335588,
+              "maximum": 1.0429120198945436,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 8,
+          "mixer": "conv",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.6511585712432861,
+              "p90": 1.6651865720748902,
+              "p95": 1.6674079537391662,
+              "maximum": 1.6834636926651
+            },
+            "mlp_output_rms": {
+              "median": 0.4345739334821701,
+              "p90": 0.46234317421913146,
+              "p95": 0.47498651742935183,
+              "maximum": 0.48911476135253906
+            },
+            "post_mlp_residual_rms": {
+              "median": 1.8223172426223755,
+              "p90": 1.8513793826103209,
+              "p95": 1.8556811571121217,
+              "maximum": 1.8738340139389038
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.26445204978065484,
+              "p90": 0.27838522086078443,
+              "p95": 0.28620268115515723,
+              "maximum": 0.2934973507216487
+            },
+            "residual_amplification": {
+              "median": 1.1047070207366645,
+              "p90": 1.1143181738125032,
+              "p95": 1.117578318853256,
+              "maximum": 1.1244095705931534,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        },
+        {
+          "index": 9,
+          "mixer": "gqa",
+          "mlp_type": "swiglu",
+          "metrics": {
+            "post_mixer_residual_rms": {
+              "median": 1.9016786217689514,
+              "p90": 1.9301347255706787,
+              "p95": 1.9394812524318694,
+              "maximum": 1.9527333974838257
+            },
+            "mlp_output_rms": {
+              "median": 1.356321632862091,
+              "p90": 1.4170991063117981,
+              "p95": 1.4225807428359984,
+              "maximum": 1.4532681703567505
+            },
+            "post_mlp_residual_rms": {
+              "median": 2.698042631149292,
+              "p90": 2.7990116834640504,
+              "p95": 2.8166719913482665,
+              "maximum": 2.845815896987915
+            },
+            "mlp_update_to_residual_rms": {
+              "median": 0.7099489333608535,
+              "p90": 0.7380433220733487,
+              "p95": 0.7464424447662619,
+              "maximum": 0.7513620842538493
+            },
+            "residual_amplification": {
+              "median": 1.4261130895388159,
+              "p90": 1.4558287013424858,
+              "p95": 1.461945618312194,
+              "maximum": 1.4688532667563108,
+              "threshold": 1.5,
+              "threshold_failure_count": 0,
+              "threshold_failure_rate": 0.0
+            }
+          },
+          "mlp_residual_scale": null
+        }
+      ]
+    },
+    "diagnostic_device": "cpu",
+    "diagnostic_precision": "fp32",
+    "xla_cached_generation_parity": "not measured",
+    "generation": "Once upon a time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time",
+    "session_seconds_before_final_packaging": 1450.797355084
+  },
+  "weight_tying": {
+    "config_tie_embeddings": true,
+    "checkpoint_weights_equal": false,
+    "maximum_absolute_difference": 0.40590906143188477,
+    "embedding_rms": 0.024038931354880333,
+    "head_rms": 0.040733885020017624,
+    "extra_parameters_if_untied": 16384000,
+    "normal-tied-loader": {
+      "parameters": 64252416,
+      "muon_parameters": 30932992,
+      "adamw_parameters": 33319424,
+      "head_in_muon": false,
+      "embedding_matches_checkpoint": false,
+      "head_matches_checkpoint": true
+    },
+    "untied-diagnostic-reconstruction": {
+      "parameters": 80636416,
+      "muon_parameters": 47316992,
+      "adamw_parameters": 33319424,
+      "head_in_muon": true,
+      "embedding_matches_checkpoint": true,
+      "head_matches_checkpoint": true
+    }
+  },
+  "fixed_validation": {
+    "seed": 43,
+    "batch_size": 8,
+    "context_length": 512,
+    "batches": 50,
+    "targets": 204800,
+    "models": {
+      "normal-tied-loader-fp32": {
+        "validation_loss": 15.453752613067627,
+        "perplexity": 5146114.969324869,
+        "batches": 50,
+        "targets": 204800
+      },
+      "normal-tied-loader-bf16": {
+        "validation_loss": 15.68008041381836,
+        "perplexity": 6453159.500129335,
+        "batches": 5,
+        "targets": 20480
+      },
+      "untied-diagnostic-reconstruction-fp32": {
+        "validation_loss": 4.163875284194947,
+        "perplexity": 64.32029968843301,
+        "batches": 50,
+        "targets": 204800
+      },
+      "untied-diagnostic-reconstruction-bf16": {
+        "validation_loss": 4.207194709777832,
+        "perplexity": 67.1678499562329,
+        "batches": 5,
+        "targets": 20480
+      }
+    }
+  },
+  "generation": [
+    {
+      "model": "normal-tied-loader",
+      "prompt": "Once upon a time",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Once upon a time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time",
+      "quality": {
+        "maximum_consecutive_word_run": 65,
+        "repeated_four_gram_rate": 0.9384615384615385
+      }
+    },
+    {
+      "model": "normal-tied-loader",
+      "prompt": "Once upon a time",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Once upon a time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time time",
+      "quality": {
+        "maximum_consecutive_word_run": 65,
+        "repeated_four_gram_rate": 0.9384615384615385
+      }
+    },
+    {
+      "model": "normal-tied-loader",
+      "prompt": "The capital of France is",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "The capital of France is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is",
+      "quality": {
+        "maximum_consecutive_word_run": 65,
+        "repeated_four_gram_rate": 0.9242424242424242
+      }
+    },
+    {
+      "model": "normal-tied-loader",
+      "prompt": "The capital of France is",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "The capital of France is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is is",
+      "quality": {
+        "maximum_consecutive_word_run": 65,
+        "repeated_four_gram_rate": 0.9242424242424242
+      }
+    },
+    {
+      "model": "normal-tied-loader",
+      "prompt": "Explain why the sky is blue.",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Explain why the sky is blue...................................................,,,,,,,,,,,,,,",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "normal-tied-loader",
+      "prompt": "Explain why the sky is blue.",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Explain why the sky is blue...................................................,,,,,,,,,,,,,,",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "Once upon a time",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Once upon a time, in a place called Westville, lived a very old man named Goliath. He loved studying various aspects of life, including his own experiences and emotions, and was one of his best-selling books! These stories are filled with incredible stories that help us understand how things are and affect us all.\n\n",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "Once upon a time",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Once upon a time, in a place called Westville, lived a very old man named Goliath. He loved studying various aspects of life, including his own experiences and emotions, and was one of his best-selling books! These stories are filled with incredible stories that help us understand how things are and affect us all.\n\n",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "The capital of France is",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "The capital of France is a product of a political structure that makes the city of Germany. It also consists of a complex system of government that can be used to make the city's capital and its inhabitants.\nIn the mid-twentieth century, the city's government was created by people who were in a position to work by the country's",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "The capital of France is",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "The capital of France is a product of a political structure that makes the city of Germany. It also consists of a complex system of government that can be used to make the city's capital and its inhabitants.\nIn the mid-twentieth century, the city's government was created by people who were in a position to work by the country's",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "Explain why the sky is blue.",
+      "cache": "off",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Explain why the sky is blue.\nAs far as the light is colored, why has that color green and light green light blue?\nIn the same way, a dark green light is red light green in the sky, which is blue in color.\nBecause of its color, dark green colors are the same, but only dark green colors do in",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    },
+    {
+      "model": "untied-diagnostic-reconstruction",
+      "prompt": "Explain why the sky is blue.",
+      "cache": "auto",
+      "seed": 42,
+      "temperature": 0.8,
+      "top_k": 40,
+      "max_new_tokens": 64,
+      "text": "Explain why the sky is blue.\nAs far as the light is colored, why has that color green and light green light blue?\nIn the same way, a dark green light is red light green in the sky, which is blue in color.\nBecause of its color, dark green colors are the same, but only dark green colors do in",
+      "quality": {
+        "maximum_consecutive_word_run": 1,
+        "repeated_four_gram_rate": 0.0
+      }
+    }
+  ],
+  "cache_parity": {
+    "normal-tied-loader": {
+      "passed": true,
+      "direct_passed": true,
+      "rollover_passed": true,
+      "direct_max_absolute_difference": 8.58306884765625e-06,
+      "rollover_max_absolute_difference": 0.0,
+      "rtol": 0.002,
+      "atol": 0.002
+    },
+    "untied-diagnostic-reconstruction": {
+      "passed": true,
+      "direct_passed": true,
+      "rollover_passed": true,
+      "direct_max_absolute_difference": 6.67572021484375e-06,
+      "rollover_max_absolute_difference": 0.0,
+      "rtol": 0.002,
+      "atol": 0.002
+    }
+  },
+  "training_log_audit": {
+    "rows": 3052,
+    "unique_steps": 3052,
+    "all_losses_and_gradients_finite": true,
+    "steady_median_tokens_per_second": 51651.803327451555,
+    "validation": [
+      {
+        "event": "validation",
+        "step": 500,
+        "tokens_seen": 8192000,
+        "validation_loss": 5.336918640136719,
+        "perplexity": 207.87119646768386
+      },
+      {
+        "event": "validation",
+        "step": 1000,
+        "tokens_seen": 16384000,
+        "validation_loss": 4.879163064956665,
+        "perplexity": 131.5205436586132
+      },
+      {
+        "event": "validation",
+        "step": 1500,
+        "tokens_seen": 24576000,
+        "validation_loss": 4.599886617660522,
+        "perplexity": 99.47303651692387
+      },
+      {
+        "event": "validation",
+        "step": 2000,
+        "tokens_seen": 32768000,
+        "validation_loss": 4.389028043746948,
+        "perplexity": 80.56207809912233
+      },
+      {
+        "event": "validation",
+        "step": 2500,
+        "tokens_seen": 40960000,
+        "validation_loss": 4.244870982170105,
+        "perplexity": 69.746760987645
+      },
+      {
+        "event": "validation",
+        "step": 3000,
+        "tokens_seen": 49152000,
+        "validation_loss": 4.169332175254822,
+        "perplexity": 64.67224795509706
+      },
+      {
+        "event": "validation",
+        "step": 3052,
+        "tokens_seen": 50000000,
+        "validation_loss": 4.164009966850281,
+        "perplexity": 64.32896310057951
+      }
+    ]
+  }
+}

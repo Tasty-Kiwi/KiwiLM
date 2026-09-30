@@ -1,7 +1,20 @@
 # Experimental TPU hardware smoke
 
-Current evidence: [initial attempt report](../examples/comparisons/kiwilm2-tpu-hardware-smoke/analysis.md).
-The launcher is implemented; real TPU training remains unverified.
+**Qualification blocked after the completed 50M run:** throughput was 47.9k
+tokens/s, but XLA device transfer broke the embedding/head weight tie. The
+checkpoint therefore represents an untied model, and normal tied loading gives
+incorrect validation/generation. See the
+[50M analysis and reproducible audit](../examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md).
+Do not resume these weights as canonical Dense or launch a larger run with the
+current worker. Weight tying must be re-established after device transfer,
+before optimizer construction, and checked through portable reload. No worker
+fix or new training was performed as part of this analysis.
+
+The completed 200-step hardware probe sustained 53.1k tokens/s on XLA BF16,
+with two compiled graphs and no recorded CPU fallbacks. The launcher now runs
+the full **50,000,000-token smoke**. The
+[initial attempt report](../examples/comparisons/kiwilm2-tpu-hardware-smoke/analysis.md)
+describes the earlier bootstrap failures, before the successful probe.
 
 This is a separate single-chip Dense/Muon 0.01 hardware probe, not a change to
 the ongoing GPU run or approval for a 1B run. Google has
@@ -17,11 +30,12 @@ bash scripts/run_colab_kiwilm2_tpu_smoke.sh
 ```
 
 The launcher allocates only `v5e1`, in a separate
-`kiwilm2-tpu-v5e1-muon-smoke` session. It verifies a real XLA matrix multiplication
+`kiwilm2-tpu-v5e1-muon-smoke-50m` session. It verifies a real XLA matrix multiplication
 before uploading the validated local smoke data in checksummed 4MiB chunks;
 large single-file uploads can fail
 at the Colab proxy. It never mounts/writes Drive or accesses 500M checkpoints.
-Results go to `runs/colab/tpu-v5e1-muon-smoke`. For repeats, set new
+Results go to `runs/colab/tpu-v5e1-muon-smoke-50m`, preserving the downloaded short
+probe. For repeats, set new
 `KIWILM_RESULT_DIR` and `COLAB_SESSION_NAME` values, not the GPU session's name.
 
 The worker uses standalone Python 3.12 in an isolated environment, with matching
@@ -36,15 +50,47 @@ The normal Windows CUDA environment and lockfile are unchanged. TPU uses
 - Dense backbone unchanged; context 512, seed 42, batch 8, accumulation 4.
 - Muon 0.01 plus auxiliary AdamW 0.0003; original clipping, decay and betas.
 - Fresh initialization, frozen tokenizer/data, 50M token LR schedule with 1M
-  warmup. The first probe stops after 200 updates / 3,276,800 tokens.
+  warmup. The run stops at exactly 50M tokens: 3,052 updates at the default
+  settings, with 12,416 valid targets in the masked final update.
 - First 20 updates excluded from steady throughput but included in wall time.
-- Five fixed validation batches for inexpensive compatibility checking, not
-  architecture selection. BF16 is not an exact continuation of the FP16 run.
+- Fifty fixed validation batches every 500 updates and at completion, seed 43.
+- Atomic checkpoints and downloadable 4MiB artifact chunks every 500 updates
+  and at completion. Throughput excludes checkpoint/validation time; session
+  wall time records that overhead and CPU diagnostics, excluding final artifact
+  packaging, environment setup and transfers. Partial final updates are excluded from
+  steady throughput.
+- The first saved checkpoint is reloaded into the model, optimizer and data
+  generator on the training device, followed by further training. This checks
+  same-process reload; it does not establish VM-restart equivalence.
+- After completion, the portable weights receive a CPU FP32 50-batch health
+  audit (25 batches per seed 141/142), direct and rollover cache-parity checks,
+  and a short generation sample. CPU diagnostic evidence is labeled explicitly;
+  on-TPU cached generation remains unverified.
 
-The worker allows 15 minutes for the probe; the launcher caps preflight/setup
-at five minutes and probe execution at 15 minutes (uploads/downloads excluded). On failure or
-exit, the launcher attempts log recovery and stops only its own session. If the
+The worker allows two hours; the launcher caps preflight/setup at five minutes
+and smoke execution at 125 minutes (uploads/downloads excluded). At the short
+probe's steady rate, 50M training alone would take about 16 minutes; compilation,
+validation, checkpoint packaging and CPU diagnostics add overhead. On failure or
+exit, the launcher attempts periodic artifact/checkpoint recovery and stops only its own session. If the
 network prevents cleanup, verify and manually stop that named TPU session.
+
+## Resume
+
+To resume a downloaded full-smoke checkpoint in a new VM:
+
+```bash
+KIWILM2_RESUME_FROM=runs/colab/tpu-v5e1-muon-smoke-50m/latest.pt \
+KIWILM_RESULT_DIR=runs/colab/tpu-v5e1-muon-smoke-50m-resumed \
+COLAB_SESSION_NAME=kiwilm2-tpu-v5e1-muon-smoke-50m-resumed \
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh
+```
+
+Resume uploads the checkpoint in verified chunks and requires matching model,
+data fingerprint, backend and training configuration. The earlier 200-step
+checkpoint has a different validation configuration; start the full smoke
+fresh. Local logs newer than the saved step are truncated on same-directory
+module resume. Checkpoints stay on the VM until downloaded; this launcher does
+not mirror to Drive, so recovery cannot survive a lost VM before downloading.
 
 ## Interpretation
 
@@ -72,16 +118,16 @@ Matched CUDA control, in PowerShell:
 uv run --locked python -m kiwilm.tpu_smoke `
   --device cuda --precision fp16 `
   --data-dir "data\smollm-smoke" `
-  --output-dir "runs\cuda-muon-hardware-smoke" `
-  --steps 200 --warmup-steps 20
+  --output-dir "runs\cuda-muon-hardware-smoke-50m" `
+  --warmup-steps 20 --eval-batches 50
 ```
 
 Compare identical fingerprints, steps, batch/accumulation, optimizer and schedule.
 Label BF16-versus-FP16 explicitly; a BF16-capable GPU can also run BF16 to isolate
 numerical differences. CPU support exists for tiny tests, not speed claims.
 
-Only after passing this probe should TPU advance to a full 50M smoke with 50
-validation batches, generation/cached-parity checks, and verified on-TPU resume.
-The short probe explicitly does **not** measure cached-generation parity.
+The full smoke now provides convergence, periodic validation/checkpoints,
+same-process training-device checkpoint reload, and CPU health/cache checks.
+Check a real VM restart and on-TPU cache parity separately before production.
 Estimate a 1B run only after including compile, evaluation, checkpoint and
 restart overhead—not just extrapolating peak throughput. No 1B job starts here.

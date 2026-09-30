@@ -1,6 +1,8 @@
 # KiwiLM 2
 
-Experimental hardware qualification: [single-chip Colab TPU smoke](docs/tpu-smoke.md).
+Experimental hardware qualification: [50M-token single-chip Colab TPU smoke](docs/tpu-smoke.md)
+is currently blocked by embedding/head weight tying; see the
+[completed-run analysis](examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md).
 
 KiwiLM 2 is a controlled language-model architecture experiment combining
 periodic grouped-query attention, large-kernel causal gated convolutions, and
