@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from collections import deque
 from pathlib import Path
 
 CONTENT = Path("/content")
@@ -19,6 +21,75 @@ def run(command: list[str], *, timeout: int = 300, env: dict | None = None) -> N
     print(result.stdout, end="", flush=True)
     print(result.stderr, end="", file=sys.stderr, flush=True)
     result.check_returncode()
+
+
+def run_worker(
+    command: list[str], *, env: dict, log_path: Path,
+    timeout: float = WORKER_TIMEOUT, heartbeat_interval: float = 30,
+) -> None:
+    """Stream structured progress while retaining all output in an append-only log."""
+    if timeout <= 0 or heartbeat_interval <= 0:
+        raise ValueError("worker timeout and heartbeat interval must be positive")
+    print(
+        "Starting TPU worker. Initial XLA compilation may take a few minutes. "
+        f"Full output: {log_path}", flush=True,
+    )
+    started = last_progress = time.monotonic()
+    pending = ""
+    with log_path.open("a", encoding="utf-8") as log, log_path.open(
+        "r", encoding="utf-8", errors="replace",
+    ) as reader:
+        # On resume, stream only new output; keep historical output in the file.
+        reader.seek(0, os.SEEK_END)
+        process = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)
+
+        def drain(*, final: bool = False) -> None:
+            nonlocal pending, last_progress
+            pending += reader.read()
+            lines = pending.split("\n")
+            pending = lines.pop()
+            if final and pending:
+                lines.append(pending)
+                pending = ""
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict) and "event" in event:
+                    print(line, flush=True)
+                    last_progress = time.monotonic()
+
+        try:
+            while True:
+                remaining = timeout - (time.monotonic() - started)
+                if remaining <= 0:
+                    raise RuntimeError(f"TPU smoke exceeded its {timeout:g}-second worker limit")
+                try:
+                    process.wait(timeout=min(1, remaining, heartbeat_interval))
+                except subprocess.TimeoutExpired:
+                    drain()
+                    now = time.monotonic()
+                    if now - last_progress >= heartbeat_interval:
+                        print(
+                            f"TPU worker still running ({now - started:.0f}s elapsed); "
+                            f"compilation/evaluation may be quiet. Full output: {log_path}",
+                            flush=True,
+                        )
+                        last_progress = now
+                else:
+                    drain(final=True)
+                    break
+        finally:
+            # Preserve the existing bounded lifetime, including interrupted/error exits.
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        if process.returncode:
+            with log_path.open(encoding="utf-8", errors="replace") as failure_log:
+                tail = "".join(deque(failure_log, maxlen=40))
+            print(f"TPU worker failed; last log lines:\n{tail}", file=sys.stderr, flush=True)
+            raise RuntimeError(f"TPU probe failed with exit code {process.returncode}")
 
 
 def data_restore_command(python: Path, data_dir: Path) -> list[str]:
@@ -109,8 +180,8 @@ def main() -> None:
         resume_args = ["--resume", str(output / "latest.pt")]
     elif (resume_dir / "latest.pt").is_file():
         resume_args = ["--resume", str(resume_dir / "latest.pt")]
-    with (output / "worker.log").open("a") as log:
-        process = subprocess.Popen([
+    print("First periodic checkpoint is at step 500; Ctrl+C stops this VM.", flush=True)
+    run_worker([
             str(PYTHON), "-u", "-m", "kiwilm.tpu_smoke",
             "--data-dir", str(data_dir),
             "--output-dir", str(output), "--warmup-steps", "20",
@@ -118,16 +189,8 @@ def main() -> None:
             "--checkpoint-interval", "500",
             "--artifact-dir", str(CONTENT / "kiwilm-tpu-artifacts"),
             *resume_args,
-        ], env=env, stdout=log, stderr=subprocess.STDOUT)
-        try:
-            process.wait(timeout=WORKER_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            raise RuntimeError("TPU smoke exceeded its two-hour worker limit") from None
-    print((output / "worker.log").read_text(), flush=True)
-    if process.returncode:
-        raise RuntimeError(f"TPU probe failed with exit code {process.returncode}")
+        ], env=env, log_path=output / "worker.log", timeout=WORKER_TIMEOUT)
+    print("TPU worker completed; packaging downloadable artifacts.", flush=True)
     run([
         str(PYTHON), "-c",
         "from pathlib import Path; from kiwilm.colab_artifacts import create_colab_artifacts; "

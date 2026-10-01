@@ -48,6 +48,14 @@ Start training explicitly, with the same environment settings:
 bash scripts/run_colab_kiwilm2_tpu_smoke.sh train
 ```
 
+During training, JSON progress rows stream to the terminal as the worker emits
+them (step 1, then every 10 updates). A heartbeat appears every 30 seconds
+without a progress event, including compilation and evaluation pauses. Full
+stdout/stderr and verbose XLA diagnostics remain in the append-only `worker.log`;
+they are not replayed wholesale at completion. Worker failures print the last
+40 log lines and still return an error. Ctrl+C still stops the allocated VM;
+the first periodic checkpoint remains at step 500.
+
 Or release the default session without training:
 
 ```bash

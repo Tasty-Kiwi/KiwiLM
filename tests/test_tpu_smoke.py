@@ -223,7 +223,8 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
             compile(command[command.index("-c") + 1], "<bootstrap-command>", "exec")
     child_env = module.subprocess.Popen.call_args.kwargs["env"]
     assert child_env["LD_LIBRARY_PATH"].startswith(str(tmp_path / "env" / "lib"))
-    process.wait.assert_called_once_with(timeout=7200)
+    process.wait.assert_called_once_with(timeout=1)
+    process.kill.assert_not_called()
     worker = module.subprocess.Popen.call_args.args[0]
     assert "--require-ready" in commands[-2]
     assert "--steps" not in worker
