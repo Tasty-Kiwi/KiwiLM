@@ -24,6 +24,7 @@ from kiwilm.config import KiwiLM2Config
 from kiwilm.data import PreparedTokenData
 from kiwilm.models import KiwiLM2LM
 from kiwilm.optim import MuonWithAuxAdamW, split_muon_parameters, zeroth_power_via_newton_schulz
+from kiwilm.tpu_checkpoint import DriveCheckpointStore, compare_continuation, contract_digest
 from kiwilm.training import TrainConfig, learning_rate_at_tokens
 
 
@@ -225,6 +226,29 @@ def portable_loss_report(
     return report
 
 
+def probe_settings(
+    config: KiwiLM2Config, *, precision: str, max_tokens: int = 50_000_000,
+    batch_size: int = 8, accumulation: int = 4, eval_batches: int = 50,
+    eval_interval: int = 500, checkpoint_interval: int = 500,
+    warmup_tokens: int | None = None,
+) -> TrainConfig:
+    return TrainConfig(
+        max_steps=math.ceil(max_tokens / (batch_size * accumulation * config.context_length)) + 100,
+        max_tokens=max_tokens, warmup_tokens=(min(1_000_000, max_tokens - 1)
+                                           if warmup_tokens is None else warmup_tokens),
+        batch_size=batch_size, grad_accum_steps=accumulation, precision=precision,
+        optimizer="muon", muon_lr=0.01, seed=42, eval_batches=eval_batches,
+        eval_interval=eval_interval, checkpoint_interval=checkpoint_interval,
+    )
+
+
+def probe_contract(settings: TrainConfig, device: str) -> dict:
+    engine = ("single-device-final-v1-tied" if settings.max_tokens == 1_000_000_000
+              else "single-device-smoke-v2-tied")
+    return {"engine": engine, "device": device,
+            "train_config": settings.to_dict()}
+
+
 def probe(
     data: PreparedTokenData, output: Path, *, config: KiwiLM2Config,
     runtime: Runtime, steps: int = 200, warmup_steps: int = 20,
@@ -233,20 +257,22 @@ def probe(
     max_tokens: int = 50_000_000, eval_interval: int = 500,
     checkpoint_interval: int = 500, artifact_dir: Path | None = None,
     final_diagnostics: bool = False, verify_checkpoint_reload: bool = False,
+    drive_store: DriveCheckpointStore | None = None, job_path: Path | None = None,
+    vm_id: str | None = None, require_new_vm: bool = False,
+    warmup_tokens: int | None = None, periodic_artifacts: bool = True,
 ) -> dict[str, Any]:
-    """Train a bounded prefix of a frozen 50M schedule using real packed data."""
+    """Train a bounded prefix of an immutable token schedule using real packed data."""
     if not 0 < warmup_steps < steps or min(
         batch_size, accumulation, eval_batches, max_tokens, eval_interval, checkpoint_interval
     ) < 1:
         raise ValueError("require steps > warmup_steps > 0 and positive batch/evaluation sizes")
     if config.architecture != "kiwilm2" or config.dropout != 0:
         raise ValueError("hardware smoke supports Dense with zero dropout only")
-    settings = TrainConfig(
-        max_steps=math.ceil(max_tokens / (batch_size * accumulation * config.context_length)) + 100,
-        max_tokens=max_tokens, warmup_tokens=min(1_000_000, max_tokens - 1),
-        batch_size=batch_size, grad_accum_steps=accumulation, precision=runtime.precision,
-        optimizer="muon", muon_lr=0.01, seed=42, eval_batches=eval_batches,
+    settings = probe_settings(
+        config, precision=runtime.precision, max_tokens=max_tokens,
+        batch_size=batch_size, accumulation=accumulation, eval_batches=eval_batches,
         eval_interval=eval_interval, checkpoint_interval=checkpoint_interval,
+        warmup_tokens=warmup_tokens,
     )
     output.mkdir(parents=True, exist_ok=True)
     if (output / "latest.pt").exists() and resume is None:
@@ -265,13 +291,24 @@ def probe(
         "cuda", enabled=runtime.device.type == "cuda" and runtime.precision == "fp16",
     )
     completed, tokens = 0, 0
-    contract = {"engine": "single-device-smoke-v2-tied", "device": runtime.device.type,
-                "train_config": settings.to_dict()}
+    contract = probe_contract(settings, runtime.device.type)
+    resume_origin = None
+    if require_new_vm and resume is None:
+        raise ValueError("fresh-VM continuation requires a checkpoint; refusing fresh training")
     if resume is not None:
         validate_tied_checkpoint(resume)
         saved = torch.load(resume, map_location="cpu", weights_only=True)
         if saved.get("training_state", {}).get("smoke_contract") != contract:
-            raise ValueError("resume must be a matching hardware smoke, not the ongoing GPU run")
+            raise ValueError(
+                "resume requires a matching hardware smoke/final budget and schedule, not a GPU run"
+            )
+        if not saved.get("optimizer_state_dict") or saved.get("batcher_state", {}).get(
+            "generators", {}
+        ).get("train") is None:
+            raise ValueError("resume checkpoint lacks optimizer or training data-generator state")
+        source_vm = saved["training_state"].get("vm_id")
+        if require_new_vm and (not vm_id or not source_vm or vm_id == source_vm):
+            raise ValueError("continuation must run in a different freshly allocated VM")
         saved = load_checkpoint(
             resume, model=model, optimizer=optimizer, expected_model_config=config,
             expected_data_fingerprint=data.fingerprint, generators={"train": generator},
@@ -284,8 +321,19 @@ def probe(
         tokens = saved["training_state"]["tokens_seen"]
         if saved["training_state"].get("scaler_state"):
             scaler.load_state_dict(saved["training_state"]["scaler_state"])
+        resume_origin = {"step": completed, "tokens_seen": tokens, "source_vm_id": source_vm,
+                         "optimizer_restored": True, "data_generator_restored": True}
     if runtime.xm is not None:
-        runtime.xm.set_rng_state(settings.seed)
+        runtime.xm.set_rng_state(
+            saved["training_state"].get("xla_rng_state", settings.seed)
+            if resume is not None else settings.seed
+        )
+    if drive_store is not None:
+        expected_identity = contract_digest(contract, data.fingerprint, config.to_dict())
+        if drive_store.identity != expected_identity:
+            raise ValueError("Drive checkpoint store does not match the training contract")
+        drive_store.check()  # Refuse to train without a reachable writable backup.
+        drive_store.validate_progress(completed)
     metrics_path = output / "metrics.jsonl"
     if resume is not None and metrics_path.exists():
         retained = [
@@ -324,9 +372,10 @@ def probe(
     validation_loss = None
     checkpoint_reload = None
     first_portability = None
+    last_drive_backup = None
 
     def checkpoint() -> None:
-        nonlocal checkpoint_reload, first_portability
+        nonlocal checkpoint_reload, first_portability, last_drive_backup
         if model.lm_head.weight is not model.token_embedding.weight:
             raise RuntimeError("embedding/head identity lost during training")
         save_checkpoint(
@@ -335,10 +384,19 @@ def probe(
             generators={"train": generator},
             metrics={"validation_loss": validation_loss},
             training_state={"tokens_seen": tokens, "smoke_contract": contract,
-                            "scaler_state": scaler.state_dict()},
+                            "scaler_state": scaler.state_dict(), "vm_id": vm_id,
+                            "xla_rng_state": runtime.xm.get_rng_state()
+                            if runtime.xm is not None else None},
         )
+        # Publish before artifact packaging or diagnostics: loss of the VM after
+        # this acknowledgement can recover this exact optimizer boundary.
+        if drive_store is not None:
+            last_drive_backup = drive_store.publish(
+                output, step=completed, tokens=tokens, job=job_path,
+            )
+            print(json.dumps(last_drive_backup), flush=True)
         # Preserve downloadable evidence even if a portability gate fails.
-        if artifact_dir is not None:
+        if artifact_dir is not None and periodic_artifacts:
             create_colab_artifacts(
                 {f.name: f for f in output.iterdir() if f.is_file() and f.name != "worker.log"},
                 artifact_dir, chunk_size=4 * 1024 * 1024,
@@ -459,8 +517,9 @@ def probe(
     memory = runtime.memory()
     checkpoint()
     report = {
-        "status": "smoke-complete" if tokens == settings.max_tokens else "probe-complete",
-        "not_a_1b_promotion": True,
+        "status": (("final-complete" if settings.max_tokens == 1_000_000_000
+                    else "smoke-complete") if tokens == settings.max_tokens else "probe-complete"),
+        "not_a_1b_promotion": settings.max_tokens != 1_000_000_000,
         "device": str(runtime.device), "precision": runtime.precision,
         "torch": torch.__version__,
         "torch_xla": runtime.xla.__version__ if runtime.xla is not None else None,
@@ -468,6 +527,7 @@ def probe(
         "tokenizer_sha256": data.metadata["tokenizer"]["sha256"],
         "model_config": config.to_dict(), "train_config": settings.to_dict(),
         "initial_step": initial_step, "step": completed, "tokens_seen": tokens,
+        "resume_origin": resume_origin, "vm_id": vm_id, "drive_backup": last_drive_backup,
         "first_step_seconds": durations[0] if durations else None,
         "warmup_steps": warmup_steps, "training_seconds": training_seconds,
         "steady_tokens_per_second": steady_tokens / steady_seconds if steady_seconds else None,
@@ -544,7 +604,10 @@ def main() -> int:
     parser.add_argument("--device", choices=("xla", "cuda", "cpu"), default="xla")
     parser.add_argument("--precision", choices=("bf16", "fp16", "fp32"), default="bf16")
     parser.add_argument("--steps", type=int, default=None,
-                        help="optional bounded probe; default runs to exactly 50M tokens")
+                        help="optional bounded prefix; default runs to the frozen token budget")
+    parser.add_argument("--phase", choices=("smoke", "final-1b"), default="smoke")
+    parser.add_argument("--warmup-tokens", type=int)
+    parser.add_argument("--final-artifacts-only", action="store_true")
     parser.add_argument("--warmup-steps", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--grad-accum-steps", type=int, default=4)
@@ -553,17 +616,47 @@ def main() -> int:
     parser.add_argument("--checkpoint-interval", type=int, default=500)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--drive-backup-dir", type=Path)
+    parser.add_argument("--drive-root", type=Path, default=Path("/content/drive"))
+    parser.add_argument("--job", type=Path)
+    parser.add_argument("--vm-id")
+    parser.add_argument("--require-new-vm", action="store_true")
+    parser.add_argument("--compare-reference", type=Path)
     args = parser.parse_args()
-    # Reuse the real frozen 50M dataset; no synthetic benchmark or new tokenizer.
-    build_colab_job(args.data_dir, phase="smoke", architecture="kiwilm2")
+    frozen = build_colab_job(args.data_dir, phase=args.phase, architecture="kiwilm2")
+    max_tokens = frozen["max_tokens"]
+    warmup_tokens = args.warmup_tokens
+    if args.phase == "final-1b":
+        if args.device != "xla" or args.precision != "bf16" or args.drive_backup_dir is None:
+            raise ValueError("1B TPU training requires XLA BF16 and verified Drive backups")
+        if (args.batch_size, args.grad_accum_steps, args.eval_batches,
+            args.eval_interval, args.checkpoint_interval) != (8, 4, 200, 500, 500):
+            raise ValueError("1B TPU training requires the frozen batch/evaluation/save settings")
+        if warmup_tokens not in {None, 20_000_000}:
+            raise ValueError("1B TPU training requires 20M warmup tokens")
+        warmup_tokens = 20_000_000
     data = PreparedTokenData(args.data_dir)
     if data.metadata["config"].get("seed") != 42:
         raise ValueError("hardware probe requires the frozen seed-42 smoke data")
     runtime = Runtime(args.device, args.precision)
+    config = KiwiLM2Config(vocab_size=data.tokenizer.vocab_size)
+    store = None
+    if args.drive_backup_dir is not None:
+        settings = probe_settings(
+            config, precision=args.precision, batch_size=args.batch_size,
+            accumulation=args.grad_accum_steps, eval_batches=args.eval_batches,
+            eval_interval=args.eval_interval, checkpoint_interval=args.checkpoint_interval,
+            max_tokens=max_tokens, warmup_tokens=warmup_tokens,
+        )
+        store = DriveCheckpointStore(
+            args.drive_backup_dir, storage_root=args.drive_root,
+            identity=contract_digest(probe_contract(settings, runtime.device.type),
+                                     data.fingerprint, config.to_dict()),
+        )
     report = probe(
-        data, args.output_dir, config=KiwiLM2Config(vocab_size=data.tokenizer.vocab_size),
+        data, args.output_dir, config=config,
         runtime=runtime,
-        steps=(math.ceil(50_000_000 / (
+        steps=(math.ceil(max_tokens / (
             args.batch_size * args.grad_accum_steps * 512
         )) + 100) if args.steps is None else args.steps,
         warmup_steps=args.warmup_steps,
@@ -572,7 +665,24 @@ def main() -> int:
         eval_interval=args.eval_interval, checkpoint_interval=args.checkpoint_interval,
         artifact_dir=args.artifact_dir, final_diagnostics=args.steps is None,
         verify_checkpoint_reload=args.steps is None,
+        drive_store=store, job_path=args.job, vm_id=args.vm_id,
+        require_new_vm=args.require_new_vm,
+        max_tokens=max_tokens, warmup_tokens=warmup_tokens,
+        periodic_artifacts=not args.final_artifacts_only,
     )
+    if args.compare_reference is not None:
+        result = compare_continuation(args.compare_reference, args.output_dir / "latest.pt")
+        report["continuation_test"] = result
+        (args.output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
+        print(json.dumps({"event": "continuation_test", **result}), flush=True)
+        if args.artifact_dir is not None:
+            create_colab_artifacts(
+                {f.name: f for f in args.output_dir.iterdir()
+                 if f.is_file() and f.name != "worker.log"},
+                args.artifact_dir, chunk_size=4 * 1024 * 1024,
+            )
+        if not result["passed"]:
+            raise RuntimeError("fresh-VM continuation differs from uninterrupted reference")
     print(json.dumps(report, indent=2), flush=True)
     return 0
 

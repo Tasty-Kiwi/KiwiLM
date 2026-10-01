@@ -9,7 +9,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -209,6 +209,11 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
         (tmp_path / "kiwilm-tpu-resume" / "artifact-manifest.json").write_text("{}")
         (tmp_path / "kiwilm-tpu-resume" / "latest.pt").write_bytes(b"mock resume")
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""))
+    def simulate_preflight(command, **kwargs):
+        if "-c" in command and "matmul_result=" in command[command.index("-c") + 1]:
+            (tmp_path / "kiwilm-tpu-preflight.json").write_text('{"vm_id":"fake-vm"}')
+        return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    run.side_effect = simulate_preflight
     process = Mock(returncode=0)
     monkeypatch.setattr(module.subprocess, "run", run)
     monkeypatch.setattr(module.subprocess, "Popen", Mock(return_value=process))
@@ -346,3 +351,65 @@ def test_full_smoke_exact_tokens_and_periodic_resume(tmp_path: Path) -> None:
     whole = torch.load(tmp_path / "whole" / "latest.pt", weights_only=True)
     for key in whole["model_state_dict"]:
         torch.testing.assert_close(split["model_state_dict"][key], whole["model_state_dict"][key])
+
+
+@pytest.mark.parametrize("phase", ["reference", "resume"])
+def test_continuation_bootstrap_reconstructs_locked_backup_and_steps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
+) -> None:
+    path = Path(__file__).resolve().parents[1] / "scripts/colab_kiwilm2_tpu_smoke.py"
+    spec = importlib.util.spec_from_file_location("continuation_bootstrap", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "CONTENT", tmp_path)
+    monkeypatch.setattr(module, "PYTHON", tmp_path / "python")
+    (tmp_path / "python").touch()
+    (tmp_path / "kiwilm-0.1.0-py3-none-any.whl").touch()
+    (tmp_path / "kiwilm-tpu-preflight.json").write_text('{"vm_id":"current-vm"}')
+    root = "/content/drive/MyDrive/KiwiLM2/checkpoints/"
+    job = {"schema_version": 1, "use_drive": True, "continuation_phase": phase,
+           "data_fingerprint": "a" * 64, "tokenizer_sha256": "b" * 64,
+           "drive_backup_dir": root + phase}
+    if phase == "resume":
+        job.update(drive_resume_dir=root + "reference", compare_reference_dir=root + "reference")
+        resume_dir = tmp_path / "kiwilm-tpu-resume"
+        resume_dir.mkdir()
+        (resume_dir / "latest.pt").write_bytes(b"simulated step-20 checkpoint")
+        (resume_dir / "metrics.jsonl").write_text('{"step":20}\n')
+    (tmp_path / "kiwilm-tpu-job.json").write_text(json.dumps(job))
+    (tmp_path / "kiwilm-tpu-setup.json").write_text(json.dumps({
+        "state": "ready", "job_digest": job_digest(job),
+    }))
+    monkeypatch.setenv("KIWILM2_TPU_ACTION", "train")
+    monkeypatch.setattr(module, "run", Mock())
+    worker = Mock()
+    monkeypatch.setattr(module, "run_worker", worker)
+    module.main()
+    command = worker.call_args.args[0]
+    assert command[command.index("--steps") + 1] == ("40" if phase == "reference" else "20")
+    assert command[command.index("--warmup-steps") + 1] == "10"
+    assert command[command.index("--checkpoint-interval") + 1] == "20"
+    assert command[command.index("--drive-backup-dir") + 1] == root + phase
+    assert command[command.index("--vm-id") + 1] == "current-vm"
+    if phase == "resume":
+        assert "--require-new-vm" in command and "--compare-reference" in command
+        assert (tmp_path / "kiwilm-tpu-smoke/metrics.jsonl").read_text() == '{"step":20}\n'
+    else:
+        assert "--resume" not in command
+
+
+def test_xla_rng_resume_restores_saved_state_instead_of_reseeding(tmp_path: Path) -> None:
+    prepare_from_stories(tmp_path / "data", ["A training story. " * 8],
+                         ["A validation story. " * 8], vocab_size=300, min_frequency=1)
+    data = PreparedTokenData(tmp_path / "data")
+    runtime = Runtime("cpu", "fp32")
+    states = []
+    runtime.xm = SimpleNamespace(set_rng_state=states.append, get_rng_state=lambda: 987,
+                                 get_memory_info=lambda _: {})
+    options = dict(config=tiny_config(data.tokenizer.vocab_size), runtime=runtime, steps=2,
+                   warmup_steps=1, batch_size=1, accumulation=2, eval_batches=1)
+    probe(data, tmp_path / "first", **options)
+    checkpoint = tmp_path / "first/latest.pt"
+    assert torch.load(checkpoint, weights_only=True)["training_state"]["xla_rng_state"] == 987
+    probe(data, tmp_path / "second", resume=checkpoint, **options)
+    assert states == [42, 987]

@@ -5,6 +5,14 @@ tokens/s, loss 4.292, 50/50 healthy batches, and aligned TPU/CPU portable reload
 See the [completed v6e-1 report](../examples/comparisons/kiwilm2-tpu-v6e1-50m-smoke/analysis.md).
 Artifacts were downloaded and the session terminated. Fresh-VM continuation,
 on-XLA cache parity and a matched idle GPU benchmark remain required before 1B.
+The repeated cached v6e-1 smoke also completed at exactly 50M tokens; its model
+weights and recorded loss/gradient trajectory match the previous run exactly.
+Drive checkpoint publication and a two-VM continuation qualification are now
+implemented and locally tested. The live reference leg committed steps 20/40;
+allocation/authorization failures prevented the resumed leg. **Live fresh-VM
+restart equivalence remains unverified.** The user chose to stop qualification
+and proceed with the separate [1B launcher](tpu-1b.md); it is not gated on that
+unfinished test, and does not represent a completed qualification.
 
 **Previous v5e-1 smoke is not a valid Dense control:** throughput was 47.9k
 tokens/s, but XLA device transfer broke the embedding/head weight tie. The
@@ -55,6 +63,9 @@ stdout/stderr and verbose XLA diagnostics remain in the append-only `worker.log`
 they are not replayed wholesale at completion. Worker failures print the last
 40 log lines and still return an error. Ctrl+C still stops the allocated VM;
 the first periodic checkpoint remains at step 500.
+Drive-enabled jobs now synchronously mirror every checkpoint before continuing.
+A `drive_checkpoint_committed` progress row acknowledges the verified recovery
+point; terminal disconnection is not that acknowledgement.
 
 Or release the default session without training:
 
@@ -79,7 +90,7 @@ A cache hit copies the exact tokenizer and packed splits to VM-local storage
 and validates sizes, metadata and SHA-256 checksums. It does not regenerate
 data or train from Drive. Existing mismatched, corrupt or incomplete caches fail
 setup without being overwritten; choose a new cache directory or inspect the
-existing one manually. This does not change any checkpoint backups.
+existing one manually. Data-cache and checkpoint directories remain separate.
 
 To reuse the already prepared GPU smoke cache, when it matches your local data:
 
@@ -120,7 +131,9 @@ The normal Windows CUDA environment and lockfile are unchanged. TPU uses
 - First 20 updates excluded from steady throughput but included in wall time.
 - Fifty fixed validation batches every 500 updates and at completion, seed 43.
 - Atomic checkpoints and downloadable 4MiB artifact chunks every 500 updates
-  and at completion. Throughput excludes checkpoint/validation time; session
+  and at completion. Drive-enabled jobs publish verified backups at those same
+  boundaries and stop if publication repeatedly fails. Throughput excludes
+  checkpoint/validation/Drive time; session
   wall time records that overhead and CPU diagnostics, excluding final artifact
   packaging, environment setup and transfers. Partial final updates are excluded from
   steady throughput.
@@ -148,7 +161,58 @@ stops only its verified session. Failed setup stops only the session it just
 created; successful setup deliberately leaves it available for `train`. If the
 network prevents cleanup, verify and manually stop that named TPU session.
 
-## Resume
+## Checkpoint persistence and recovery
+
+Drive is enabled by default. New full-smoke jobs use a separate namespace:
+
+```text
+/content/drive/MyDrive/KiwiLM2/checkpoints/tpu-v6e1-muon-smoke-50m-tied-<fingerprint-prefix>
+```
+
+`latest.json` points to the newest verified generation; `previous.json` retains
+the previous distinct optimizer step. Each generation contains `latest.pt`, the
+metrics sidecar, the frozen job, and a checksummed manifest. Copying and read-back
+verification complete before the latest pointer is atomically published. Only
+known superseded committed generations are pruned; an interrupted uncommitted
+copy does not replace either recovery pointer. Failed attempts may leave orphan
+generation directories for manual inspection, not automatically broad cleanup.
+
+The checkpoint includes weights, Muon/AdamW state, step/token/LR schedule state,
+the data generator, CPU/process RNG, scaler state, and XLA RNG state. The XLA
+state uses the [versioned 2.9 RNG APIs](https://github.com/pytorch/xla/blob/v2.9.0/torch_xla/core/xla_model.py).
+Backups are synchronous, not best-effort background copies: a disconnected mount
+or failed publication gets bounded retries, then **training stops**. The local
+checkpoint and the previous committed Drive recovery point are retained.
+
+This is not a zero-loss guarantee. A sudden VM loss can discard updates since
+the last committed checkpoint (up to the 500-update interval by default, about
+8.192M tokens). Drive mount write/read verification is not a guarantee against
+cloud-side data loss. Setting `KIWILM2_USE_DRIVE=0` explicitly disables both Drive
+data caching and checkpoint protection; do not use it for a long run.
+
+To restart an interrupted smoke on a fresh VM **directly from Drive**, choose a
+new local/session name, and set the original locked backup directory for both
+restore and publication:
+
+```bash
+export KIWILM2_TPU_DRIVE_RESUME="/content/drive/MyDrive/KiwiLM2/checkpoints/<original-namespace>"
+export KIWILM2_TPU_DRIVE_BACKUP="$KIWILM2_TPU_DRIVE_RESUME"
+export KIWILM_RESULT_DIR=runs/colab/tpu-v6e1-smoke-drive-resumed
+export COLAB_SESSION_NAME=kiwilm2-tpu-v6e1-smoke-drive-resumed
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup
+bash scripts/run_colab_kiwilm2_tpu_smoke.sh train
+```
+
+Replace the placeholder with the actual namespace printed during the original
+run. Setup verifies the committed checkpoint locally, locks its exact SHA-256,
+and copies the metrics sidecar. Missing/corrupt required checkpoints never fall
+back to random initialization. A checksum-invalid latest generation can fall
+back to the verified previous generation, but continuing behind a newer pointer
+requires a new backup namespace; stale local resumes cannot overwrite newer
+committed progress. Contract/data/model mismatches are rejected before updates.
+The smoke scheduler cannot be repurposed as a 1B schedule by resuming its weights.
+
+Alternatively, resume a downloaded checkpoint:
 
 To resume a downloaded full-smoke checkpoint in a new VM:
 
@@ -169,9 +233,55 @@ and unequal matrices are rejected before allocation. Start the corrected smoke
 fresh. The setup job locks the uploaded checkpoint's SHA-256; a data-cache hit
 needs only the checkpoint upload. Local logs newer than the saved step are
 truncated on same-directory module resume. Checkpoints stay on the VM until
-downloaded; this launcher does
-not mirror checkpoints to Drive, so recovery cannot survive a lost VM before
-downloading. Drive caching here is for frozen data only.
+downloaded **only when Drive has been explicitly disabled**. A local checkpoint
+cannot overwrite newer progress in an existing Drive namespace; choose a new
+backup directory for a fork. Old completed runs were not retroactively backed
+up by this change.
+
+## Two-VM continuation qualification
+
+The completed 50M checkpoint has no remaining schedule budget. To exercise real
+optimizer updates after restart without altering that baseline, use a separate
+short split run with the same model, data, seed, BF16, batch 8/accumulation 4,
+Muon 0.01, and **50M learning-rate schedule**. It is a recovery test, not a quality
+smoke or a 1B launch. Both phases use five fixed validation batches and checkpoint
+every 20 updates to keep the test bounded.
+
+VM A runs 40 updates uninterrupted, committing steps 20 and 40 to Drive. Its
+launcher downloads results and stops that VM. Run each command yourself:
+
+```bash
+unset KIWILM2_RESUME_FROM
+bash scripts/run_colab_kiwilm2_tpu_continuation.sh reference setup
+bash scripts/run_colab_kiwilm2_tpu_continuation.sh reference train
+```
+
+After it completes, VM B restores the **step-20 checkpoint from Drive**, runs
+updates 21–40, and compares its final state with VM A's committed step-40 state:
+
+```bash
+bash scripts/run_colab_kiwilm2_tpu_continuation.sh resume setup
+bash scripts/run_colab_kiwilm2_tpu_continuation.sh resume train
+```
+
+The wrapper isolates session, result, and Drive names from ordinary smoke
+settings. Default namespaces end in `continuation-restart-v1-reference` and
+`continuation-restart-v1-resume`. Results are under
+`runs/colab/tpu-v6e1-continuation-restart-v1-{reference,resume}`. For a repeat,
+set `KIWILM2_TPU_TEST_ID=restart-v2` for **all four commands**, preserving old
+evidence and backups. `COLAB_TPU` must remain the same for both phases.
+
+Pass requires distinct recorded VM identities and exact equality of model
+tensors, optimizer state, configs/fingerprint, data-generator state, process RNG,
+XLA RNG, scaler state, and final step/token count. The expected endpoint is step
+40 / 655,360 tokens; the resumed phase must start at step 20 / 327,680 tokens.
+`summary.json.continuation_test.passed` records the decision; mismatch returns
+an error and preserves the checkpoint. A CPU fresh-process test verifies the
+same comparison mechanism locally, **not TPU restart equivalence**. Neither
+`setup` command trains; it leaves a billable idle VM until `train` or `colab stop`.
+
+No 1B trainer or run is enabled here. Qualify real Drive restoration, persistence
+overhead, and fresh-VM state equality before adopting this path for a long run.
 
 ## Interpretation
 

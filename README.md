@@ -9,6 +9,14 @@ The TPU launcher now restores fingerprint-checked Drive data, with compressed
 parallel uploads on a cache miss. `bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup`
 prepares only; `bash scripts/run_colab_kiwilm2_tpu_smoke.sh train` is a separate,
 explicit start. Setup leaves an idle, potentially billable TPU until started or stopped.
+Drive-enabled TPU jobs now publish verified latest/previous checkpoint generations
+at every save boundary and stop on persistent backup failure. A separate
+[two-VM continuation test](docs/tpu-smoke.md#two-vm-continuation-qualification)
+checks restart state before a long run; no training is launched automatically.
+The separate [1B TPU launcher](docs/tpu-1b.md) prepares data in the VM, requires
+verified Drive backups, and offers strict original-job resume. The user elected
+to proceed despite the uncompleted live fresh-VM qualification; setup and training
+remain separate explicit commands.
 
 KiwiLM 2 is a controlled language-model architecture experiment combining
 periodic grouped-query attention, large-kernel causal gated convolutions, and

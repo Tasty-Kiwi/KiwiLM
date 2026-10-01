@@ -29,7 +29,7 @@ def mapped(value):
 if command == "status":
     print("Session not found")
     sys.exit(1)
-if command in {"new", "stop", "log"}:
+if command in {"new", "stop", "log", "drivemount"}:
     sys.exit(0)
 if command == "upload":
     target = mapped(args[-1])
@@ -54,13 +54,23 @@ elif command == "exec":
         if os.environ.get("FAKE_CACHE_HIT") and not (data / "metadata.json").exists():
             shutil.copytree(os.environ["KIWILM2_DATA_DIR"], data)
         job = json.loads(mapped("/content/kiwilm-tpu-job.json").read_text())
-        result = prepare_inputs(job, data_dir=data,
-            resume_dir=mapped("/content/kiwilm-tpu-resume"), drive_root=mapped("/content/drive"))
+        if job.get("phase") == "final-1b":
+            from kiwilm.tpu_setup import job_digest
+            # Simulate VM-side preparation, not data downloads or model training.
+            job["data_fingerprint"] = "b" * 64
+            mapped("/content/kiwilm-tpu-job.json").write_text(json.dumps(job))
+            result = {"state":"ready", "job_digest":job_digest(job)}
+        else:
+            result = prepare_inputs(job, data_dir=data,
+                resume_dir=mapped("/content/kiwilm-tpu-resume"),
+                drive_root=mapped("/content/drive"))
         mapped("/content/kiwilm-tpu-setup.json").write_text(json.dumps(result))
     elif action == "train":
         from kiwilm.colab_artifacts import create_colab_artifacts
         # Only simulated artifact production. No model or training loop exists here.
-        output = mapped("/content/kiwilm-tpu-smoke")
+        job = json.loads(mapped("/content/kiwilm-tpu-job.json").read_text())
+        output = mapped("/content/kiwilm-tpu-final-1b" if job.get("phase") == "final-1b"
+                        else "/content/kiwilm-tpu-smoke")
         output.mkdir(parents=True, exist_ok=True)
         (output / "summary.json").write_text('{"status":"simulated-complete"}')
         (output / "latest.pt").write_bytes(b"simulated checkpoint")
@@ -211,3 +221,62 @@ def test_mismatched_remote_lock_never_trains_or_stops_foreign_session(launcher) 
     )
     assert result.returncode != 0
     assert [command[0] for command in calls(log)] == ["download"]
+
+
+def test_final_launcher_prepares_small_uploads_and_separate_train(
+    launcher, tmp_path: Path,
+) -> None:
+    pty = pytest.importorskip("pty")
+    from tokenizers import Tokenizer, models
+
+    from kiwilm.colab_artifacts import file_sha256
+    from kiwilm.data import metadata_fingerprint
+
+    env, log = launcher
+    source = Path(env["KIWILM2_DATA_DIR"])
+    specials = {"[PAD]": 0, "[UNK]": 1, "[BOS]": 2, "[EOS]": 3}
+    tokenizer = source / "final-tokenizer.json"
+    tokenizer.write_text(Tokenizer(models.BPE(
+        vocab={**specials, **{f"token{i}": i for i in range(4, 32_000)}},
+        merges=[], unk_token="[UNK]")).to_str())
+    metadata = {"dataset": {"name": "HuggingFaceTB/smollm-corpus",
+                            "requested_revision": "main", "resolved_revision": "a" * 40},
+                "tokenizer": {"file": tokenizer.name, "sha256": file_sha256(tokenizer),
+                              "vocab_size": 32_000, "requested_vocab_size": 32_000,
+                              "min_frequency": 2, "special_tokens": specials}}
+    metadata["fingerprint"] = metadata_fingerprint(metadata)
+    (source / "metadata.json").write_text(json.dumps(metadata))
+    env["KIWILM2_USE_DRIVE"] = "1"
+    script = ROOT / "scripts/run_colab_kiwilm2_tpu_1b.sh"
+    master, slave = pty.openpty()
+    try:
+        setup = subprocess.run(["bash", str(script), "setup"], env=env, cwd=ROOT,
+                               stdin=slave, capture_output=True, text=True, timeout=60)
+    finally:
+        os.close(master)
+        os.close(slave)
+    assert setup.returncode == 0, setup.stdout + setup.stderr
+    assert "NO TRAINING STARTED" in setup.stdout
+    recorded = calls(log)
+    uploads = [c[-1] for c in recorded if c[0] == "upload"]
+    assert len([p for p in uploads if "/kiwilm-tpu-tokenizer/" in p]) == 2
+    assert not any("kiwilm-data-artifacts/" in p for p in uploads)
+    assert not any("KIWILM2_TPU_ACTION=train" in c for c in recorded)
+    assert all(c[c.index("--timeout") + 1] == "21900" for c in recorded
+               if "KIWILM2_TPU_ACTION=prepare" in c)
+    job = json.loads((Path(env["KIWILM_RESULT_DIR"]) / "tpu-job.json").read_text())
+    assert job["data_fingerprint"] == "b" * 64  # Finalized remote job became local owner lock.
+    train = subprocess.run(["bash", str(script), "train"], env=env, cwd=ROOT,
+                           capture_output=True, text=True, timeout=60)
+    assert train.returncode == 0, train.stdout + train.stderr
+    train_call = next(c for c in calls(log) if "KIWILM2_TPU_ACTION=train" in c)
+    assert train_call[train_call.index("--timeout") + 1] == "79500"
+    assert (Path(env["KIWILM_RESULT_DIR"]) / "latest.pt").read_bytes() == b"simulated checkpoint"
+
+
+def test_final_launcher_refuses_unprotected_run_before_colab(launcher) -> None:
+    env, log = launcher
+    result = subprocess.run(["bash", str(ROOT / "scripts/run_colab_kiwilm2_tpu_1b.sh"), "setup"],
+                            env=env, cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode != 0 and "requires Drive" in result.stderr
+    assert calls(log) == []

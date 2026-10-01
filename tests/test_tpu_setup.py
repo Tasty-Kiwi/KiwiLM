@@ -13,8 +13,10 @@ import torch
 from kiwilm.colab_artifacts import create_colab_artifacts, file_sha256
 from kiwilm.colab_drive import CACHE_MARKER
 from kiwilm.data import PreparedTokenData, prepare_from_stories
+from kiwilm.tpu_checkpoint import DriveCheckpointStore
 from kiwilm.tpu_setup import (
     cache_exists,
+    job_checkpoint_identity,
     job_digest,
     prepare_inputs,
     publish_data_cache,
@@ -224,3 +226,74 @@ def test_local_job_validation_runs_before_allocation(
     with pytest.raises(ValueError):
         write_setup_job(inputs["source"], path, use_drive=True, cache_dir="/content/drive")
     assert not path.exists()
+
+
+def test_drive_continuation_restores_exact_split_and_reference(inputs: dict) -> None:
+    publish_data_cache(inputs["source"], inputs["cache"], inputs["job"])
+    root = inputs["paths"]["drive_root"] / "MyDrive/KiwiLM2/checkpoints"
+    job = {**inputs["job"], "continuation_phase": "resume",
+           "drive_backup_dir": str(root / "resumed"),
+           "drive_resume_dir": str(root / "reference"),
+           "compare_reference_dir": str(root / "reference")}
+    data = PreparedTokenData(inputs["source"])
+    identity = job_checkpoint_identity(job, data)
+    store = DriveCheckpointStore(root / "reference", identity=identity, retry_delay=0)
+    run = root.parent / "local-reference"
+    run.mkdir(parents=True)
+    weights = torch.ones(3, 2)
+    for step in (20, 40):
+        torch.save({"step": step, "model_config": {"tie_embeddings": True},
+                    "model_state_dict": {"token_embedding.weight": weights,
+                                         "lm_head.weight": weights}}, run / "latest.pt")
+        store.publish(run, step=step, tokens=step * 16384)
+    report = prepare_inputs(job, **inputs["paths"])
+    assert report["state"] == "ready" and report["drive_resume"]["step"] == 20
+    resume = inputs["paths"]["resume_dir"]
+    assert torch.load(resume / "latest.pt", weights_only=True)["step"] == 20
+    assert torch.load(resume / "reference/latest.pt", weights_only=True)["step"] == 40
+    assert prepare_inputs(job, **inputs["paths"], require_ready=True)["state"] == "ready"
+    wrong_namespace = {**job, "drive_resume_dir": str(root / "other-reference"),
+                       "compare_reference_dir": str(root / "other-reference")}
+    with pytest.raises(ValueError, match="provenance differs"):
+        prepare_inputs(wrong_namespace, **inputs["paths"], require_ready=True)
+    (resume / "latest.pt").write_bytes(b"changed after setup")
+    with pytest.raises(ValueError, match="changed since setup"):
+        prepare_inputs(job, **inputs["paths"], require_ready=True)
+
+
+def test_drive_resume_missing_checkpoint_fails_closed(inputs: dict) -> None:
+    publish_data_cache(inputs["source"], inputs["cache"], inputs["job"])
+    root = inputs["paths"]["drive_root"] / "MyDrive/KiwiLM2/checkpoints"
+    job = {**inputs["job"], "drive_backup_dir": str(root / "output"),
+           "drive_resume_dir": str(root / "missing")}
+    with pytest.raises(ValueError, match="No valid committed"):
+        prepare_inputs(job, **inputs["paths"])
+    assert not (inputs["paths"]["resume_dir"] / "latest.pt").exists()
+
+
+@pytest.mark.parametrize("field", ["drive_backup_dir", "drive_resume_dir", "compare_reference_dir"])
+def test_checkpoint_paths_cannot_be_broad_or_outside_drive(inputs: dict, field: str) -> None:
+    for value in (str(inputs["paths"]["drive_root"]), "/tmp/checkpoints/test",
+                  str(inputs["paths"]["drive_root"] / "MyDrive/KiwiLM2/checkpoints")):
+        with pytest.raises(ValueError, match="specific mounted Drive namespace"):
+            validate_job({**inputs["job"], field: value}, inputs["paths"]["drive_root"])
+
+
+def test_continuation_jobs_have_isolated_locked_drive_names(
+    inputs: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("kiwilm.tpu_setup.build_colab_job", Mock(return_value={
+        "data_fingerprint": inputs["job"]["data_fingerprint"],
+    }))
+    jobs = []
+    for phase in ("reference", "resume"):
+        output = tmp_path / f"{phase}.json"
+        write_setup_job(inputs["source"], output, use_drive=True, cache_dir="",
+                        continuation_phase=phase)
+        jobs.append(json.loads(output.read_text()))
+    assert jobs[0]["drive_backup_dir"] != jobs[1]["drive_backup_dir"]
+    assert jobs[1]["drive_resume_dir"] == jobs[0]["drive_backup_dir"]
+    assert job_digest(jobs[0]) != job_digest(jobs[1])
+    assert job_checkpoint_identity(jobs[0], PreparedTokenData(inputs["source"])) == (
+        job_checkpoint_identity(jobs[1], PreparedTokenData(inputs["source"]))
+    )
