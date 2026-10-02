@@ -1,0 +1,192 @@
+{
+  "groups": [
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "all",
+      "profile": "all",
+      "samples": 120,
+      "mean_repeated_four_gram_rate": 0.3096985198000495,
+      "samples_repetition_over_0_5": 39,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "all",
+      "profile": "focused",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.565089730485952,
+      "samples_repetition_over_0_5": 38,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "all",
+      "profile": "creative",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.054307309114146954,
+      "samples_repetition_over_0_5": 1,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "story",
+      "profile": "all",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.27383650641102164,
+      "samples_repetition_over_0_5": 16,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "story",
+      "profile": "focused",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.48315700535768447,
+      "samples_repetition_over_0_5": 15,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "story",
+      "profile": "creative",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.06451600746435884,
+      "samples_repetition_over_0_5": 1,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "expository",
+      "profile": "all",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.34556053318907726,
+      "samples_repetition_over_0_5": 23,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "expository",
+      "profile": "focused",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.6470224556142194,
+      "samples_repetition_over_0_5": 23,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 500M",
+      "category": "expository",
+      "profile": "creative",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.04409861076393506,
+      "samples_repetition_over_0_5": 0,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "all",
+      "profile": "all",
+      "samples": 120,
+      "mean_repeated_four_gram_rate": 0.3113575818615286,
+      "samples_repetition_over_0_5": 41,
+      "word_collapses_20_plus": 1,
+      "maximum_consecutive_word_run": 24
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "all",
+      "profile": "focused",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.5411542471657409,
+      "samples_repetition_over_0_5": 39,
+      "word_collapses_20_plus": 1,
+      "maximum_consecutive_word_run": 24
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "all",
+      "profile": "creative",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.0815609165573164,
+      "samples_repetition_over_0_5": 2,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 7
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "story",
+      "profile": "all",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.28263497832741497,
+      "samples_repetition_over_0_5": 20,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "story",
+      "profile": "focused",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.5025877111944896,
+      "samples_repetition_over_0_5": 19,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "story",
+      "profile": "creative",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.06268224546034022,
+      "samples_repetition_over_0_5": 1,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 2
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "expository",
+      "profile": "all",
+      "samples": 60,
+      "mean_repeated_four_gram_rate": 0.3400801853956423,
+      "samples_repetition_over_0_5": 21,
+      "word_collapses_20_plus": 1,
+      "maximum_consecutive_word_run": 24
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "expository",
+      "profile": "focused",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.579720783136992,
+      "samples_repetition_over_0_5": 20,
+      "word_collapses_20_plus": 1,
+      "maximum_consecutive_word_run": 24
+    },
+    {
+      "model": "Dense Muon 0.01 TPU 1B",
+      "category": "expository",
+      "profile": "creative",
+      "samples": 30,
+      "mean_repeated_four_gram_rate": 0.10043958765429258,
+      "samples_repetition_over_0_5": 1,
+      "word_collapses_20_plus": 0,
+      "maximum_consecutive_word_run": 7
+    }
+  ],
+  "paired_repetition": {
+    "pairs": 120,
+    "1b_less_repetition": 64,
+    "1b_more_repetition": 51,
+    "ties": 5,
+    "mean_change_1b_minus_500m": 0.001659062061479169,
+    "median_change_1b_minus_500m": -0.0044302183401297435
+  }
+}
