@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-02",
+  "repo_id": "Tasty-Kiwi/KiwiLM-2",
+  "repo_type": "model",
+  "private": true,
+  "hub_commit": "53d6abcb4d11c8a98936c19d55d2b741a99d7602",
+  "status": "private-draft-uploaded-and-download-verified",
+  "weights_dtype": "bf16",
+  "weights_bytes": 161282896,
+  "weights_sha256": "88a775621789bd2de37850b0403f57442827c9552a78936ade8f405b930b2908",
+  "source_freeze_pending": true,
+  "source_tag": null,
+  "verification": {
+    "privacy_before_and_after_upload": true,
+    "fresh_download_all_ten_release_files": true,
+    "all_file_checksums_and_sizes_match_local_bundle": true,
+    "inference_manifest": "passed",
+    "seed42_cached_generation_matches_bf16_reference": true,
+    "execution_device": "cpu",
+    "execution_dtype": "fp32"
+  },
+  "notes": "Original checkpoints and bundle provenance remain unchanged. The uploaded release.json is the pre-upload build record, not this publication receipt. Source commits/tags and public visibility remain pending owner approval."
+}

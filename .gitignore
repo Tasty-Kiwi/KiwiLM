@@ -17,6 +17,7 @@ artifacts/
 *.pt
 *.pth
 *.bin
+spaces/kiwilm-playground/public/models/
 
 # Editor and OS metadata.
 .DS_Store

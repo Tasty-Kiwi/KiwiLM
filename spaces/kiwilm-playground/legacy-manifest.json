@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "source_space_revision": "ba2457fb3a8b73450afd0785362337aaf32cf5fc",
+  "models": {
+    "x": {
+      "files": {
+        "model.onnx": {"bytes": 21655627, "sha256": "2a3d4ac4335d97a54bbb5888e27506fe874c75083fa5041722f7a59be793499d"},
+        "tokenizer.json": {"bytes": 554202, "sha256": "0127391ca334542dd206b0bef735b571d3739e5a399e89bbe0b42e79a09d9226"},
+        "tokenizer_config.json": {"bytes": 257, "sha256": "663d1ad4ebfb3d4affa8379c84d17596ed51cc9503eaa9d930caa9d352791bec"}
+      }
+    },
+    "y-direct": {
+      "files": {
+        "model.onnx": {"bytes": 21668085, "sha256": "050d29f09ddce13e128b7f18f73ffebc45dbcbf63778b61b35e6beeba18d3b2e"},
+        "tokenizer.json": {"bytes": 554202, "sha256": "0127391ca334542dd206b0bef735b571d3739e5a399e89bbe0b42e79a09d9226"},
+        "tokenizer_config.json": {"bytes": 257, "sha256": "663d1ad4ebfb3d4affa8379c84d17596ed51cc9503eaa9d930caa9d352791bec"}
+      }
+    },
+    "y-cpt": {
+      "files": {
+        "model.onnx": {"bytes": 21668085, "sha256": "38bae3f39b25860f327fe51a6e816c44a02623574ee48bbd4bf00a0254338aac"},
+        "tokenizer.json": {"bytes": 554202, "sha256": "0127391ca334542dd206b0bef735b571d3739e5a399e89bbe0b42e79a09d9226"},
+        "tokenizer_config.json": {"bytes": 257, "sha256": "663d1ad4ebfb3d4affa8379c84d17596ed51cc9503eaa9d930caa9d352791bec"}
+      }
+    }
+  }
+}

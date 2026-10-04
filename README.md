@@ -1,10 +1,24 @@
 # KiwiLM 2
 
+The Dense **1B-token TPU run** is complete; see the
+[matched 500M/1B analysis](examples/comparisons/kiwilm2-final-1b-tpu-muon/analysis.md).
+Local Hugging Face release preparation, inference-only Safetensors export,
+dataset-free loading, and private-only publication are documented in the
+[release runbook](docs/huggingface-release.md). Uploads require separate approval.
+
+The [browser-local playground](https://huggingface.co/spaces/Tasty-Kiwi/KiwiLM-Playground)
+offers a cached ONNX export of the released Dense weights alongside the original
+KiwiLM 1 X/Y browser bundles. Prompts and continuations
+stay in the browser; no inference server or training dataset is needed. The first
+load downloads approximately 323 MB of ONNX weights. Export/build instructions are
+in [the playground source](spaces/kiwilm-playground/README.md).
+
 Experimental hardware qualification: [50M-token single-chip Colab TPU smoke](docs/tpu-smoke.md)
 now targets v6e-1 with corrected weight tying and portable-reload checks. The
 [corrected v6e-1 smoke passed](examples/comparisons/kiwilm2-tpu-v6e1-50m-smoke/analysis.md).
 The [previous v5e-1 run](examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md)
-remains an invalid untied control; a larger TPU run is not yet qualified.
+remains an invalid untied control. The corrected Dense 1B run is now complete,
+including restoration of optimizer/data-generator state on a fresh VM.
 The TPU launcher now restores fingerprint-checked Drive data, with compressed
 parallel uploads on a cache miss. `bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup`
 prepares only; `bash scripts/run_colab_kiwilm2_tpu_smoke.sh train` is a separate,
@@ -14,8 +28,9 @@ at every save boundary and stop on persistent backup failure. A separate
 [two-VM continuation test](docs/tpu-smoke.md#two-vm-continuation-qualification)
 checks restart state before a long run; no training is launched automatically.
 The separate [1B TPU launcher](docs/tpu-1b.md) prepares data in the VM, requires
-verified Drive backups, and offers strict original-job resume. The user elected
-to proceed despite the uncompleted live fresh-VM qualification; setup and training
+verified Drive backups, and offers strict original-job resume. The finished run
+resumed at step 13,000 and reached exactly 1B tokens; this demonstrates practical
+continuation, not bitwise equivalence to an uninterrupted run. Setup and training
 remain separate explicit commands.
 
 KiwiLM 2 is a controlled language-model architecture experiment combining

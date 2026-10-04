@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from safetensors.torch import load_file
 
 from kiwilm.checkpoint import save_checkpoint
 from kiwilm.config import KiwiLM2Config, KiwiLM2SlimConfig, KiwiLM2SlimV3Config
@@ -24,6 +25,7 @@ from kiwilm.safetensors_io import (
 )
 
 
+@pytest.mark.parametrize("dtype", ("bf16", "fp32"))
 @pytest.mark.parametrize(
     ("config_type", "config_overrides"),
     [
@@ -45,6 +47,7 @@ def test_safetensors_export_round_trip_and_manifest(
     tmp_path: Path,
     config_type: type[KiwiLM2Config],
     config_overrides: dict[str, object],
+    dtype: str,
 ) -> None:
     data_dir = tmp_path / "data"
     metadata = prepare_from_stories(
@@ -86,6 +89,7 @@ def test_safetensors_export_round_trip_and_manifest(
         expected_data_fingerprint=data.fingerprint,
         expected_tokenizer_sha256=metadata["tokenizer"]["sha256"],
         variant="test-variant",
+        dtype=dtype,
     )
     loaded, loaded_config = load_safetensors_model(
         output_dir,
@@ -98,6 +102,10 @@ def test_safetensors_export_round_trip_and_manifest(
     assert json.loads((output_dir / METADATA_FILE).read_text())["tokens_seen"] == 123
     stored_manifest = json.loads((output_dir / MANIFEST_FILE).read_text())
     assert stored_manifest == manifest
+    assert manifest["weights_dtype"] == dtype
+    expected_dtype = torch.bfloat16 if dtype == "bf16" else torch.float32
+    assert all(t.dtype == expected_dtype for t in load_file(output_dir / MODEL_FILE).values()
+               if t.is_floating_point())
     for name, details in manifest["files"].items():
         assert sha256_file(output_dir / name) == details["sha256"]
         assert (output_dir / name).stat().st_size == details["bytes"]
@@ -105,6 +113,9 @@ def test_safetensors_export_round_trip_and_manifest(
     assert embedded["variant"] == "test-variant"
     assert embedded["checkpoint_sha256"] == sha256_file(checkpoint)
     inputs = torch.tensor([[2, 10, 11]], dtype=torch.long)
+    model.load_state_dict({name: tensor.to(expected_dtype).float()
+                           if tensor.is_floating_point() else tensor
+                           for name, tensor in model.state_dict().items()})
     with torch.no_grad():
         assert torch.equal(model(inputs), loaded(inputs))
     assert (

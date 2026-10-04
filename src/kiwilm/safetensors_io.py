@@ -27,6 +27,37 @@ CONFIG_FILE = "config.json"
 METADATA_FILE = "metadata.json"
 TOKENIZER_FILE = "tokenizer.json"
 MANIFEST_FILE = "manifest.json"
+BUNDLE_FILES = (MODEL_FILE, CONFIG_FILE, METADATA_FILE, TOKENIZER_FILE, MANIFEST_FILE)
+EXPORT_DTYPES = {"bf16": torch.bfloat16, "fp32": torch.float32}
+
+
+def export_provenance(
+    prepared_metadata: Mapping[str, Any], provenance_path: Path | None = None,
+) -> dict[str, str]:
+    """Validate tokenizer provenance independently from the checkpoint's data recipe."""
+    tokenizer = prepared_metadata.get("tokenizer")
+    if not isinstance(tokenizer, Mapping) or not isinstance(tokenizer.get("sha256"), str):
+        raise ValueError("prepared data does not contain a tokenizer checksum")
+    fingerprint = prepared_metadata.get("fingerprint")
+    if not isinstance(fingerprint, str):
+        raise ValueError("prepared data does not contain a fingerprint")
+    result = {
+        "tokenizer_dataset_fingerprint": fingerprint,
+        "tokenizer_sha256": tokenizer["sha256"],
+        "checkpoint_data_fingerprint": fingerprint,
+    }
+    if provenance_path is not None:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        if not isinstance(provenance, Mapping):
+            raise ValueError("checkpoint provenance must be an object")
+        checkpoint_fingerprint = provenance.get("data_fingerprint")
+        if not isinstance(checkpoint_fingerprint, str):
+            raise ValueError("checkpoint provenance lacks a data_fingerprint")
+        if provenance.get("tokenizer_sha256") != tokenizer["sha256"]:
+            raise ValueError("checkpoint provenance tokenizer checksum does not match")
+        result["checkpoint_data_fingerprint"] = checkpoint_fingerprint
+        result["checkpoint_provenance_sha256"] = sha256_file(provenance_path)
+    return result
 
 
 def sha256_file(path: str | Path) -> str:
@@ -47,12 +78,16 @@ def export_safetensors_bundle(
     expected_data_fingerprint: str | None = None,
     expected_tokenizer_sha256: str | None = None,
     variant: str,
+    provenance: Mapping[str, str] | None = None,
+    dtype: str = "bf16",
 ) -> dict[str, Any]:
     """Export model weights and reconstruction metadata without optimizer state."""
 
     checkpoint = Path(checkpoint_path)
     destination = Path(output_dir)
     tokenizer_source = Path(tokenizer_path)
+    if dtype not in EXPORT_DTYPES:
+        raise ValueError("export dtype must be bf16 or fp32")
     if destination.exists():
         raise FileExistsError(f"Safetensors output already exists: {destination}")
 
@@ -91,7 +126,18 @@ def export_safetensors_bundle(
     ):
         raise ValueError("checkpoint model state must map names to tensors")
     model = build_model(config)
+    if not all(torch.isfinite(tensor).all().item() for tensor in state.values()):
+        raise ValueError("checkpoint model weights must all be finite")
+    if config.tie_embeddings and not torch.equal(
+        state["token_embedding.weight"], state["lm_head.weight"]
+    ):
+        raise ValueError("checkpoint tied embedding/head weights disagree")
     model.load_state_dict(state, strict=True)
+    if provenance is not None and (
+        provenance.get("checkpoint_data_fingerprint") != data_fingerprint
+        or provenance.get("tokenizer_sha256") != tokenizer_sha256
+    ):
+        raise ValueError("export provenance does not match checkpoint/tokenizer")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
@@ -101,9 +147,13 @@ def export_safetensors_bundle(
         # Clone every entry so tied tensors remain independently addressable by
         # ordinary state_dict loaders. The in-memory model re-establishes tying.
         portable_state = {
-            name: tensor.detach().cpu().contiguous().clone()
+            name: tensor.detach().cpu().to(
+                dtype=EXPORT_DTYPES[dtype] if tensor.is_floating_point() else tensor.dtype,
+            ).contiguous().clone()
             for name, tensor in state.items()
         }
+        if not all(torch.isfinite(tensor).all().item() for tensor in portable_state.values()):
+            raise ValueError("export dtype conversion produced non-finite weights")
         tensor_metadata = {
             "format": SAFETENSORS_FORMAT,
             "architecture": config.architecture,
@@ -114,6 +164,7 @@ def export_safetensors_bundle(
             "checkpoint_sha256": sha256_file(checkpoint),
             "step": str(payload.get("step", "")),
             "variant": variant,
+            "weights_dtype": dtype,
         }
         save_file(
             portable_state,
@@ -127,6 +178,7 @@ def export_safetensors_bundle(
             "format": SAFETENSORS_FORMAT,
             "variant": variant,
             "architecture": config.architecture,
+            "weights_dtype": dtype,
             "parameter_count": sum(
                 parameter.numel() for parameter in model.parameters()
             ),
@@ -141,6 +193,7 @@ def export_safetensors_bundle(
             "initialization": _nested_value(
                 payload, "training_state", "initialization"
             ),
+            "export_provenance": dict(provenance) if provenance is not None else None,
         }
         _write_json(temporary / METADATA_FILE, metadata)
         files = {
@@ -150,7 +203,8 @@ def export_safetensors_bundle(
             }
             for name in (MODEL_FILE, CONFIG_FILE, METADATA_FILE, TOKENIZER_FILE)
         }
-        manifest = {"format": SAFETENSORS_FORMAT, "variant": variant, "files": files}
+        manifest = {"format": SAFETENSORS_FORMAT, "variant": variant,
+                    "weights_dtype": dtype, "files": files}
         _write_json(temporary / MANIFEST_FILE, manifest)
         os.replace(temporary, destination)
         return manifest
@@ -175,10 +229,13 @@ def load_safetensors_model(
     *,
     data_fingerprint: str | None,
     device: torch.device,
+    dtype: torch.dtype = torch.float32,
 ) -> tuple[nn.Module, ModelConfig]:
     """Reconstruct a KiwiLM model from a portable Safetensors bundle."""
 
     model_path = _resolve_model_path(path)
+    if Path(path).is_dir() or (model_path.parent / MANIFEST_FILE).exists():
+        verify_safetensors_bundle(model_path.parent)
     metadata = read_safetensors_metadata(model_path)
     actual_fingerprint = metadata.get("data_fingerprint")
     if data_fingerprint is not None and actual_fingerprint != data_fingerprint:
@@ -190,11 +247,65 @@ def load_safetensors_model(
     if not isinstance(serialized_config, dict):
         raise ValueError("Safetensors model configuration must be an object")
     config = ModelConfig.from_dict(serialized_config)
-    model = build_model(config)
-    model.load_state_dict(load_file(model_path, device="cpu"), strict=True)
+    # Preserve portable FP32 execution by default; storage precision is independent.
+    model = build_model(config).to(dtype=dtype)
+    state = load_file(model_path, device="cpu")
+    stored_dtype = metadata.get("weights_dtype")
+    if stored_dtype is not None and (
+        stored_dtype not in EXPORT_DTYPES
+        or any(t.is_floating_point() and t.dtype != EXPORT_DTYPES[stored_dtype]
+               for t in state.values())
+    ):
+        raise ValueError("Safetensors tensor dtype does not match weights_dtype metadata")
+    if config.tie_embeddings and not torch.equal(
+        state["token_embedding.weight"], state["lm_head.weight"]
+    ):
+        raise ValueError("Safetensors tied embedding/head weights disagree")
+    model.load_state_dict(state, strict=True)
     model.to(device)
     model.eval()
     return model, config
+
+
+def verify_safetensors_bundle(path: str | Path) -> dict[str, Any]:
+    """Check all inference files and reconstruction metadata before using a bundle."""
+    root = Path(path)
+    manifest = json.loads((root / MANIFEST_FILE).read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or manifest.get("format") != SAFETENSORS_FORMAT:
+        raise ValueError("unsupported KiwiLM bundle manifest")
+    files = manifest.get("files")
+    if not isinstance(files, dict) or set(files) != set(BUNDLE_FILES) - {MANIFEST_FILE}:
+        raise ValueError("bundle manifest must describe exactly the four inference files")
+    for name, details in files.items():
+        target = root / name
+        if (not isinstance(details, dict) or not target.is_file()
+                or target.stat().st_size != details.get("bytes")
+                or sha256_file(target) != details.get("sha256")):
+            raise ValueError(f"bundle integrity check failed for {name}")
+    embedded = read_safetensors_metadata(root / MODEL_FILE)
+    config = json.loads((root / CONFIG_FILE).read_text(encoding="utf-8"))
+    metadata = json.loads((root / METADATA_FILE).read_text(encoding="utf-8"))
+    if not isinstance(config, dict) or not isinstance(metadata, dict):
+        raise ValueError("bundle configuration/metadata must be objects")
+    if (config != json.loads(embedded["model_config"])
+            or metadata.get("model_config") != config
+            or metadata.get("format") != SAFETENSORS_FORMAT
+            or metadata.get("variant") != manifest.get("variant")
+            or metadata.get("variant") != embedded.get("variant")
+            or metadata.get("tokenizer_sha256") != files[TOKENIZER_FILE]["sha256"]):
+        raise ValueError("bundle reconstruction metadata disagrees")
+    for key in ("architecture", "checkpoint_sha256", "data_fingerprint"):
+        if metadata.get(key) != embedded.get(key):
+            raise ValueError(f"bundle metadata disagrees on {key}")
+    if embedded.get("weights_dtype") is not None and (
+        embedded["weights_dtype"] not in EXPORT_DTYPES
+        or metadata.get("weights_dtype") != embedded["weights_dtype"]
+        or manifest.get("weights_dtype") != embedded["weights_dtype"]
+    ):
+        raise ValueError("bundle storage dtype metadata disagrees")
+    if ByteBPETokenizer.load(root / TOKENIZER_FILE).vocab_size != config.get("vocab_size"):
+        raise ValueError("bundle tokenizer vocabulary does not match the model")
+    return manifest
 
 
 def _resolve_model_path(path: str | Path) -> Path:
@@ -219,14 +330,17 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 __all__ = [
+    "BUNDLE_FILES",
     "CONFIG_FILE",
     "MANIFEST_FILE",
     "METADATA_FILE",
     "MODEL_FILE",
     "SAFETENSORS_FORMAT",
     "TOKENIZER_FILE",
+    "export_provenance",
     "export_safetensors_bundle",
     "load_safetensors_model",
     "read_safetensors_metadata",
     "sha256_file",
+    "verify_safetensors_bundle",
 ]

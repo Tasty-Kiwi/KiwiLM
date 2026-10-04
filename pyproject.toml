@@ -19,6 +19,9 @@ dependencies = [
 [project.scripts]
 kiwilm = "kiwilm.cli:main"
 
+[project.optional-dependencies]
+browser = ["onnx>=1.22", "onnxruntime>=1.28"]
+
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"

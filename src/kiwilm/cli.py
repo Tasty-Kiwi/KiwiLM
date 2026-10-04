@@ -42,6 +42,7 @@ from kiwilm.inference import load_trained_model
 from kiwilm.model_profile import profile_kiwilm2
 from kiwilm.models import build_model
 from kiwilm.safetensors_io import (
+    export_provenance,
     export_safetensors_bundle,
     read_safetensors_metadata,
 )
@@ -232,6 +233,15 @@ def build_parser() -> argparse.ArgumentParser:
     export_safetensors_parser.add_argument("--checkpoint", type=Path, required=True)
     export_safetensors_parser.add_argument("--output-dir", type=Path, required=True)
     export_safetensors_parser.add_argument("--variant", required=True)
+    export_safetensors_parser.add_argument(
+        "--dtype", choices=("bf16", "fp32"), default="bf16",
+        help="stored floating-weight dtype (default: bf16); does not change the source checkpoint",
+    )
+    export_safetensors_parser.add_argument(
+        "--checkpoint-provenance", type=Path,
+        help="original training job/metadata with data_fingerprint and tokenizer_sha256; "
+        "permits a verified tokenizer from a different prepared-data budget",
+    )
     export_safetensors_parser.set_defaults(handler=_export_safetensors_command)
 
     train_parser = subparsers.add_parser(
@@ -740,13 +750,19 @@ def _export_safetensors_command(args: argparse.Namespace) -> int:
         raise ValueError("prepared data does not name its tokenizer artifact")
     if not isinstance(tokenizer_sha256, str):
         raise ValueError("prepared data does not contain a tokenizer checksum")
+    provenance = export_provenance(prepared_metadata, args.checkpoint_provenance)
+    tokenizer_path = args.tokenizer_from / tokenizer_file
+    if not tokenizer_path.resolve().is_relative_to(args.tokenizer_from.resolve()):
+        raise ValueError("tokenizer artifact must be inside its prepared dataset directory")
     manifest = export_safetensors_bundle(
         args.checkpoint,
         args.output_dir,
-        tokenizer_path=args.tokenizer_from / tokenizer_file,
-        expected_data_fingerprint=prepared_fingerprint,
+        tokenizer_path=tokenizer_path,
+        expected_data_fingerprint=provenance["checkpoint_data_fingerprint"],
         expected_tokenizer_sha256=tokenizer_sha256,
         variant=args.variant,
+        provenance=provenance,
+        dtype=args.dtype,
     )
     _print_json(
         {
