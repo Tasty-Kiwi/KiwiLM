@@ -13,7 +13,8 @@ import pytest
 from kiwilm.data import prepare_from_stories
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts/run_colab_kiwilm2_tpu_smoke.sh"
+ARCHIVE = ROOT / "archive/kiwilm2/scripts"
+SCRIPT = ARCHIVE / "run_colab_kiwilm2_tpu_smoke.sh"
 
 # This fake CLI deliberately cannot allocate hardware or execute training.
 FAKE_COLAB = r'''
@@ -247,7 +248,7 @@ def test_final_launcher_prepares_small_uploads_and_separate_train(
     metadata["fingerprint"] = metadata_fingerprint(metadata)
     (source / "metadata.json").write_text(json.dumps(metadata))
     env["KIWILM2_USE_DRIVE"] = "1"
-    script = ROOT / "scripts/run_colab_kiwilm2_tpu_1b.sh"
+    script = ARCHIVE / "run_colab_kiwilm2_tpu_1b.sh"
     master, slave = pty.openpty()
     try:
         setup = subprocess.run(["bash", str(script), "setup"], env=env, cwd=ROOT,
@@ -276,7 +277,7 @@ def test_final_launcher_prepares_small_uploads_and_separate_train(
 
 def test_final_launcher_refuses_unprotected_run_before_colab(launcher) -> None:
     env, log = launcher
-    result = subprocess.run(["bash", str(ROOT / "scripts/run_colab_kiwilm2_tpu_1b.sh"), "setup"],
+    result = subprocess.run(["bash", str(ARCHIVE / "run_colab_kiwilm2_tpu_1b.sh"), "setup"],
                             env=env, cwd=ROOT, capture_output=True, text=True)
     assert result.returncode != 0 and "requires Drive" in result.stderr
     assert calls(log) == []

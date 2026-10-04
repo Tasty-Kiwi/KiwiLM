@@ -142,7 +142,7 @@ if [[ "${existing_status}" != *"not found"* && "${existing_status}" != *"Not fou
 fi
 
 job_command=(
-  uv run python scripts/prepare_kiwilm2_colab_job.py
+  uv run python archive/kiwilm2/scripts/prepare_kiwilm2_colab_job.py
   --output "${job_path}"
   --phase "${phase}"
   --architecture "${variant}"
@@ -212,7 +212,7 @@ fi
 
 "${colab_bin}" exec -s "${session_name}" \
   --timeout "${timeout_seconds}" \
-  -f scripts/colab_kiwilm2_train.py
+  -f archive/kiwilm2/scripts/colab_kiwilm2_train.py
 
 manifest_path="${result_dir}/artifact-manifest.json"
 "${colab_bin}" download -s "${session_name}" \

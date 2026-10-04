@@ -14,7 +14,8 @@ import pytest
 
 @pytest.fixture
 def bootstrap():
-    path = Path(__file__).resolve().parents[1] / "scripts/colab_kiwilm2_tpu_smoke.py"
+    root = Path(__file__).resolve().parents[1]
+    path = root / "archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("stream_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

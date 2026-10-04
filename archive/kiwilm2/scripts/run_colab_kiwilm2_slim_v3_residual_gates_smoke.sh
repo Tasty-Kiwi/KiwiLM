@@ -4,7 +4,7 @@ set -euo pipefail
 audit_path="${KIWILM2_RESIDUAL_AUDIT:-examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json}"
 if [[ ! -f "${audit_path}" ]]; then
   echo "Residual audit not found at ${audit_path}" >&2
-  echo "Run scripts/audit_kiwilm2_residual_growth.py before paid smoke training." >&2
+  echo "Run archive/kiwilm2/scripts/audit_kiwilm2_residual_growth.py before paid smoke training." >&2
   exit 1
 fi
 
@@ -21,8 +21,8 @@ common=(
 
 env "${common[@]}" \
   KIWILM2_SWIGLU_RESIDUAL_GATE_INIT=0.25 \
-  scripts/run_colab_kiwilm2.sh
+  archive/kiwilm2/scripts/run_colab_kiwilm2.sh
 
 env "${common[@]}" \
   KIWILM2_SWIGLU_RESIDUAL_GATE_INIT=0.5 \
-  scripts/run_colab_kiwilm2.sh
+  archive/kiwilm2/scripts/run_colab_kiwilm2.sh

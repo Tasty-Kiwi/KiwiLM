@@ -137,7 +137,7 @@ if [[ "${action}" == "setup" ]]; then
     done
   fi
   "${colab_bin}" exec -s "${session}" --env KIWILM2_TPU_ACTION=preflight \
-    --timeout 300 -f scripts/colab_kiwilm2_tpu_smoke.py
+    --timeout 300 -f archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py
   "${colab_bin}" download -s "${session}" /content/kiwilm-tpu-preflight.json \
     "${result_dir}/preflight.json"
   if [[ "${use_drive}" == "1" ]]; then
@@ -149,7 +149,7 @@ if [[ "${action}" == "setup" ]]; then
     fi
   fi
   "${colab_bin}" exec -s "${session}" --env KIWILM2_TPU_ACTION=prepare \
-    --timeout "${prepare_timeout}" -f scripts/colab_kiwilm2_tpu_smoke.py
+    --timeout "${prepare_timeout}" -f archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py
   "${colab_bin}" download -s "${session}" /content/kiwilm-tpu-setup.json "${result_dir}/setup.json"
   state="$(uv run --locked python -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' \
     "${result_dir}/setup.json")"
@@ -174,7 +174,7 @@ if [[ "${action}" == "setup" ]]; then
       --session "${session}" --colab-bin "${colab_bin}" --workers "${workers}"
   fi
   "${colab_bin}" exec -s "${session}" --env KIWILM2_TPU_ACTION=prepare \
-    --timeout "${prepare_timeout}" -f scripts/colab_kiwilm2_tpu_smoke.py
+    --timeout "${prepare_timeout}" -f archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py
   "${colab_bin}" download -s "${session}" /content/kiwilm-tpu-setup.json "${result_dir}/setup.json"
   if [[ "${phase}" == "final-1b" ]]; then
     "${colab_bin}" download -s "${session}" /content/kiwilm-tpu-job.json "${result_dir}/tpu-job.json"
@@ -196,6 +196,6 @@ uv run --locked python -c \
   "${result_dir}" "${staging}/remote-setup.json" "${session}" "${tpu}"
 owned=1
 "${colab_bin}" exec -s "${session}" --env KIWILM2_TPU_ACTION=train \
-  --timeout "${train_timeout}" -f scripts/colab_kiwilm2_tpu_smoke.py
+  --timeout "${train_timeout}" -f archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py
 "${colab_bin}" download -s "${session}" "${remote_run}/summary.json" "${result_dir}/summary.json"
 download_artifacts

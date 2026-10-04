@@ -18,7 +18,7 @@ from kiwilm.colab_drive import restore_checkpoint_backup, restore_prepared_data
 from kiwilm.colab_kiwilm2 import build_colab_job, checkpoint_backup_key
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = ROOT / "scripts" / "colab_kiwilm2_train.py"
+WORKER = ROOT / "archive/kiwilm2/scripts" / "colab_kiwilm2_train.py"
 
 
 def _worker_functions(tmp_path: Path, *, required: bool = True) -> dict:
@@ -130,7 +130,7 @@ def test_recovery_policy_preserves_existing_500m_backup_key() -> None:
 
 def test_job_cli_serializes_require_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     spec = importlib.util.spec_from_file_location(
-        "prepare_colab_job", ROOT / "scripts" / "prepare_kiwilm2_colab_job.py",
+        "prepare_colab_job", ROOT / "archive/kiwilm2/scripts" / "prepare_kiwilm2_colab_job.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -178,7 +178,7 @@ def test_launcher_passes_recovery_policy_before_allocating(
         KIWILM2_RESUME_FROM=str(resume) if explicit else "",
     )
     result = subprocess.run(
-        ["bash", str(ROOT / "scripts" / "run_colab_kiwilm2.sh")],
+        ["bash", str(ROOT / "archive/kiwilm2/scripts" / "run_colab_kiwilm2.sh")],
         env=env, cwd=ROOT, capture_output=True, text=True, timeout=10,
     )
     assert result.returncode == 9, result.stdout + result.stderr

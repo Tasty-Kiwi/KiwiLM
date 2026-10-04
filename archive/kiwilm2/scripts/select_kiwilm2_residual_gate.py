@@ -26,7 +26,7 @@ def main() -> int:
         gate = "0.25" if result["selected"] == "gate_025" else "0.5"
         result["confirmation_commands"] = {
             "windows_powershell": (
-                "uv run --locked python scripts\\run_kiwilm2_experiment.py `\n"
+                "uv run --locked python archive\\kiwilm2\\scripts\\run_kiwilm2_experiment.py `\n"
                 "  --phase architecture `\n"
                 '  --data-dir "data\\smollm-architecture" `\n'
                 '  --output-dir "runs\\kiwilm2-slim-v3-gated-architecture" `\n'
@@ -42,7 +42,7 @@ def main() -> int:
                 f"KIWILM2_SWIGLU_RESIDUAL_GATE_INIT={gate} \\\n"
                 "KIWILM2_RESIDUAL_AUDIT="
                 "examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \\\n"
-                "COLAB_GPU=L4 KIWILM2_PRECISION=bf16 scripts/run_colab_kiwilm2.sh"
+                "COLAB_GPU=L4 KIWILM2_PRECISION=bf16 archive/kiwilm2/scripts/run_colab_kiwilm2.sh"
             ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)

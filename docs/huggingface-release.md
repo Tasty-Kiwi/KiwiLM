@@ -1,8 +1,18 @@
 # KiwiLM 2 Hugging Face release
 
-Target: **Tasty-Kiwi/KiwiLM-2**, **private**. Only the owner will make it public.
+Published: [Tasty-Kiwi/KiwiLM-2](https://huggingface.co/Tasty-Kiwi/KiwiLM-2),
+model revision `53d6abcb4d11c8a98936c19d55d2b741a99d7602`.
+The owner made it public after the verified private upload. Public availability
+was rechecked on 2026-10-05. No new publication is needed for repository cleanup.
 Weights and code are MIT. This is a custom PyTorch base model, not a Transformers
 `AutoModel` or hosted-inference integration.
+
+The original private upload receipt and bundled `release.json` remain historical
+records, including their pending source-freeze fields. The subsequent local
+source reference is documented in [the V2 freeze record](kiwilm2-freeze.md);
+it does not retroactively change the uploaded artifact's provenance.
+The private-only publication helper below creates a **new** repository and
+refuses existing ones. Do not rerun it against the now-public release.
 
 ## Local preparation (no uploads or training)
 
@@ -63,10 +73,13 @@ no blind `--allow-data-mismatch` export bypass.
 
 ## Freeze reviewed release source
 
-Review/commit the implementation and card first. Create an annotated source tag
-only after approval, for example `kiwilm2-v2-1b`. Do not tag the current pre-change
-HEAD and imply it contains uncommitted export tooling. Push source/tag only when
-authorized. The bundled wheel checksum remains an independent code-artifact ID.
+The V3 cleanup freezes the reviewed pre-cleanup implementation at local tag
+`kiwilm2-v2-1b` (`643aa81`). This tag includes the committed export tooling;
+the original bundle was built earlier and retains its own wheel checksum and
+dirty-worktree provenance. Cleanup edits themselves are not committed or pushed.
+For any new release build, use a reviewed **clean checkout of the source tag**.
+The builder refuses a dirty checkout or a tag that does not point to HEAD.
+Push source/tag or upload a new bundle only with separate authorization.
 
 After source freeze, rebuild the wheel and prepare a **new** output:
 

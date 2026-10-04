@@ -68,7 +68,7 @@ def main() -> int:
         upper = 3 if result["selected"] == "h7s3" else 4
         result["promotion_commands"] = {
             "windows_powershell": (
-                "uv run --locked python scripts\\run_kiwilm2_experiment.py `\n"
+                "uv run --locked python archive\\kiwilm2\\scripts\\run_kiwilm2_experiment.py `\n"
                 "  --phase architecture `\n"
                 '  --data-dir "data\\smollm-architecture" `\n'
                 '  --output-dir "runs\\kiwilm2-slim-v3-architecture" `\n'
@@ -85,7 +85,7 @@ def main() -> int:
                 f"KIWILM2_UPPER_SWIGLU_BLOCKS={upper} \\\n"
                 "COLAB_GPU=L4 \\\n"
                 "KIWILM2_PRECISION=bf16 \\\n"
-                "scripts/run_colab_kiwilm2.sh"
+                "archive/kiwilm2/scripts/run_colab_kiwilm2.sh"
             ),
         }
     args.output.parent.mkdir(parents=True, exist_ok=True)

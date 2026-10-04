@@ -182,7 +182,7 @@ def test_final_worker_reconstructs_budget_timeout_and_required_resume(
     job["data_fingerprint"] = "b" * 64
     job["drive_resume_dir"] = job["drive_backup_dir"]
     spec = importlib.util.spec_from_file_location(
-        "final_bootstrap", ROOT / "scripts/colab_kiwilm2_tpu_smoke.py")
+        "final_bootstrap", ROOT / "archive/kiwilm2/scripts/colab_kiwilm2_tpu_smoke.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "CONTENT", tmp_path)

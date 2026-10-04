@@ -112,8 +112,11 @@ def test_portability_gate_checks_logits_not_just_loss(tmp_path: Path) -> None:
         portable_loss_report(model, data, path, runtime, **options)
 
 
+ARCHIVE = Path(__file__).resolve().parents[1] / "archive/kiwilm2/scripts"
+
+
 def test_launcher_rejects_unsupported_tpu_before_allocation() -> None:
-    script = Path(__file__).resolve().parents[1] / "scripts/run_colab_kiwilm2_tpu_smoke.sh"
+    script = ARCHIVE / "run_colab_kiwilm2_tpu_smoke.sh"
     result = subprocess.run(
         ["bash", str(script)], env={**os.environ, "COLAB_TPU": "unsupported"},
         capture_output=True, text=True, check=False,
@@ -187,7 +190,7 @@ def test_xla_requires_one_real_tpu_and_synchronizes(monkeypatch: pytest.MonkeyPa
 def test_bootstrap_uses_standalone_python_and_bounded_worker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resume: bool,
 ) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    path = ARCHIVE / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("tpu_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -247,7 +250,7 @@ def test_bootstrap_uses_standalone_python_and_bounded_worker(
 def test_bootstrap_setup_cannot_launch_training(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str | None,
 ) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    path = ARCHIVE / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("setup_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -276,7 +279,7 @@ def test_bootstrap_setup_cannot_launch_training(
 def test_bootstrap_changed_job_refuses_training(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    path = ARCHIVE / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("locked_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -298,7 +301,7 @@ def test_bootstrap_changed_job_refuses_training(
 
 
 def test_bootstrap_reassembles_actual_chunks(tmp_path: Path) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts" / "colab_kiwilm2_tpu_smoke.py"
+    path = ARCHIVE / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("tpu_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -357,7 +360,7 @@ def test_full_smoke_exact_tokens_and_periodic_resume(tmp_path: Path) -> None:
 def test_continuation_bootstrap_reconstructs_locked_backup_and_steps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str,
 ) -> None:
-    path = Path(__file__).resolve().parents[1] / "scripts/colab_kiwilm2_tpu_smoke.py"
+    path = ARCHIVE / "colab_kiwilm2_tpu_smoke.py"
     spec = importlib.util.spec_from_file_location("continuation_bootstrap", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

@@ -200,7 +200,7 @@ def test_manual_promotion_override_is_bound_to_exact_smoke_artifacts(
 
 def test_experiment_candidates_drop_h7_and_isolate_both_gate_initializers() -> None:
     namespace = runpy.run_path(
-        Path(__file__).parents[1] / "scripts" / "run_kiwilm2_experiment.py"
+        Path(__file__).parents[1] / "archive/kiwilm2/scripts" / "run_kiwilm2_experiment.py"
     )
     candidates = namespace["CANDIDATES"]
     assert "slim-v3-h7s3" not in candidates

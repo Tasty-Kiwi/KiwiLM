@@ -15,4 +15,4 @@ export KIWILM2_COMPILE_POLICY=compiled
 export KIWILM2_RESIDUAL_AUDIT="${KIWILM2_RESIDUAL_AUDIT:-examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json}"
 export KIWILM2_PROMOTION_OVERRIDE="${KIWILM2_PROMOTION_OVERRIDE:-examples/comparisons/kiwilm2-smoke-slim-v3-residual-gates/manual-promotion.json}"
 
-scripts/run_colab_kiwilm2.sh
+archive/kiwilm2/scripts/run_colab_kiwilm2.sh

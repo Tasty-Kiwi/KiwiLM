@@ -1,4 +1,4 @@
-"""Shared causal language-model interface."""
+"""Frozen causal-model contract; bidirectional encoders must use a separate interface."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ from kiwilm.config import ModelConfig
 
 
 class CausalLanguageModel(nn.Module, ABC):
-    """Base class implemented by all KiwiLM architectures."""
+    """V2 next-token interface, not a requirement for future diffusion/encoder models."""
 
     config: ModelConfig
 
     @abstractmethod
     def forward(self, input_ids: Tensor) -> Tensor:
         """Return next-token logits with shape ``[batch, sequence, vocabulary]``."""
-

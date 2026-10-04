@@ -1,239 +1,124 @@
-# KiwiLM 2
+# KiwiLM
 
-The Dense **1B-token TPU run** is complete; see the
-[matched 500M/1B analysis](examples/comparisons/kiwilm2-final-1b-tpu-muon/analysis.md).
-Local Hugging Face release preparation, inference-only Safetensors export,
-dataset-free loading, and private-only publication are documented in the
-[release runbook](docs/huggingface-release.md). Uploads require separate approval.
+KiwiLM is a small language-model research codebase. **KiwiLM 2 is complete**;
+the next project is a notebook-first bidirectional encoder with masked diffusion.
+The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. V3 is not implemented yet.
 
-The [browser-local playground](https://huggingface.co/spaces/Tasty-Kiwi/KiwiLM-Playground)
-offers a cached ONNX export of the released Dense weights alongside the original
-KiwiLM 1 X/Y browser bundles. Prompts and continuations
-stay in the browser; no inference server or training dataset is needed. The first
-load downloads approximately 323 MB of ONNX weights. Export/build instructions are
-in [the playground source](spaces/kiwilm-playground/README.md).
+## KiwiLM 2 reference
 
-Experimental hardware qualification: [50M-token single-chip Colab TPU smoke](docs/tpu-smoke.md)
-now targets v6e-1 with corrected weight tying and portable-reload checks. The
-[corrected v6e-1 smoke passed](examples/comparisons/kiwilm2-tpu-v6e1-50m-smoke/analysis.md).
-The [previous v5e-1 run](examples/comparisons/kiwilm2-tpu-50m-smoke/analysis.md)
-remains an invalid untied control. The corrected Dense 1B run is now complete,
-including restoration of optimizer/data-generator state on a fresh VM.
-The TPU launcher now restores fingerprint-checked Drive data, with compressed
-parallel uploads on a cache miss. `bash scripts/run_colab_kiwilm2_tpu_smoke.sh setup`
-prepares only; `bash scripts/run_colab_kiwilm2_tpu_smoke.sh train` is a separate,
-explicit start. Setup leaves an idle, potentially billable TPU until started or stopped.
-Drive-enabled TPU jobs now publish verified latest/previous checkpoint generations
-at every save boundary and stop on persistent backup failure. A separate
-[two-VM continuation test](docs/tpu-smoke.md#two-vm-continuation-qualification)
-checks restart state before a long run; no training is launched automatically.
-The separate [1B TPU launcher](docs/tpu-1b.md) prepares data in the VM, requires
-verified Drive backups, and offers strict original-job resume. The finished run
-resumed at step 13,000 and reached exactly 1B tokens; this demonstrates practical
-continuation, not bitwise equivalence to an uninterrupted run. Setup and training
-remain separate explicit commands.
+The Dense model has 64,252,416 parameters, a 32K tokenizer, a 512-token context,
+and was trained from scratch for exactly 1B tokens on a 70/30
+FineWeb-Edu/Cosmopedia mixture using a single Colab TPU v6e-1.
 
-KiwiLM 2 is a controlled language-model architecture experiment combining
-periodic grouped-query attention, large-kernel causal gated convolutions, and
-hashed bigram/trigram embeddings. The repository contains three active variants:
+- [Published BF16 weights and model card](https://huggingface.co/Tasty-Kiwi/KiwiLM-2)
+- [Matched 500M/1B evaluation and analysis](examples/comparisons/kiwilm2-final-1b-tpu-muon/analysis.md)
+- [Frozen V2 source and checkpoint provenance](docs/kiwilm2-freeze.md)
+- [V2 architecture and maintained interfaces](docs/kiwilm2.md)
+- [Browser-local playground](https://huggingface.co/spaces/Tasty-Kiwi/KiwiLM-Playground)
 
-- `kiwilm2`: a 64.25M-parameter backbone with 1536-wide SwiGLU feed-forward blocks.
-- `kiwilm2_slim`: a 40.69M-parameter control using gated, width-preserving
-  Hadamard MLPs with independent signed diagonals and depth-scaled learned
-  residual gains.
-- `kiwilm2_slim_v3`: a hybrid ablation with gated Hadamard lower blocks and a
-  contiguous upper SwiGLU suffix. H6/S4 is active; H7/S3 remains loadable only
-  for historical checkpoint compatibility.
+Matched FP32 validation: **3.486474 loss / 32.6705 perplexity**.
+Four-choice retrieval: **62.5%** on a small templated suite, not a general
+reasoning benchmark. Generation remains unreliable: **41/120 severe-loop
+samples**, semantic drift, and fabricated explanations. This is an experimental
+base model, not a chatbot.
 
-Both use a 32K tokenizer, 512-token context, tied token embeddings and LM head,
-8 query heads, 2 KV heads, cached RoPE on attention blocks, and the fixed mixer
-schedule `GQA → Conv31 → Conv63` repeated three times followed by a final GQA.
+The 1B run resumed its step-13,000 checkpoint on a fresh TPU VM and completed
+61,036 updates. That demonstrates practical continuation, **not** bitwise
+equivalence to an uninterrupted run. Historical TPU qualification failures and
+the invalid untied v5e control remain in the [V2 workflow archive](archive/kiwilm2/README.md).
 
-Earlier KiwiLM architectures and their reports are preserved on the `legacy`
-branch. Check out that branch to load historical checkpoints.
+## Install
 
-![KiwiLM 2 architecture](docs/kiwilm2.svg)
-
-![KiwiLM 2 Slim v3 H6/S4 architecture](docs/kiwilm2-slim-v3-h6-s4.svg)
-
-The complete architecture, data, Colab, checkpoint, and evaluation specification
-is in the [KiwiLM 2 runbook](docs/kiwilm2.md).
-
-## Setup
-
-KiwiLM uses Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
-
-macOS or Linux:
+Python 3.11+ and [uv](https://docs.astral.sh/uv/):
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync --locked
-uv run kiwilm --help
+uv run --locked kiwilm --help
 ```
 
-Windows PowerShell:
+Windows PowerShell uses the same commands. The lock selects official CUDA 13.2
+PyTorch wheels on Windows; macOS/Linux use their normal PyPI resolution.
+Optional browser export dependencies: `uv sync --locked --extra browser`.
 
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-uv sync --locked
-uv run --locked python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO CUDA GPU')"
-```
+## Generate without training data
 
-The lock selects PyTorch's official CUDA 13.2 wheel index on Windows, so
-`uv sync` and `uv run` no longer replace a CUDA installation with PyPI's CPU
-wheel. macOS and Linux continue to use their normal PyPI resolution.
-
-## Prepare data
-
-Prepare the reproducible 50M-token FineWeb-Edu and Cosmopedia smoke corpus:
+Download the published bundle at its immutable model revision:
 
 ```bash
-uv run kiwilm prepare-smollm \
-  --profile smoke \
-  --output-dir data/smollm-smoke
+uv run --locked hf download Tasty-Kiwi/KiwiLM-2 --revision 53d6abcb4d11c8a98936c19d55d2b741a99d7602 --local-dir artifacts/KiwiLM-2
+uv run --locked kiwilm generate --checkpoint artifacts/KiwiLM-2 --prompt "Once upon a time, a fox found a box." --max-new-tokens 160 --temperature 0.8 --top-k 40 --seed 42 --cache auto --stream
 ```
 
-Larger profiles must reuse its tokenizer:
+The same one-line commands work in PowerShell. The package verifies the bundle
+manifest; no training dataset, Transformers integration, or hosted inference
+server is needed. BF16 is the storage format; portable inference defaults to FP32.
+See [dataset-free Python loading](examples/generate_from_hub.py) and the
+[release runbook](docs/huggingface-release.md).
+
+The static playground retains KiwiLM 2 Dense and all three original KiwiLM 1
+X/Y choices. Downloads are lazy and inference runs in a browser worker.
+The Dense ONNX download is approximately 323 MB; X/Y bundles are about 22 MB each.
+[Playground source and build instructions](spaces/kiwilm-playground/README.md).
+
+## Local V2 tools
+
+The `kiwilm` CLI retains data preparation, causal training/resume, CPT, SFT,
+validation, generation, generation comparison, retrieval, diagnostics/profiling,
+and tokenizer/Safetensors export. Use `kiwilm <command> --help`.
+Dense, gated Slim v2 and hybrid Slim v3 checkpoint dispatch remain compatible;
+"Slim v3" is a **V2 ablation**, not KiwiLM 3.
 
 ```bash
-uv run kiwilm prepare-smollm \
-  --profile architecture \
-  --tokenizer-from data/smollm-smoke \
-  --output-dir data/smollm-architecture
+uv run --locked kiwilm prepare-smollm --profile smoke --output-dir data/smollm-smoke
+uv run --locked kiwilm profile-kiwilm2 --architecture kiwilm2
+uv run --locked kiwilm evaluate --data-dir data/smollm-smoke --checkpoint runs/my-v2/latest.pt
 ```
 
-TinyStories and SimpleStories preparation remain available for frozen-tokenizer
-external evaluation. `prepare-instruct`, `cpt`, and `sft` remain available for
-later controlled adaptation experiments.
+Prepared-data fingerprints must match for training/evaluation. Use the
+bundle's tokenizer, not an unrelated dataset, for generation.
 
-## Train
+V2 CLI-based Colab launchers, ablation runners and their detailed runbooks moved
+to [`archive/kiwilm2/`](archive/kiwilm2/README.md). They remain regression-tested
+for historical reproduction, not the starting point for V3. Launchers are
+user-run only and can allocate billable hardware.
 
-Run the matched Dense and Slim smoke comparison:
+## Development boundary
 
-```bash
-uv run python scripts/run_kiwilm2_experiment.py \
-  --phase smoke \
-  --data-dir data/smollm-smoke \
-  --output-dir runs/kiwilm2-smoke \
-  --device cuda \
-  --precision fp16
-```
+V2 model, config dispatch, causal trainer and checkpoint formats stay independent
+and unchanged. V3 will have separate masking, objective, trainer, sampler and
+recovery modules; it must not inherit the causal objective. Data/tokenizer,
+metrics and verified latest/previous checkpoint utilities can be reused where
+their contracts fit. See [infrastructure boundaries](docs/development.md).
 
-Train one variant directly:
-
-```bash
-uv run kiwilm train \
-  --architecture kiwilm2 \
-  --data-dir data/smollm-smoke \
-  --output-dir runs/kiwilm2 \
-  --device cuda \
-  --precision fp16 \
-  --context-length 512 \
-  --d-model 512 \
-  --query-heads 8 \
-  --kv-heads 2 \
-  --swiglu-dim 1536 \
-  --bigram-buckets 16384 \
-  --trigram-buckets 16384 \
-  --batch-size 8 \
-  --grad-accum-steps 4 \
-  --max-tokens 50000000 \
-  --max-steps 3152
-```
-
-Use `--architecture kiwilm2_slim` for gated Slim v2. Add `--compile-mode
-compiled` to force `torch.compile`; eager remains the portable local default.
-Muon is deliberately restricted to Dense; AdamW is the shared baseline.
-
-After the Dense Muon 0.01 analysis, audit the existing 250M Dense-AdamW and
-ungated H6/S4 checkpoints before changing the model:
-
-```bash
-uv run --locked python scripts/audit_kiwilm2_residual_growth.py \
-  --data-dir data/smollm-architecture \
-  --smoke-data-dir data/smollm-smoke \
-  --dense runs/kiwilm2-architecture/kiwilm2-adamw/latest.pt \
-  --h6s4 runs/kiwilm2-slim-v3-architecture2/kiwilm2-slim-v3-h6-s4-adamw/latest.pt \
-  --output examples/comparisons/kiwilm2-slim-v3-residual-audit/audit.json \
-  --device cuda --precision bf16
-```
-
-Only an exact 100-batch audit that reproduces block-9 growth authorizes the
-alpha=0.25 and alpha=0.5 smoke launchers. See the runbook for Windows and Colab
-commands and the complete promotion rules.
-
-## Colab
-
-The launchers prepare data inside the Colab VM and optionally mirror completed
-checkpoints to Google Drive:
-
-```bash
-scripts/run_colab_kiwilm2_smoke.sh
-scripts/run_colab_kiwilm2_slim_smoke.sh
-scripts/run_colab_kiwilm2_slim_v3_smoke.sh
-scripts/run_colab_kiwilm2_slim_v3_residual_gates_smoke.sh
-scripts/run_colab_kiwilm2_slim_v3_gate050_architecture.sh
-scripts/run_colab_kiwilm2_architecture.sh
-scripts/run_colab_kiwilm2_muon_sweep.sh
-```
-
-The architecture launcher runs the controlled 250M-token Dense and gated-Slim
-pair. It uses 200 validation batches, a 5M-token warmup, and an automatically
-derived 15,359-step ceiling while stopping exactly at 250M tokens. Windows
-PowerShell preparation and training commands are documented in the
-[KiwiLM 2 runbook](docs/kiwilm2.md#colab-launchers).
-
-T4 and fp16 are the defaults. The Slim-only launcher benchmarks Dense eager,
-Slim eager, and Slim compiled on the same VM, selecting compiled execution only
-when it is both the fastest Slim path and faster than Dense. Set
-`KIWILM2_COMPILE_POLICY` to `eager`, `compiled`, or `auto`. The generic launcher
-also accepts overrides for phase, variant, optimizer, GPU, precision, batch
-size, Drive root, resume checkpoint, and output directory.
-
-## Evaluate and inspect
-
-```bash
-uv run kiwilm evaluate \
-  --data-dir data/smollm-smoke \
-  --checkpoint runs/kiwilm2/best.pt
-
-uv run kiwilm generate \
-  --data-dir data/smollm-smoke \
-  --checkpoint runs/kiwilm2/best.pt \
-  --prompt "Once upon a time"
-
-uv run kiwilm profile-kiwilm2 --architecture kiwilm2
-```
-
-The repository also retains side-by-side generation, retrieval, CPT, SFT,
-instruction scoring, portable tokenizer export, and Safetensors export commands.
-Use `uv run kiwilm <command> --help` for their interfaces.
-
-The completed 50M-token minimal-Slim-v1, gated-v2 smoke, and 250M architecture
-evidence is stored under `examples/comparisons`. The Slim v3 comparison folder
-contains the provenance, evaluation, and promotion commands to run after both
-hybrid checkpoints arrive. The original minimal-v1 report remains at
-[examples/comparisons/kiwilm2-smoke-dense-vs-slim](examples/comparisons/kiwilm2-smoke-dense-vs-slim/analysis.md).
-
-## Repository layout
+Notebooks will be the primary V3 training interface, with training math in tested
+Python modules. No V3 notebooks, model or training run are created by this cleanup.
 
 ```text
-src/kiwilm/        model, data, training, evaluation, and export library
-scripts/           KiwiLM 2 experiment, Colab, retrieval, and reporting tools
-docs/              KiwiLM 2 runbook and generated architecture diagrams
-eval/              fixed generation and instruction-evaluation suites
-examples/          retained Dense-vs-Slim comparison evidence
-tests/             active KiwiLM 2 and generic workflow coverage
+src/kiwilm/           maintained V2 runtime and shared infrastructure
+scripts/             evaluation, release, export and rendering utilities
+archive/kiwilm2/      historical experiment runners and Colab CLI workflows
+docs/                maintained references, roadmap boundaries and diagrams
+examples/comparisons/ preserved research evidence
+releases/kiwilm2-1b/  model card, publication receipt and verification records
+spaces/              browser-local playground
+tests/               runtime, recovery, archived workflow and frozen-output tests
 ```
 
-Prepared datasets, checkpoints, runs, build outputs, and local environment files
-are ignored because they are reproducible or stored externally.
+Historical pre-V2 Python models remain on the `legacy` branch. Local datasets,
+checkpoints, release bundles and `.venv` are ignored but preserved; cleanup does
+not delete research artifacts or touch Drive/Hugging Face backups.
 
-## Verification
+## Verify
 
 ```bash
 uv lock --check
-uv run --locked ruff check src scripts tests
+uv run --locked ruff check src scripts archive tests
 uv run --locked pytest -q
 uv build
 ```
+
+The suite always checks frozen tiny V2 state schemas and outputs. If the original
+1B checkpoint / published BF16 bundle are available locally, it also verifies
+them against pre-cleanup FP32 logits, greedy continuations and cached rollover.
+Those two artifact tests are explicitly skipped in a fresh checkout without
+weights; [the freeze record](docs/kiwilm2-freeze.md) documents explicit paths.

@@ -11,5 +11,5 @@ for muon_lr in 0.01 0.02 0.04; do
   KIWILM2_MUON_LR="${muon_lr}" \
   COLAB_SESSION_NAME="kiwilm2-${phase}-muon-${muon_lr//./-}" \
   KIWILM_RESULT_DIR="${result_root}/muon-${muon_lr}" \
-  scripts/run_colab_kiwilm2.sh
+  archive/kiwilm2/scripts/run_colab_kiwilm2.sh
 done
