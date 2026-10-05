@@ -2,7 +2,9 @@
 
 KiwiLM is a small language-model research codebase. **KiwiLM 2 is complete**;
 the next project is a notebook-first bidirectional encoder with masked diffusion.
-The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. V3 is not implemented yet.
+The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
+[Phase 3 bidirectional backbone](docs/kiwilm3.md) is implemented; masked
+diffusion training and generation are not yet implemented.
 
 ## KiwiLM 2 reference
 
@@ -85,8 +87,8 @@ user-run only and can allocate billable hardware.
 ## Development boundary
 
 V2 model, config dispatch, causal trainer and checkpoint formats stay independent
-and unchanged. V3 will have separate masking, objective, trainer, sampler and
-recovery modules; it must not inherit the causal objective. Data/tokenizer,
+and unchanged. V3 has a separate encoder/config and will have masking, objective,
+trainer, sampler and recovery modules; it must not inherit the causal objective. Data/tokenizer,
 metrics and verified latest/previous checkpoint utilities can be reused where
 their contracts fit. See [infrastructure boundaries](docs/development.md).
 
@@ -98,6 +100,18 @@ or diffusion objective. All actions are off by default; no VM is allocated by
 the notebooks. [Setup and fresh-runtime recovery guide](docs/notebook-workflow.md).
 CPU continuation is regression-tested; live Colab/Drive qualification is still
 a user-run gate before declaring M2 complete.
+
+The untrained V3 encoder uses repeated full attention → BiConv31 → BiConv63,
+RoPE, dense SwiGLUs and a tied reconstruction head. Its 12/16-block configurations
+have 65.12M/81.43M parameters. Run bounded CPU structural checks (no training):
+
+```bash
+uv run --locked python scripts/check_kiwilm3_encoder.py --depth 12
+uv run --locked python scripts/check_kiwilm3_encoder.py --depth 16
+```
+
+[Encoder API, static profiles, serialization and remaining gates](docs/kiwilm3.md).
+The local `codex/kiwilm2-frozen` branch preserves the pre-M3 V2/M2 baseline.
 
 ```bash
 uv sync --locked --extra notebooks

@@ -1,7 +1,8 @@
-# Development boundary before KiwiLM 3
+# KiwiLM 3 development boundaries
 
-Scope: M0/M1 cleanup and M2 workflow of [V3_PLAN.md](../V3_PLAN.md).
-No V3 encoder, diffusion training or classifier is implemented here.
+Scope: M0/M1 cleanup, M2 workflow and M3 backbone of [V3_PLAN.md](../V3_PLAN.md).
+The separate bidirectional encoder is implemented. Diffusion training and the
+classifier are not. See [M3 contracts and qualification](kiwilm3.md).
 
 ## Keep the V2 baseline independent
 
@@ -11,8 +12,10 @@ next-token logits, not a universal encoder contract. Keep their module paths,
 config serialization, state-dict keys and checkpoint format stable. Historical
 Slim-v3 names must not be mistaken for the new KiwiLM 3 encoder.
 
-V3 should introduce a separate encoder interface exposing hidden states and a
-separate `v3/` masking/objective/trainer/sampling/checkpoint surface. Do not
+V3 introduces `models/encoder.py`, `models/kiwilm3.py` and independent
+`v3/config.py`, profiling, qualification and inference-only weight files.
+It exposes contextual hidden states without inheriting causal training.
+M4 will add the `v3/` masking/objective/trainer/sampling/checkpoint surface. Do not
 generalize the causal trainer or move all modules into packages merely to match
 the proposed roadmap tree. Model math remains in Python modules, not notebooks.
 
