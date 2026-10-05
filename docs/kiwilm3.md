@@ -1,10 +1,10 @@
 # KiwiLM 3: M3 bidirectional backbone
 
 The Phase 3 encoder prototype is implemented. It is **untrained**, and is not
-yet a diffusion language model or classifier. Mask corruption, protected-token
-policy, reconstruction loss, noise sampling, training-state recovery and
-iterative generation belong to Phase 4. No training or cloud session is started
-by this implementation.
+yet a pretrained diffusion language model or classifier. The
+[Phase 4 denoising prototype](kiwilm3-denoising.md) now provides mask corruption,
+protected-token policy, reconstruction loss and local CPU state recovery.
+Iterative generation belongs to M5. No cloud training is started automatically.
 
 ## Confirmed baseline
 
@@ -63,8 +63,9 @@ rows stay finite. Sequences must fit the configured context.
 `None` means zero. Fixed sinusoidal features of `1000 * level` feed a learned
 64→512→512 SiLU MLP and are added to token embeddings. This is conditioning
 only: it does **not** corrupt tokens or specify a diffusion schedule. The
-existing tokenizer is unchanged and has no new `[MASK]` token; the ID policy
-must be decided explicitly in M4.
+V2 tokenizer is unchanged. M4 creates a separate tokenizer with an appended real
+`[MASK]` and requires an explicitly matching model vocabulary; see the
+[denoising policy](kiwilm3-denoising.md).
 
 ## Local qualification
 
@@ -105,8 +106,9 @@ Explicit `dtype="fp32"` enables exact Safetensors parity.
 
 Export uses exclusive atomic hard-link publication on a local filesystem;
 export to VM-local disk, not directly onto a Drive/FUSE mount. The format omits
-tokenizer bytes, optimizer, schedule, data position and RNG. M4 will need its
-own verified latest/previous training-state format, including noise RNG.
+tokenizer bytes, optimizer, schedule, data position and RNG. M4 has a separate
+local training-state format including noise RNG; production verified
+latest/previous Drive recovery remains a future qualification gate.
 
 ## Preserved V2 / notebook boundaries
 

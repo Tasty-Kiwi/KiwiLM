@@ -3,8 +3,9 @@
 KiwiLM is a small language-model research codebase. **KiwiLM 2 is complete**;
 the next project is a notebook-first bidirectional encoder with masked diffusion.
 The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
-[Phase 3 bidirectional backbone](docs/kiwilm3.md) is implemented; masked
-diffusion training and generation are not yet implemented.
+[Phase 3 bidirectional backbone](docs/kiwilm3.md) and
+[Phase 4 denoising prototype](docs/kiwilm3-denoising.md) are implemented.
+Iterative generation and production accelerator training are not yet implemented.
 
 ## KiwiLM 2 reference
 
@@ -112,6 +113,11 @@ uv run --locked python scripts/check_kiwilm3_encoder.py --depth 16
 
 [Encoder API, static profiles, serialization and remaining gates](docs/kiwilm3.md).
 The local `codex/kiwilm2-frozen` branch preserves the pre-M3 V2/M2 baseline.
+
+The new [M4 CPU notebook](notebooks/kiwilm3-denoising.ipynb) uses a separate real
+MASK tokenizer, variable-noise masked reconstruction and fixed validation.
+All actions default off; the bounded CPU trainer/state files are not TPU/Drive
+production recovery. [Tokenizer conversion and local acceptance checks](docs/kiwilm3-denoising.md).
 
 ```bash
 uv sync --locked --extra notebooks

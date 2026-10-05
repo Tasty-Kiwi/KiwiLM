@@ -1,8 +1,9 @@
 # KiwiLM 3 development boundaries
 
-Scope: M0/M1 cleanup, M2 workflow and M3 backbone of [V3_PLAN.md](../V3_PLAN.md).
-The separate bidirectional encoder is implemented. Diffusion training and the
-classifier are not. See [M3 contracts and qualification](kiwilm3.md).
+Scope: M0/M1 cleanup, M2 workflow, M3 backbone and M4 denoising prototype of
+[V3_PLAN.md](../V3_PLAN.md). The separate encoder and bounded CPU reconstruction
+trainer are implemented; iterative generation, accelerator training and the
+classifier are not. See [M3 contracts](kiwilm3.md) and [M4 policy](kiwilm3-denoising.md).
 
 ## Keep the V2 baseline independent
 
@@ -15,7 +16,8 @@ Slim-v3 names must not be mistaken for the new KiwiLM 3 encoder.
 V3 introduces `models/encoder.py`, `models/kiwilm3.py` and independent
 `v3/config.py`, profiling, qualification and inference-only weight files.
 It exposes contextual hidden states without inheriting causal training.
-M4 will add the `v3/` masking/objective/trainer/sampling/checkpoint surface. Do not
+M4 adds `v3/tokenizer.py`, `masking.py`, `objectives.py`, `trainer.py` and separate
+local training-state `checkpoints.py`. M5 will add sampling. Do not
 generalize the causal trainer or move all modules into packages merely to match
 the proposed roadmap tree. Model math remains in Python modules, not notebooks.
 
@@ -57,7 +59,8 @@ The fresh-process CPU equivalence test is local evidence, not a live Colab
 acceptance test. Complete the [two-runtime recovery procedure](notebook-workflow.md)
 on the intended Colab backend with Drive before closing M2. No long training
 run is enabled by this phase. M3 introduces the separate bidirectional encoder;
-M4 supplies actual noise schedules/objective and a V3-specific trainer.
+M4 supplies actual corruption and the reconstruction objective with a bounded
+CPU trainer. Production accelerator scheduling and Drive transport remain gated.
 
 ## Cleanup invariants
 
