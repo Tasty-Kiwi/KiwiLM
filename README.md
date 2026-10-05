@@ -90,12 +90,24 @@ recovery modules; it must not inherit the causal objective. Data/tokenizer,
 metrics and verified latest/previous checkpoint utilities can be reused where
 their contracts fit. See [infrastructure boundaries](docs/development.md).
 
-Notebooks will be the primary V3 training interface, with training math in tested
-Python modules. No V3 notebooks, model or training run are created by this cleanup.
+The M2 notebook workflow is now available: [smoke](notebooks/kiwilm3-smoke.ipynb),
+[train/resume](notebooks/kiwilm3-train.ipynb) and
+[evaluate/export](notebooks/kiwilm3-evaluate.ipynb).
+They currently qualify recovery with a **tiny V2 causal probe**, not a V3 model
+or diffusion objective. All actions are off by default; no VM is allocated by
+the notebooks. [Setup and fresh-runtime recovery guide](docs/notebook-workflow.md).
+CPU continuation is regression-tested; live Colab/Drive qualification is still
+a user-run gate before declaring M2 complete.
+
+```bash
+uv sync --locked --extra notebooks
+uv build --wheel
+```
 
 ```text
 src/kiwilm/           maintained V2 runtime and shared infrastructure
 scripts/             evaluation, release, export and rendering utilities
+notebooks/           explicit M2 setup, qualification, resume and evaluation
 archive/kiwilm2/      historical experiment runners and Colab CLI workflows
 docs/                maintained references, roadmap boundaries and diagrams
 examples/comparisons/ preserved research evidence
@@ -113,7 +125,7 @@ not delete research artifacts or touch Drive/Hugging Face backups.
 ```bash
 uv lock --check
 uv run --locked ruff check src scripts archive tests
-uv run --locked pytest -q
+uv run --locked --extra browser --extra notebooks pytest -q
 uv build
 ```
 

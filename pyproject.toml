@@ -21,6 +21,7 @@ kiwilm = "kiwilm.cli:main"
 
 [project.optional-dependencies]
 browser = ["onnx>=1.22", "onnxruntime>=1.28"]
+notebooks = ["nbformat>=5.10", "nbclient>=0.10", "nbconvert>=7.16", "ipykernel>=6.30"]
 
 [build-system]
 requires = ["hatchling>=1.27"]

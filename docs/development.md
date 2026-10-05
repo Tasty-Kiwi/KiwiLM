@@ -1,7 +1,7 @@
 # Development boundary before KiwiLM 3
 
-Scope: M0/M1 of [V3_PLAN.md](../V3_PLAN.md). No encoder, diffusion training,
-notebook workflow or classifier is implemented here.
+Scope: M0/M1 cleanup and M2 workflow of [V3_PLAN.md](../V3_PLAN.md).
+No V3 encoder, diffusion training or classifier is implemented here.
 
 ## Keep the V2 baseline independent
 
@@ -33,13 +33,28 @@ the proposed roadmap tree. Model math remains in Python modules, not notebooks.
 They are not the new notebook control surface. Their CLI orchestration moved to
 `archive/kiwilm2/`; relevant safety/recovery tests still run.
 
-## Next gate, not part of cleanup
+## M2 workflow and remaining gate
 
-M2 will provide explicit setup/configure/train-or-resume/evaluate notebook cells
-around tested library calls. It must recover optimizer/LR state, RNG, data
-position and noise RNG on a fresh runtime, validate an experiment fingerprint,
-and retain the latest/previous publication strategy. No training should begin
-until the user explicitly starts it.
+`notebook_setup.py`, `notebook_worker.py` and `notebook_workflow.py` provide
+explicit setup/configure/train-or-resume/evaluate cells around Python calls.
+The bounded, named M2 V2 recovery probe validates optimizer/token schedule,
+Python/NumPy/torch/backend RNG, validation/data sampling and a reserved noise
+RNG. The noise stream is exercised solely to test state recovery; it does not
+corrupt inputs or implement a diffusion objective. Config, code, tokenizer,
+data and runtime identities lock resume, independent of VM-local paths.
+
+The three notebooks call a worker **inside the selected notebook VM**. No
+remote CLI provisioning or training math is embedded in cells. Setup uses a
+separate Python 3.12 environment with matched torch/XLA on TPU; it does not
+replace Colab kernel torch. Verified latest/previous transport is reused with
+its own M2 namespace and schema. Source V2 training and serialization remain
+unchanged.
+
+The fresh-process CPU equivalence test is local evidence, not a live Colab
+acceptance test. Complete the [two-runtime recovery procedure](notebook-workflow.md)
+on the intended Colab backend with Drive before closing M2. No long training
+run is enabled by this phase. M3 introduces the separate bidirectional encoder;
+M4 supplies actual noise schedules/objective and a V3-specific trainer.
 
 ## Cleanup invariants
 
