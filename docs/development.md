@@ -1,9 +1,11 @@
 # KiwiLM 3 development boundaries
 
-Scope: M0/M1 cleanup, M2 workflow, M3 backbone and M4 denoising prototype of
+Scope: M0/M1 cleanup, M2 workflow, M3 backbone, M4 denoising and M5 generation of
 [V3_PLAN.md](../V3_PLAN.md). The separate encoder and bounded CPU reconstruction
-trainer are implemented; iterative generation, accelerator training and the
-classifier are not. See [M3 contracts](kiwilm3.md) and [M4 policy](kiwilm3-denoising.md).
+trainer and fixed-slot sampler are implemented. B/C experiments are prepared;
+corpus architecture selection, accelerator training and the classifier are not.
+See [M3 contracts](kiwilm3.md), [M4 policy](kiwilm3-denoising.md) and
+[M5 B/C workflows](kiwilm3-experiments.md).
 
 ## Keep the V2 baseline independent
 
@@ -17,7 +19,8 @@ V3 introduces `models/encoder.py`, `models/kiwilm3.py` and independent
 `v3/config.py`, profiling, qualification and inference-only weight files.
 It exposes contextual hidden states without inheriting causal training.
 M4 adds `v3/tokenizer.py`, `masking.py`, `objectives.py`, `trainer.py` and separate
-local training-state `checkpoints.py`. M5 will add sampling. Do not
+local training-state `checkpoints.py`. M5 adds independent `sampling.py`,
+`evaluation.py`, frozen `experiments.py` and opt-in `experiment_runner.py`. Do not
 generalize the causal trainer or move all modules into packages merely to match
 the proposed roadmap tree. Model math remains in Python modules, not notebooks.
 

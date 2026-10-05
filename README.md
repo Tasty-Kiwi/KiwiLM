@@ -5,7 +5,10 @@ the next project is a notebook-first bidirectional encoder with masked diffusion
 The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
 [Phase 3 bidirectional backbone](docs/kiwilm3.md) and
 [Phase 4 denoising prototype](docs/kiwilm3-denoising.md) are implemented.
-Iterative generation and production accelerator training are not yet implemented.
+[Phase 5 fixed-slot generation and B/C experiments](docs/kiwilm3-experiments.md)
+are available as bounded CPU workflows. A/D are dropped; dense SwiGLU is used
+throughout. Corpus architecture selection and production accelerator training
+remain pending.
 
 ## KiwiLM 2 reference
 
@@ -118,6 +121,11 @@ The new [M4 CPU notebook](notebooks/kiwilm3-denoising.ipynb) uses a separate rea
 MASK tokenizer, variable-noise masked reconstruction and fixed validation.
 All actions default off; the bounded CPU trainer/state files are not TPU/Drive
 production recovery. [Tokenizer conversion and local acceptance checks](docs/kiwilm3-denoising.md).
+
+The [M5 B/C notebook](notebooks/kiwilm3-experiments.ipynb) prepares attention-only
+vs hybrid and 12 vs 16 blocks with frozen controls, explicit local continuation,
+aligned evaluation and fixed-slot generation/infilling. Training is opt-in;
+there is no new corpus or accelerator result yet.
 
 ```bash
 uv sync --locked --extra notebooks

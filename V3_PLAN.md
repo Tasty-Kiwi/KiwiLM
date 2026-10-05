@@ -4,7 +4,8 @@ Objective: Conclude KiwiLM 2, simplify the research codebase, and build KiwiLM 3
 
 The biggest workflow change is that Colab notebooks become the primary interface for serious training. The underlying training logic remains in tested Python modules, but launching, monitoring, checkpoint recovery, and evaluation happen through notebooks rather than remote CLI orchestration.
 
-No repository changes yet—this is the implementation roadmap.
+This is the implementation roadmap. See maintained implementation/status notes
+in `docs/development.md`; roadmap proposals below are not all completed gates.
 
 ## Phase 1 — Freeze and clean up KiwiLM 2
 
@@ -217,6 +218,14 @@ For the first sampler, keep a fixed number of output slots and reveal high-confi
 That keeps the initial implementation focused on verifying that the model learns the intended denoising task.
 
 ## Phase 5 — Controlled experiments
+
+**Current owner-approved scope:** A and D are dropped. Implement B and C as a
+four-candidate matrix (hybrid/attention-only × 12/16 blocks), all dense SwiGLU
+with the existing variable-noise masked reconstruction policy. M5 iterative
+fixed-slot sampling and bounded CPU workflows are implemented; corpus runs,
+accelerator/Drive acceptance and architecture selection remain pending. See
+[the B/C runbook](docs/kiwilm3-experiments.md). The original proposals below are
+retained as roadmap history, not authorization to run A or D.
 
 Your V2 work already provides a good template: smoke tests, health audits, matched evaluations, and explicit promotion criteria.
 
