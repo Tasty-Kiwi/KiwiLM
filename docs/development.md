@@ -3,7 +3,9 @@
 Scope: M0/M1 cleanup, M2 workflow, M3 backbone, M4 denoising and M5 generation of
 [V3_PLAN.md](../V3_PLAN.md). The separate encoder and bounded CPU reconstruction
 trainer and fixed-slot sampler are implemented. B/C experiments are prepared;
-corpus architecture selection, accelerator training and the classifier are not.
+corpus architecture selection, live accelerator qualification and the classifier
+are not. The [V3 accelerator/Drive adapter](kiwilm3-tpu.md) is implemented but
+not yet qualified on live Colab hardware.
 See [M3 contracts](kiwilm3.md), [M4 policy](kiwilm3-denoising.md) and
 [M5 B/C workflows](kiwilm3-experiments.md).
 
@@ -30,7 +32,7 @@ the proposed roadmap tree. Model math remains in Python modules, not notebooks.
 | --- | --- | --- |
 | `data.py`, `tokenizer.py` | Deterministic packed data, revision/fingerprint, frozen tokenizer | Define MASK/protected-token behavior separately |
 | `checkpoint.py` | Atomic serialization, config checks, RNG capture | Extend training state for noise RNG/objective; do not reinterpret V2 payloads |
-| `tpu_checkpoint.py` | Verified latest/previous generations, integrity, fail-closed publication | Give V3 its own experiment identity/schema; it currently uses V2 serialization validation |
+| `tpu_checkpoint.py` | Generic byte-level latest/previous transport, integrity, fail-closed publication | V3 validates its separate payload in `v3/accelerator_checkpoint.py`; do not use V2 payload validation |
 | `colab_drive.py`, `colab_artifacts.py` | Validated data restore, atomic transfer, chunk reassembly | Preserve mount checks and recovery refusal; never silently start fresh |
 | `optim.py` | Optimizers/parameter partition helpers | Revalidate parameter routing for a new encoder |
 | `comparison.py`, `retrieval.py`, `diagnostics.py` | Evaluation/report patterns | Current metrics are causal; diffusion loss is not AR perplexity |
@@ -63,7 +65,12 @@ acceptance test. Complete the [two-runtime recovery procedure](notebook-workflow
 on the intended Colab backend with Drive before closing M2. No long training
 run is enabled by this phase. M3 introduces the separate bidirectional encoder;
 M4 supplies actual corruption and the reconstruction objective with a bounded
-CPU trainer. Production accelerator scheduling and Drive transport remain gated.
+CPU trainer. The separate `v3/accelerator.py` now supplies token scheduling,
+accumulation and XLA BF16; `accelerator_checkpoint.py` and
+`accelerator_workflow.py` use generic Drive transport with native V3 recovery.
+The new notebook calls `v3/accelerator_worker.py`, never the M2 V2 worker.
+Live fresh-TPU-VM recovery remains a user-run acceptance gate. M4/M5 CPU state,
+inference files and suite identities remain unchanged.
 
 ## Cleanup invariants
 

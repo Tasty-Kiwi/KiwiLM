@@ -1,7 +1,7 @@
 # KiwiLM 3 — iterative generation and B/C experiments
 
 Phase 5 implements M5 fixed-slot generation and **prepares** matched B/C runs.
-It does not select an architecture, train a corpus model or qualify TPU/Drive
+It does not select an architecture, train a corpus model or qualify live TPU/Drive
 recovery. By owner decision, **A and D are dropped**: no fixed-15% training
 baseline or Hadamard ablation. All candidates use the unchanged
 [M4 variable-noise masked reconstruction objective](kiwilm3-denoising.md).
@@ -38,7 +38,10 @@ Installation, planning, preflight, training, comparison and generation are off
 by default. Cells call tested Python modules, never embed training math. Existing
 M2/M4 notebooks are unchanged. No VM is allocated or Drive mounted.
 
-The current adapter is **bounded CPU FP32**, constant-LR AdamW, no accumulation.
+This notebook's adapter is **bounded CPU FP32**, constant-LR AdamW, no accumulation.
+The separate [V3 TPU notebook](../notebooks/kiwilm3-tpu.ipynb) now provides
+token-based scheduling/accumulation and native Drive state; live recovery is
+still pending. Its new checkpoint format does not reinterpret these CPU suites.
 Full-width defaults: 1,000 step attempts × batch 2 × context 512 = **1,024,000
 input positions**, not a 50M/1B TPU recipe. Non-padding tokens/optimizer updates
 are separately measured; empty-mask attempts skip the optimizer. LR 0.001,

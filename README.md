@@ -7,8 +7,10 @@ The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
 [Phase 4 denoising prototype](docs/kiwilm3-denoising.md) are implemented.
 [Phase 5 fixed-slot generation and B/C experiments](docs/kiwilm3-experiments.md)
 are available as bounded CPU workflows. A/D are dropped; dense SwiGLU is used
-throughout. Corpus architecture selection and production accelerator training
-remain pending.
+throughout. The new [TPU/BF16 continuation notebook](notebooks/kiwilm3-tpu.ipynb)
+prepares token-based scheduling, accumulation and verified V3 Drive recovery.
+[Live recovery qualification](docs/kiwilm3-tpu.md) and corpus architecture
+selection remain pending; no training is started automatically.
 
 ## KiwiLM 2 reference
 
@@ -126,6 +128,11 @@ The [M5 B/C notebook](notebooks/kiwilm3-experiments.ipynb) prepares attention-on
 vs hybrid and 12 vs 16 blocks with frozen controls, explicit local continuation,
 aligned evaluation and fixed-slot generation/infilling. Training is opt-in;
 there is no new corpus or accelerator result yet.
+
+The [V3 TPU notebook](notebooks/kiwilm3-tpu.ipynb) uses the actual dense denoising
+trainer, not M2's V2 probe. All actions default off. First qualify a tiny
+two-VM continuation with isolated torch/XLA and latest/previous Drive backups;
+then review the proposed matched 50M B/C controls. [Runtime and recovery guide](docs/kiwilm3-tpu.md).
 
 ```bash
 uv sync --locked --extra notebooks
