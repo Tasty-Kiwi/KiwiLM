@@ -141,6 +141,12 @@ loss of usable context before selecting an initialization or residual change.
 That diagnostic is a proposed next experiment, not an implemented model fix.
 No further cloud run is launched or recommended as a confirmed solution.
 
+Follow-up (2026-10-11): the
+[balanced fixed-corpus readout diagnostic](../kiwilm3-readout-fixed-corpus/analysis.md)
+has now completed. The unchanged native tied/full-loss model passes that small
+memorization task; this does not repair the corpus checkpoint. The next gate
+is isolating corpus masking/noise conditions, with no head change selected.
+
 ## Reproduction and artifacts
 
 From the repository root, this command repeats the bounded local tests:

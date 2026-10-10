@@ -29,6 +29,15 @@ uv run --locked python scripts/isolate_kiwilm3_collapse.py --run-dir runs/colab/
 
 Use `--replay-steps 32` for the bounded fresh CPU diagnostic, not a cloud smoke
 or saved-checkpoint continuation. Remaining B/C corpus runs stay on hold.
+The subsequent [balanced readout test](examples/comparisons/kiwilm3-readout-fixed-corpus/analysis.md)
+passes with the unchanged tied/full-loss model on four fixed corpus windows.
+This is contextual memorization evidence, not a repair or generalization result.
+The subsequent [paired context-512 masking test](examples/comparisons/kiwilm3-noise-policy-512/analysis.md)
+found no fix from switching to fixed 15% noise. Both short CPU conditions
+remained worse than unigram CE with negligible context response. The next
+gate is fixed-corpus multi-target memorization at context 512, not another
+cloud run or a production head/objective change. See the
+[masking diagnostic runbook](docs/kiwilm3-noise-diagnostics.md).
 
 ## KiwiLM 2 reference
 

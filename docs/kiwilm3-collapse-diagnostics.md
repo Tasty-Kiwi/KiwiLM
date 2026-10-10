@@ -230,6 +230,17 @@ uv run --locked python scripts/isolate_kiwilm3_collapse.py --run-dir runs/colab/
 refuses existing output paths and more than 64 updates per case. It never
 loads the saved optimizer into a trainer or changes model defaults/checkpoints.
 
+The next [balanced fixed-corpus readout diagnostic](kiwilm3-readout-diagnostics.md)
+compares tied/untied heads and full/two-target loss support, with margins,
+centered hidden-state energy and context pairing/erasure controls. It is a
+bounded CPU memorization test, not another cloud smoke or an objective change
+to production training.
+
+The follow-up [paired context-512 masking-policy diagnostic](kiwilm3-noise-diagnostics.md)
+has also completed: fixed 15% did not resolve context insensitivity in the
+bounded fresh CPU comparison. See the
+[results and remaining gate](../examples/comparisons/kiwilm3-noise-policy-512/analysis.md).
+
 ### Reading the diagnostic metrics
 
 `metrics.jsonl` adds `v3_collapse_diagnostics` rows without changing standard
