@@ -7,6 +7,25 @@ The biggest workflow change is that Colab notebooks become the primary interface
 This is the implementation roadmap. See maintained implementation/status notes
 in `docs/development.md`; roadmap proposals below are not all completed gates.
 
+Workflow update (2026-10-10): while Colab notebook connections hang, the
+user-run staged CLI is the primary setup/debugging interface. After repeated
+TPU allocation timeouts, NVIDIA CUDA BF16 (L4/A100/H100) is the current path;
+TPU scripts and notebooks remain backups. See `docs/kiwilm3-colab-cli.md`. The proposed
+notebook-first design below is retained as roadmap context, not a requirement
+to block CLI-based qualification. Live target-backend/Drive recovery is required
+before corpus training on that runtime.
+
+L4/BF16 update (2026-10-10): the tiny two-VM continuation passed the
+[local artifact audit](docs/kiwilm3-gpu-recovery.md). `run` / `resume-run`
+combine CLI stages explicitly.
+
+Quality update (2026-10-11): the first hybrid-12 50M corpus smoke and subsequent
+5M lower-LR diagnostic completed but failed contextual-learning checks. B/C
+corpus comparisons are on hold. Bounded local conditioning/mixer-scale tests
+did not establish a fix; see the
+[diagnostic comparison](examples/comparisons/kiwilm3-lr-diagnostic-5m/analysis.md).
+Do not confuse successful runtime recovery with model-quality acceptance.
+
 ## Phase 1 — Freeze and clean up KiwiLM 2
 
 Before introducing V3, establish a stable reference point.

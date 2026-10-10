@@ -32,6 +32,8 @@ def execute(action: str, request: dict) -> dict:
         "qualification": request["qualification"],
         "run_name": request["run_name"],
     }
+    if "collapse_diagnostics" in request:
+        common["collapse_diagnostics"] = request["collapse_diagnostics"]
     if action == "preflight":
         return preflight(config, **common)
     if action == "train":

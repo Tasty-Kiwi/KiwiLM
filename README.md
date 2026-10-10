@@ -1,7 +1,7 @@
 # KiwiLM
 
 KiwiLM is a small language-model research codebase. **KiwiLM 2 is complete**;
-the next project is a notebook-first bidirectional encoder with masked diffusion.
+the next project is a bidirectional encoder with masked diffusion.
 The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
 [Phase 3 bidirectional backbone](docs/kiwilm3.md) and
 [Phase 4 denoising prototype](docs/kiwilm3-denoising.md) are implemented.
@@ -9,8 +9,26 @@ The [KiwiLM 3 roadmap](V3_PLAN.md) defines that work. Its
 are available as bounded CPU workflows. A/D are dropped; dense SwiGLU is used
 throughout. The new [TPU/BF16 continuation notebook](notebooks/kiwilm3-tpu.ipynb)
 prepares token-based scheduling, accumulation and verified V3 Drive recovery.
-[Live recovery qualification](docs/kiwilm3-tpu.md) and corpus architecture
-selection remain pending; no training is started automatically.
+[L4/BF16 recovery qualification](docs/kiwilm3-gpu-recovery.md) has passed;
+TPU qualification and corpus architecture selection remain pending.
+No training is started automatically.
+The [script-driven NVIDIA BF16 launcher](docs/kiwilm3-colab-cli.md) is the
+current Colab path following TPU allocation timeouts; TPU scripts and notebooks
+remain backup options.
+
+The first V3 corpus smoke completed but collapsed to unigram-like predictions.
+See [local collapse diagnostics and the gate before further runs](docs/kiwilm3-collapse-diagnostics.md).
+The user-run 5M-token lower-LR diagnostic also completed without resolving
+the failure. Local conditioning/mixer-scale isolation tests found no sufficient
+fix. See the [results and next diagnostic gate](examples/comparisons/kiwilm3-lr-diagnostic-5m/analysis.md).
+Inspect the recovered checkpoint locally without starting training:
+
+```bash
+uv run --locked python scripts/isolate_kiwilm3_collapse.py --run-dir runs/colab/v3-gpu-hybrid-12-lr3e4-diagnostic-5m-recovered/downloads --data-dir data/smollm-smoke --replay-steps 0 --output runs/kiwilm3-diagnostics/checkpoint-counterfactuals.json
+```
+
+Use `--replay-steps 32` for the bounded fresh CPU diagnostic, not a cloud smoke
+or saved-checkpoint continuation. Remaining B/C corpus runs stay on hold.
 
 ## KiwiLM 2 reference
 
@@ -127,12 +145,34 @@ production recovery. [Tokenizer conversion and local acceptance checks](docs/kiw
 The [M5 B/C notebook](notebooks/kiwilm3-experiments.ipynb) prepares attention-only
 vs hybrid and 12 vs 16 blocks with frozen controls, explicit local continuation,
 aligned evaluation and fixed-slot generation/infilling. Training is opt-in;
-there is no new corpus or accelerator result yet.
+these bounded CPU workflows are not accelerator-quality evidence.
 
 The [V3 TPU notebook](notebooks/kiwilm3-tpu.ipynb) uses the actual dense denoising
 trainer, not M2's V2 probe. All actions default off. First qualify a tiny
 two-VM continuation with isolated torch/XLA and latest/previous Drive backups;
 then review the proposed matched 50M B/C controls. [Runtime and recovery guide](docs/kiwilm3-tpu.md).
+
+For CLI-driven setup and debugging (no notebook upload required):
+
+```bash
+bash scripts/run_colab_kiwilm3_gpu.sh run --gpu L4 --precision bf16 --state-dir runs/colab/v3-gpu-qualification-new
+```
+
+`run` explicitly combines setup → preflight → train → watch → collect → stop.
+Drive authorization still requires your input. `resume-run --from-state OLD
+--state-dir NEW` combines fresh-VM continuation with the same original controls.
+Staged commands and a non-allocating `plan` remain available for debugging.
+Setup alone allocates billable hardware but never trains. Training is explicitly
+detached; monitor/collect/stop with the saved session owner. Default is a tiny
+step-8 recovery qualification, not a corpus run. On Windows invoke
+`uv run --locked python scripts/run_colab_kiwilm3_gpu.py` with the same actions.
+Default L4/CUDA BF16; explicit A100/H100 are also supported. T4 is excluded.
+The state directory is `runs/colab/kiwilm3-gpu`; preserve failed TPU session
+state separately. Check for orphaned allocations before retrying.
+[Fresh-VM resume and diagnostics](docs/kiwilm3-colab-cli.md).
+The [live L4/BF16 recovery qualification](docs/kiwilm3-gpu-recovery.md) passed;
+the full-width smoke and subsequent lower-LR diagnostic failed the quality gate.
+Further corpus training remains on hold pending contextual-learning diagnostics.
 
 ```bash
 uv sync --locked --extra notebooks

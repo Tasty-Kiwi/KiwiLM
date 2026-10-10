@@ -10,6 +10,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -115,6 +116,115 @@ def equal(left, right):
 def test_config_refusals(options):
     with pytest.raises(ValueError):
         AcceleratorTrainConfig(**options)
+
+
+def test_collapse_monitor_is_deterministic_read_only_and_matches_cpu_audit(prepared):
+    from kiwilm.v3.diagnostics import gradient_probe
+    from kiwilm.v3.training_diagnostics import CollapseMonitor
+
+    trainer, old_job = make(prepared)
+    assert "collapse_diagnostics" not in old_job
+    monitor = CollapseMonitor(trainer)
+    gradients = {name: torch.ones_like(p) for name, p in trainer.model.named_parameters()}
+    for name, parameter in trainer.model.named_parameters():
+        parameter.grad = gradients[name].clone()
+    before = {name: p.clone() for name, p in trainer.model.named_parameters()}
+    rng = torch.get_rng_state().clone()
+    data_rng = trainer.data_generator.get_state().clone()
+    noise_rng = trainer.noise_generator.get_state().clone()
+    report = monitor.evaluate()
+    assert report == monitor.evaluate()
+    assert report["step"] == 0 and report["finite_block_statistics"]
+    assert len(report["context_probes"]) == 8 and len(report["blocks"]) == 12
+    assert trainer.model.training and trainer.optimizer_steps == trainer.tokens_seen == 0
+    assert torch.equal(rng, torch.get_rng_state())
+    assert torch.equal(data_rng, trainer.data_generator.get_state())
+    assert torch.equal(noise_rng, trainer.noise_generator.get_state())
+    for name, parameter in trainer.model.named_parameters():
+        assert torch.equal(before[name], parameter)
+        assert torch.equal(gradients[name], parameter.grad)
+    audit = gradient_probe(trainer.model, monitor.windows[0], trainer.masking)
+    for measured, reference in zip(report["blocks"], audit["blocks"], strict=True):
+        for key in ("input_rms", "mixer_update_rms", "post_mixer_rms", "output_rms"):
+            assert measured[key] == pytest.approx(reference[key])
+    for row in report["context_probes"]:
+        if row["masked_tokens"]:
+            assert row["loss_minus_unigram"] == row["loss"] - row["unigram_loss"]
+        if row["noise_level"] == 1:
+            assert row["changed_visible_tokens"] == row["visible_content_tokens"] == 0
+            assert row["argmax_change_fraction"] == row["maximum_probability_change"] == 0
+
+
+def test_collapse_monitor_removes_hooks_on_failure(prepared, monkeypatch):
+    from kiwilm.v3 import training_diagnostics as diagnostics
+
+    trainer, _ = make(prepared)
+    monitor = diagnostics.CollapseMonitor(trainer)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("diagnostic failure")
+
+    monkeypatch.setattr(diagnostics, "context_probe", fail)
+    with pytest.raises(RuntimeError, match="diagnostic failure"):
+        monitor.evaluate()
+    assert trainer.model.training
+    for module in trainer.model.modules():
+        assert not module._forward_hooks and not module._forward_pre_hooks
+
+
+def test_diagnostic_job_is_locked_separately_and_worker_reconstructs(prepared):
+    from kiwilm.v3.training_diagnostics import POLICY
+
+    trainer, original = make(prepared)
+    _, diagnostic = construct(settings(), **arguments(prepared), collapse_diagnostics=True)
+    assert original["contract"] == diagnostic["contract"] == trainer.contract
+    assert diagnostic["collapse_diagnostics"] == POLICY
+    assert namespace(Path("drive"), original) != namespace(Path("drive"), diagnostic)
+    request = {
+        "config": settings().to_dict(),
+        "collapse_diagnostics": True,
+        **{
+            key: str(value) if isinstance(value, Path) else value
+            for key, value in arguments(prepared).items()
+        },
+    }
+    assert execute("preflight", request)["job"]["collapse_diagnostics"] == POLICY
+    with pytest.raises(ValueError, match="boolean"):
+        construct(settings(), **arguments(prepared), collapse_diagnostics="yes")
+
+
+def test_diagnostic_resume_matches_uninterrupted_training(prepared, tmp_path):
+    config = settings(eval_interval=1)
+    opts = dict(arguments(prepared), collapse_diagnostics=True)
+
+    def launch(name, backup, mode, **extra):
+        return train(
+            config,
+            **opts,
+            run_dir=tmp_path / name,
+            backup_root=tmp_path / backup,
+            mode=mode,
+            start_training=True,
+            retry_delay=0,
+            **extra,
+        )
+
+    launch("reference", "reference-drive", "fresh")
+    launch("paused", "drive", "fresh", stop_after_step=1)
+    launch("resumed", "drive", "resume")
+    left, right = [
+        torch.load(tmp_path / name / "latest.pt", weights_only=True)
+        for name in ("reference", "resumed")
+    ]
+    for key in ("model", "optimizer", "generators", "rng", "schedule", "tokens_seen", "step"):
+        equal(left[key], right[key])
+    rows = [
+        json.loads(line) for line in (tmp_path / "resumed/metrics.jsonl").read_text().splitlines()
+    ]
+    probes = [row for row in rows if row["event"] == "v3_collapse_diagnostics"]
+    assert [row["step"] for row in probes] == [0, 1, 2, 3]
+    assert rows[0]["event"] == "v3_validation" and rows[1] == probes[0]
+    assert all(row["finite_block_statistics"] for row in probes)
 
 
 def test_schedule_endpoints_and_real_candidate_depths():
@@ -489,6 +599,21 @@ def test_backend_restrictions_no_fallback(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with pytest.raises(RuntimeError, match="unavailable"):
         runtime_module.Runtime("cuda", "bf16")
+
+
+def test_cuda_bf16_requires_native_support_before_model_transfer(prepared, monkeypatch):
+    from kiwilm.v3 import accelerator
+
+    monkeypatch.setattr(
+        accelerator,
+        "Runtime",
+        lambda *a: SimpleNamespace(device=torch.device("cuda"), precision="bf16"),
+    )
+    calls = []
+    monkeypatch.setattr(torch.cuda, "is_bf16_supported", lambda **kw: calls.append(kw) or False)
+    with pytest.raises(ValueError, match="BF16 unsupported"):
+        make(prepared, device="cuda", precision="bf16")
+    assert calls == [{"including_emulation": False}]
 
 
 @pytest.mark.parametrize("damage", ["moments", "lr", "tie", "budget"])

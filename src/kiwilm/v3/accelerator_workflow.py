@@ -62,7 +62,12 @@ def construct(
     candidate: str,
     qualification: bool,
     run_name: str,
+    collapse_diagnostics: bool = False,
 ):
+    if type(collapse_diagnostics) is not bool or (
+        collapse_diagnostics and config.device not in {"cpu", "cuda"}
+    ):
+        raise ValueError("collapse_diagnostics must be boolean and requires CPU/CUDA")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", run_name):
         raise ValueError("run_name must be a short lowercase hyphenated identifier")
     data, tokenizer = PreparedTokenData(data_dir), MaskBPETokenizer.load(tokenizer_path)
@@ -80,6 +85,10 @@ def construct(
         "run_name": run_name,
         "contract": trainer.contract,
     }
+    if collapse_diagnostics:
+        from kiwilm.v3.training_diagnostics import POLICY
+
+        job["collapse_diagnostics"] = dict(POLICY)
     return trainer, job
 
 
@@ -142,6 +151,7 @@ def train(
     require_new_vm: bool = False,
     vm_id: str | None = None,
     retry_delay: float = 5,
+    collapse_diagnostics: bool = False,
 ) -> dict:
     if start_training is not True:
         raise ValueError("training disabled; explicitly enable start_training=True")
@@ -160,6 +170,7 @@ def train(
         candidate=candidate,
         qualification=qualification,
         run_name=run_name,
+        collapse_diagnostics=collapse_diagnostics,
     )
     store = V3CheckpointStore(
         namespace(backup_root, job), job=job, storage_root=storage_root, retry_delay=retry_delay
@@ -192,8 +203,16 @@ def train(
     else:
         origin = store.restore(trainer, run_dir, vm_id=vm_id, require_new_vm=require_new_vm)
     metrics = run_dir / "metrics.jsonl"
+    monitor = None
+    if collapse_diagnostics:
+        from kiwilm.v3.training_diagnostics import CollapseMonitor
+
+        monitor = CollapseMonitor(trainer)
     committed = None
     if mode == "fresh":
+        if monitor is not None:
+            _append(metrics, trainer.evaluate())
+            _append(metrics, monitor.evaluate())
         committed = store.publish(trainer, run_dir, vm_id=vm_id)
         print(json.dumps(committed), flush=True)  # step zero before any training
     while trainer.tokens_seen < config.max_tokens and (
@@ -208,6 +227,8 @@ def train(
         stopping = stop_after_step is not None and trainer.step == stop_after_step
         if trainer.step % config.eval_interval == 0 or complete or stopping:
             _append(metrics, trainer.evaluate())
+            if monitor is not None:
+                _append(metrics, monitor.evaluate())
         if trainer.step % config.checkpoint_interval == 0 or complete or stopping:
             # No catch-and-continue: failed publication halts the run with local
             # latest.pt retained and the previous Drive commit unchanged.

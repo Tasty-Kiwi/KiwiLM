@@ -1,5 +1,11 @@
 # KiwiLM 3 — TPU training and verified continuation
 
+Current workflow: use the [script-driven Colab CLI](kiwilm3-colab-cli.md) as
+the primary setup/debugging path. Following repeated TPU allocation timeouts,
+NVIDIA CUDA BF16 is the current target; this TPU guide and its unchanged
+notebook remain backups. Both use the same V3 trainer and Drive checkpoint
+contract; live qualification is still pending.
+
 The [default-off notebook](../notebooks/kiwilm3-tpu.ipynb) now drives a separate
 V3 trainer with token-based warmup/cosine decay, accumulation and BF16 AMP.
 It **prepares** single-TPU qualification; live Colab/Drive recovery and B/C

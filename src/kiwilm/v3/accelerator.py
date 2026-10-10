@@ -189,7 +189,7 @@ class AcceleratorTrainer:
         if (
             config.device == "cuda"
             and config.precision == "bf16"
-            and not torch.cuda.is_bf16_supported()
+            and not torch.cuda.is_bf16_supported(including_emulation=False)
         ):
             raise ValueError(
                 "CUDA BF16 unsupported; explicitly use FP32 (FP16 is not implemented here)"

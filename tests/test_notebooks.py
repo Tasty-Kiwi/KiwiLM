@@ -110,3 +110,23 @@ def test_interrupted_install_resumes_only_same_contract(tmp_path, monkeypatch):
     assert not (directory / "kiwilm-environment.json").exists()
     prepare_environment(wheel, directory, "xla")
     assert json.loads((directory / "kiwilm-environment.json").read_text())["torch_xla"] == "2.9.0"
+
+
+def test_cuda_environment_pins_torch_without_cpu_or_xla(tmp_path, monkeypatch):
+    wheel = tmp_path / "kiwilm.whl"
+    wheel.write_bytes(b"mock wheel")
+    directory = tmp_path / "isolated-cuda"
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        if "venv" in command:
+            directory.mkdir()
+
+    monkeypatch.setattr("kiwilm.notebook_setup.subprocess.run", execute)
+    prepare_environment(wheel, directory, "cuda")
+    assert "torch==2.13.0" in calls[2] and "torch==2.13.0" in calls[3]
+    assert not any("torch_xla" in str(c) or "/whl/cpu" in str(c) for c in calls)
+    marker = json.loads((directory / "kiwilm-environment.json").read_text())
+    assert marker["device"] == "cuda" and marker["torch_xla"] is None
+    assert "--no-deps" in calls[-1]

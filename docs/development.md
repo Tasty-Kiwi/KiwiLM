@@ -2,10 +2,12 @@
 
 Scope: M0/M1 cleanup, M2 workflow, M3 backbone, M4 denoising and M5 generation of
 [V3_PLAN.md](../V3_PLAN.md). The separate encoder and bounded CPU reconstruction
-trainer and fixed-slot sampler are implemented. B/C experiments are prepared;
-corpus architecture selection, live accelerator qualification and the classifier
-are not. The [V3 accelerator/Drive adapter](kiwilm3-tpu.md) is implemented but
-not yet qualified on live Colab hardware.
+trainer and fixed-slot sampler are implemented. B/C experiments are prepared
+but on hold after corpus quality failures; architecture selection and the
+classifier remain pending. The [V3 accelerator/Drive adapter](kiwilm3-tpu.md)
+passed the bounded live L4/BF16 recovery qualification; TPU qualification
+remains pending. See the
+[5M diagnostic and local isolation results](../examples/comparisons/kiwilm3-lr-diagnostic-5m/analysis.md).
 See [M3 contracts](kiwilm3.md), [M4 policy](kiwilm3-denoising.md) and
 [M5 B/C workflows](kiwilm3-experiments.md).
 
@@ -71,6 +73,31 @@ accumulation and XLA BF16; `accelerator_checkpoint.py` and
 The new notebook calls `v3/accelerator_worker.py`, never the M2 V2 worker.
 Live fresh-TPU-VM recovery remains a user-run acceptance gate. M4/M5 CPU state,
 inference files and suite identities remain unchanged.
+
+The user-run [V3 Colab CLI](kiwilm3-colab-cli.md) now provides staged
+setup/preflight, detached training, status/logs, verified collection and exact
+wheel fresh-VM continuation. It calls the same V3 worker and generic transport;
+notebooks remain a backup. Default plan/import is non-allocating, setup never
+trains, and tests use a fake Colab control plane/local synthetic CPU workers.
+
+Following repeated TPU allocation timeouts, the current entry point is
+`scripts/run_colab_kiwilm3_gpu.sh` (PowerShell: the matching `.py`). It shares
+the same staged orchestration and V3 Drive transport, defaults to L4/CUDA
+BF16, supports explicit A100/H100, and excludes T4. Native BF16 and the
+requested card family are checked without CPU/XLA/precision fallback.
+New GPU state uses `runs/colab/kiwilm3-gpu`; old TPU locks remain intact.
+Resume pins the original GPU/precision/artifacts and cannot migrate a TPU
+checkpoint to CUDA. Recovery must be qualified on the intended runtime;
+full-width B/C performance remains a live user-run acceptance check.
+
+The user-run L4/BF16 two-VM probe now passes the
+[downloaded-artifact recovery audit](kiwilm3-gpu-recovery.md): restore step 8,
+finish step 64 / 4096 tokens, exact metric prefix and verified final checkpoint
+receipt on a distinct VM. This is operational recovery evidence, not bitwise
+equivalence or full-width performance. CLI `run` and `resume-run` now combine
+all stages with fail-fast checks and collection before shutdown. They never
+retry an ambiguous submission or stop a potentially healthy worker on a
+monitoring disconnect. Corpus training still requires user invocation.
 
 ## Cleanup invariants
 

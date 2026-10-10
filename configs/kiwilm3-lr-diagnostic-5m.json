@@ -1,0 +1,19 @@
+{
+  "device": "cuda",
+  "precision": "bf16",
+  "max_tokens": 5000000,
+  "warmup_tokens": 1000000,
+  "batch_size": 8,
+  "grad_accum_steps": 4,
+  "learning_rate": 0.0003,
+  "min_learning_rate": 0.00003,
+  "weight_decay": 0.01,
+  "gradient_clip": 1.0,
+  "seed": 42,
+  "data_seed": 42,
+  "noise_seed": 142,
+  "validation_seed": 242,
+  "checkpoint_interval": 50,
+  "eval_interval": 25,
+  "eval_batches": 20
+}
